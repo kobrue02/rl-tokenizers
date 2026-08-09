@@ -20,8 +20,9 @@
 # All main.py / fairtok.cli flags are forwarded directly -- see `python main.py --help`.
 #
 # PREREQUISITE: flores_plus and bouquet are gated HF datasets (see fairtok/oldi_data.py).
-# Export HF_TOKEN before submitting -- this compute node has no interactive login, so
-# huggingface_hub's automatic token discovery has nothing to find otherwise:
+# If you've already run `huggingface-cli login` on this cluster (not just your laptop --
+# the token lives in $HOME on whichever machine you logged in on), that's picked up
+# automatically below. Otherwise export HF_TOKEN before submitting:
 #   export HF_TOKEN=hf_...
 #   sbatch jobs/train.sh ...
 
@@ -34,7 +35,15 @@ module load devel/python/3.13.3-llvm-19.1
 echo "CUDA: $CUDA_HOME"
 
 # 3. Environment
-: "${HF_TOKEN:?Set HF_TOKEN before submitting -- needed for gated flores_plus/bouquet datasets}"
+# huggingface_hub looks for the login token at $HF_HOME/token by default. We redirect
+# HF_HOME below to keep this project's dataset cache out of your global ~/.cache, which
+# would ALSO hide a `huggingface-cli login` token cached at the default location -- so
+# pull it forward into HF_TOKEN first, before HF_HOME is overridden, if it's not already
+# set explicitly.
+if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.cache/huggingface/token" ]; then
+    export HF_TOKEN=$(cat "$HOME/.cache/huggingface/token")
+fi
+: "${HF_TOKEN:?No HF_TOKEN and no cached login at ~/.cache/huggingface/token -- run \`huggingface-cli login\` on this cluster (not just your laptop) or export HF_TOKEN before submitting}"
 export CUDA_VISIBLE_DEVICES=0
 export TORCH_EXTENSIONS_DIR=$PROJECT_ROOT/.cache/torch_extensions
 export HF_HOME=$PROJECT_ROOT/.cache/huggingface
