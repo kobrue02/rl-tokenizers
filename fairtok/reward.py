@@ -11,6 +11,7 @@ doesn't need this reward-shaping workaround because it's differentiable.)
 """
 
 import numpy as np
+import torch
 
 
 def discounted_returns(rewards, gamma):
@@ -32,8 +33,15 @@ def build_rewards(records, fairness_scalar, lambda_fair):
     predict -- directly targeting the reward-attribution noise problem that
     motivated this change (see conversation: initial REINFORCE loss magnitudes
     in the tens of thousands, dominated by raw byte-predictability, not by
-    which boundary decisions were actually good)."""
-    rewards = [float((rec.next_byte_logprob - rec.early_byte_logprob).detach()) for rec in records]
+    which boundary decisions were actually good).
+
+    Stacks the whole sequence's reward into one tensor and pulls it off the device
+    with a single .cpu() call, instead of calling float() (== .item(), a host-device
+    sync) once per record -- on GPU that per-record sync, done once per byte position
+    per sequence, was a major bottleneck (same issue as the one fixed in
+    batched_sample_rollout, same fix: one sync instead of many)."""
+    predict_reward = torch.stack([rec.next_byte_logprob - rec.early_byte_logprob for rec in records])
+    rewards = predict_reward.detach().cpu().tolist()
     fairness_penalty = lambda_fair * fairness_scalar
     rewards[-1] -= fairness_penalty
     return rewards

@@ -173,6 +173,15 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu"):
         })
         prev_boundary = action
 
+    # Pull `action`/`byte_correct` off the device ONCE each (two syncs total), not once
+    # per (sequence, position) pair -- on GPU, every individual .item() call is a full
+    # host-device synchronization, and B*T of those (potentially tens of thousands per
+    # training step) previously dominated wall-clock time far more than the actual GRU
+    # compute did. Everything still needed as a differentiable tensor (boundary_logit,
+    # boundary_logprob, next/early_byte_logprob) stays on-device, untouched.
+    actions_np = torch.stack([s["action"] for s in per_step]).cpu().numpy()  # (T, B)
+    correct_np = torch.stack([s["byte_correct"] for s in per_step]).cpu().numpy()  # (T, B)
+
     results = []
     for b in range(B):
         L = lengths[b]
@@ -181,12 +190,12 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu"):
             has_next = t + 1 < L
             step = per_step[t]
             records.append(StepRecord(
-                int(step["action"][b].item()),
+                int(actions_np[t, b]),
                 step["boundary_logit"][b],
                 step["boundary_logprob"][b],
                 step["next_byte_logprob"][b] if has_next else torch.zeros((), device=device),
                 step["early_byte_logprob"][b] if has_next else torch.zeros((), device=device),
-                bool(step["byte_correct"][b].item()) if has_next else None,
+                bool(correct_np[t, b]) if has_next else None,
             ))
         results.append(records)
     return results
