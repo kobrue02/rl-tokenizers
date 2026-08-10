@@ -66,7 +66,7 @@ echo "Starting training with args: $@"
 python3 train.py fairtok \
     --use-wandb \
     --wandb-project fairtok \
-    --wandb-run-name "slurm-${SLURM_JOB_ID}" \
+    --run-name "slurm-${SLURM_JOB_ID}" \
     --output-dir "$PROJECT_ROOT/checkpoints/policy_${SLURM_JOB_ID}.pt" \
     --vocab-out "$PROJECT_ROOT/vocab_out/vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/vocab_stats_${SLURM_JOB_ID}.json" \

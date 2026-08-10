@@ -28,6 +28,7 @@ from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.oldi_data import LANG_SCRIPT
 from common.vocab import top_k_by_frequency
 
+from .inference import save_checkpoint
 from .model import MagnetModel
 
 
@@ -303,8 +304,11 @@ class MagnetTrainer:
         self.vocab = final_vocab
 
         if cfg.output_dir:
-            torch.save(model.state_dict(), cfg.output_dir)
-            print(f"saved model state_dict to {cfg.output_dir}")
+            # config + scripts alongside state_dict, not state_dict alone -- see
+            # magnet.inference.load_checkpoint, which needs both to reconstruct a
+            # MagnetModel (scripts sizes its per-script boundary_predictors ModuleDict).
+            save_checkpoint(model, cfg, scripts, cfg.output_dir)
+            print(f"saved model checkpoint to {cfg.output_dir}")
 
         return model, token_freq, final_vocab, loss_trace, boundary_rate_trace
 
