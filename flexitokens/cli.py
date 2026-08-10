@@ -10,9 +10,16 @@ import argparse
 import dataclasses
 
 from common.cli_data import DATA_SOURCES, load_groups
-from common.reporting import report_collapse
+from common.reporting import (
+    fertility_by_lang,
+    report_collapse,
+    report_fertility,
+    report_stability,
+)
+from common.stability import sequences_by_lang_from_groups, stability_by_lang
 from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
 
+from .segment import induce_spans
 from .train import FlexiTokensConfig, FlexiTokensTrainer, _print_vocab_metrics
 
 
@@ -79,6 +86,17 @@ def main(argv=None):
     model, token_freq, final_vocab, info = trainer.train()
     report_collapse(token_freq, final_vocab)
     _print_vocab_metrics(token_freq)
+    report_fertility(fertility_by_lang(token_freq, train_groups))
+
+    device = next(model.parameters()).device
+    sequences_by_lang = sequences_by_lang_from_groups(train_groups)
+    induce_fn_by_lang = {
+        lang: (lambda raw, m=model, d=device: induce_spans(m, raw, d))
+        for lang in sequences_by_lang
+    }
+    report_stability(
+        stability_by_lang(induce_fn_by_lang, sequences_by_lang, seed=cfg.seed)
+    )
 
     entries = vocab_with_stats(token_freq, cfg.vocab_size)
     if args.vocab_preview:

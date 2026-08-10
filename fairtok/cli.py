@@ -5,11 +5,19 @@ from the dataclass itself so this can't drift out of sync with fairtok.train.GRP
 import argparse
 import dataclasses
 
+from common.bytes_utils import bytes_to_tensor
 from common.cli_data import DATA_SOURCES, load_groups
 from common.oldi_data import load_bouquet_dev
-from common.reporting import report_collapse
+from common.reporting import (
+    fertility_by_lang,
+    report_collapse,
+    report_fertility,
+    report_stability,
+)
+from common.stability import sequences_by_lang_from_groups, stability_by_lang
 from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
 
+from .policy import segment_bytes
 from .train import GRPOConfig, GRPOTrainer
 
 # Extra clarifying text for fields whose semantics aren't obvious from
@@ -127,6 +135,21 @@ def main(argv=None):
     trainer = GRPOTrainer(cfg, train_groups, eval_dataset=eval_groups)
     policy, token_freq, final_vocab, target_rate = trainer.train()
     report_collapse(token_freq, final_vocab)
+    report_fertility(fertility_by_lang(token_freq, train_groups))
+
+    device = next(policy.parameters()).device
+    sequences_by_lang = sequences_by_lang_from_groups(train_groups)
+    induce_fn_by_lang = {
+        lang: (
+            lambda raw, p=policy, d=device: segment_bytes(
+                p, bytes_to_tensor(raw, d), deterministic=True, device=d
+            )
+        )
+        for lang in sequences_by_lang
+    }
+    report_stability(
+        stability_by_lang(induce_fn_by_lang, sequences_by_lang, seed=cfg.seed)
+    )
 
     entries = vocab_with_stats(token_freq, cfg.vocab_size)
 

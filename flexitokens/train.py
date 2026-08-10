@@ -31,6 +31,7 @@ from tqdm.auto import tqdm
 
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.parity import compute_lang_parity_ratios
 from common.vocab import top_k_by_frequency
 
 from .model import FlexiTokensModel, boundary_hinge_loss, next_byte_loss, pad_byte_batch
@@ -67,6 +68,11 @@ def derive_alpha_beta(
 
         alpha_L = clamp(alpha_anchor / ratio_L, alpha_floor, alpha_ceiling)
 
+    ratio_L itself is computed by common.parity.compute_lang_parity_ratios, shared
+    with fairtok.train's own per-language target-rate derivation (same evidence,
+    same formula -- see that module for why a single global rate is a fairness
+    problem, not just a simplification).
+
     Rationale: if L systematically needs MORE bytes than the anchor to express
     the same content (e.g. multi-byte UTF-8 scripts, more verbose morphology),
     a FIXED boundary rate would give L systematically MORE tokens per sentence
@@ -101,51 +107,21 @@ def derive_alpha_beta(
     differ from `anchor_lang` if that language isn't present in the corpus;
     see the fallback below).
     """
-    lengths_by_lang = defaultdict(list)
-    for group in train_groups:
-        for lang, text in group.items():
-            lengths_by_lang[lang].append(_byte_len(text))
-
-    anchor = (
-        anchor_lang
-        if anchor_lang in lengths_by_lang
-        else next(iter(lengths_by_lang), None)
-    )
-    if anchor is None:
-        raise ValueError(
-            "train_groups is empty -- cannot derive alpha_L/beta_L from no data"
-        )
+    ratio_by_lang, anchor = compute_lang_parity_ratios(train_groups, anchor_lang)
     if anchor != anchor_lang:
         print(
             f"[flexitokens] anchor language {anchor_lang!r} not present in this corpus; "
             f"falling back to {anchor!r} as the alpha_L anchor"
         )
 
-    paired_anchor_lengths = defaultdict(
-        list
-    )  # lang -> anchor's length in groups where both present
-    paired_lang_lengths = defaultdict(
-        list
-    )  # lang -> lang's own length in those same groups
+    lengths_by_lang = defaultdict(list)
     for group in train_groups:
-        if anchor not in group:
-            continue
-        anchor_len = _byte_len(group[anchor])
         for lang, text in group.items():
-            paired_anchor_lengths[lang].append(anchor_len)
-            paired_lang_lengths[lang].append(_byte_len(text))
+            lengths_by_lang[lang].append(_byte_len(text))
 
     alpha_by_lang, beta_by_lang = {}, {}
     for lang, all_lens in lengths_by_lang.items():
-        anchor_lens = paired_anchor_lengths.get(lang, [])
-        lang_lens = paired_lang_lengths.get(lang, [])
-        if anchor_lens and sum(anchor_lens) > 0:
-            ratio = (sum(lang_lens) / len(lang_lens)) / (
-                sum(anchor_lens) / len(anchor_lens)
-            )
-        else:
-            ratio = 1.0  # no group pairs this language with the anchor -- no evidence
-            # of a byte-length disparity, so fall back to treating it like the anchor
+        ratio = ratio_by_lang[lang]
         alpha = max(alpha_floor, min(alpha_ceiling, alpha_anchor / max(ratio, 1e-6)))
 
         mean_len = sum(all_lens) / len(all_lens)

@@ -5,6 +5,14 @@ baselines) -- comparing them meaningfully requires scoring them all the same way
 Rényi efficiency: Zouhar et al., "Tokenization and the Noiseless Channel" (ACL 2023).
 Gini coefficient: Foroutan et al., "Parity-aware Byte-Pair Encoding" (2025), Eq. 5 -- the
 closed form here is algebraically identical to theirs (derived independently, then checked).
+Fertility: Ahia et al., "Do All Languages Cost the Same?" (EMNLP 2023); also the
+headline metric of Lundin et al.'s "The Token Tax" (AfricaNLP 2026) -- included
+alongside Rényi efficiency/Gini for comparability with that wider literature, most of
+which reports fertility rather than an entropy-based measure.
+Boundary stability: adapted from "Proxy Compression for Language Modeling" (Zheng et
+al. 2026)'s "compressor stability" diagnostic (Sec 3.4) -- there used to explain why
+gzip-compressed training proxies fail to transfer while tokenizer/neural-compressor
+proxies succeed; repurposed here as a per-language fairness check (see common.stability).
 """
 
 import numpy as np
@@ -54,3 +62,46 @@ def compression_rate(num_bytes, num_tokens):
     if num_tokens <= 0:
         return 0.0
     return num_bytes / num_tokens
+
+
+def fertility(num_tokens, num_words):
+    """Tokens per word -- see module docstring. Higher = more tokens needed per word =
+    a language this tokenizer serves less efficiently. num_tokens/num_words are
+    corpus-level totals (summed over every sentence for one language), not a
+    per-sentence average, matching how the tokenizer-fairness literature reports it."""
+    if num_words <= 0:
+        return 0.0
+    return num_tokens / num_words
+
+
+def boundary_stability(spans_before, spans_after):
+    """1 - normalized Levenshtein distance between two span sequences (each a list of
+    byte-string spans, e.g. from common.bytes_utils.spans_from_boundaries) -- 1.0 means
+    an input perturbation left the induced segmentation completely unchanged, 0.0 means
+    maximally different. See module docstring for where this is adapted from, and
+    common.stability for the perturb-and-compare machinery that produces
+    spans_before/spans_after in the first place.
+
+    Treats each span as one atomic symbol (two spans are "equal" iff their bytes are
+    identical), not a byte-level edit distance -- a single boundary shift several bytes
+    into a long span should count as roughly ONE segmentation change, not one change
+    per byte it happens to touch.
+    """
+    n, m = len(spans_before), len(spans_after)
+    if n == 0 and m == 0:
+        return 1.0
+    if n == 0 or m == 0:
+        return 0.0
+    prev = list(range(m + 1))
+    for i in range(1, n + 1):
+        curr = [i] + [0] * m
+        for j in range(1, m + 1):
+            cost = 0 if spans_before[i - 1] == spans_after[j - 1] else 1
+            curr[j] = min(
+                prev[j] + 1,  # deletion
+                curr[j - 1] + 1,  # insertion
+                prev[j - 1] + cost,  # substitution/match
+            )
+        prev = curr
+    edit_distance = prev[m]
+    return 1.0 - edit_distance / max(n, m)

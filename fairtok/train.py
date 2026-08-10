@@ -50,6 +50,7 @@ from tqdm.auto import tqdm
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.data import LANG_PROFILES, make_synthetic_parallel_groups
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.parity import compute_lang_parity_ratios
 from common.reporting import avg_span_length, collapse_stats, report_collapse
 from common.vocab import top_k_by_frequency, vocab_churn, vocab_snapshot_stats
 
@@ -116,6 +117,22 @@ class GRPOConfig:
     # The naive from-scratch trainer is O(vocab_size * corpus_size); if this tracked
     # vocab_size directly, a vocab_size=50000 run would need ~49700 merges just to
     # compute the anchor, i.e. the exact freeze this field exists to prevent.
+    anchor_lang: str = "eng"  # pivot language for per-language target-rate scaling
+    # (see compute_lang_parity_ratios below) -- matches flexitokens.train.FlexiTokensConfig's
+    # own anchor_lang field/default, and this project's use of English as the
+    # common.oldi_data reporting pivot elsewhere. _plain_bpe_target_rate's single
+    # global target_rate is still computed exactly as before and used as the ANCHOR's
+    # own rate; every other language's target_rate_by_lang entry is that anchor rate
+    # scaled by its own parity ratio, per "Compute Optimal Tokenization" (Limisiewicz
+    # et al. 2026): languages that need more bytes to say the same thing warrant a
+    # genuinely different optimal compression rate, not the same global one -- a
+    # single target_rate was, until now, exactly the kind of tokenizer-level
+    # unfairness that paper finds in real deployed multilingual tokenizers.
+    target_rate_floor: float = 1.0  # a target_rate below 1 byte/token is nonsensical
+    # (can't compress below the raw byte stream); guards a degenerate parity ratio.
+    target_rate_ceiling: float = 64.0  # generous upper bound, well past any realistic
+    # compression rate at this project's vocab_size scale -- guards the opposite
+    # degenerate case (e.g. a near-empty sample making ratio_L blow up).
     use_wandb: bool = False
     wandb_project: str = "fairtok"
     run_name: str = ""
@@ -450,6 +467,33 @@ class GRPOTrainer:
                 cfg.seed,
             )
 
+        # Per-language target rate: target_rate above is a single GLOBAL anchor rate
+        # (measured on the anchor language's own text, once parity-scaled below); every
+        # other language's entry in target_rate_by_lang is that anchor rate times its
+        # own byte-length parity ratio vs the anchor (see GRPOConfig.anchor_lang's
+        # comment for the rationale, and common.parity.compute_lang_parity_ratios for
+        # the ratio formula -- the same one flexitokens.train.derive_alpha_beta already
+        # uses for its own per-language alpha_L). A language with no evidence of a
+        # disparity (ratio ~= 1.0, e.g. never paired with the anchor in any group, or
+        # this project's synthetic placeholder profiles) simply gets target_rate back
+        # unchanged -- this is a strict refinement of the old single-rate behavior, not
+        # a change to it, whenever no real parity signal exists.
+        parity_ratio_by_lang, parity_anchor = compute_lang_parity_ratios(
+            raw_train_groups, cfg.anchor_lang
+        )
+        if parity_anchor != cfg.anchor_lang:
+            print(
+                f"[fairtok] anchor language {cfg.anchor_lang!r} not present in this corpus; "
+                f"falling back to {parity_anchor!r} for per-language target-rate scaling"
+            )
+        target_rate_by_lang = {
+            lang: max(
+                cfg.target_rate_floor,
+                min(cfg.target_rate_ceiling, target_rate * ratio),
+            )
+            for lang, ratio in parity_ratio_by_lang.items()
+        }
+
         run = None
         if cfg.use_wandb:
             import wandb
@@ -460,6 +504,7 @@ class GRPOTrainer:
                 config={
                     **dataclasses.asdict(cfg),
                     "target_rate": target_rate,
+                    "target_rate_by_lang": target_rate_by_lang,
                     "num_train_groups": len(train_dataset),
                 },
             )
@@ -536,7 +581,13 @@ class GRPOTrainer:
                 # scale of returns and sequence length, not "how good the policy is" -- it
                 # has no reason to trend toward zero. Summing them into one number (as the
                 # original version did) hides which one is actually driving any change.
-                step_boundary_logits = []  # for the rate-consistency loss, below
+                step_lang_boundary_logits = defaultdict(
+                    list
+                )  # for the PER-LANGUAGE rate-consistency loss, below -- keyed by
+                # language rather than one flat list, so each language's mean boundary
+                # logit is pushed toward ITS OWN target_rate_by_lang entry, not a single
+                # batch-wide pooled rate that a language dominating this step's batch
+                # composition could otherwise drag every other language's rate toward.
                 # Collected as plain Python lists and only turned into tensors ONCE, after
                 # the loop below -- an earlier version did `reinforce_loss = reinforce_loss
                 # - float(adv[t]) * rec.boundary_logprob` (etc.) INSIDE the per-position loop,
@@ -597,7 +648,7 @@ class GRPOTrainer:
                     for lang, (byte_seq, records) in group_records.items():
                         adv = advantages[lang]
                         for t, rec in enumerate(records):
-                            step_boundary_logits.append(rec.boundary_logit)
+                            step_lang_boundary_logits[lang].append(rec.boundary_logit)
                             step_boundary_logprobs.append(
                                 rec.boundary_logprob
                             )  # score-function term
@@ -650,15 +701,41 @@ class GRPOTrainer:
                 # rather than a reward-shaping penalty that has to survive being filtered
                 # through the noisy REINFORCE pathway (the old mechanism this replaces).
                 # `factor` is detached so it only scales the correction, not a gradient path.
-                all_logits = torch.stack(step_boundary_logits)
-                mean_logit = all_logits.mean()
-                mean_prob = torch.sigmoid(all_logits).mean()
-                target_downsample_rate = (
-                    1.0 / target_rate
-                )  # target_rate is bytes/token; D&W's
-                # mechanism operates on a target fraction-of-positions-that-are-boundaries
-                factor = (mean_prob - target_downsample_rate).detach()
-                rate_consistency_loss = cfg.lambda_target * mean_logit * factor
+                #
+                # Computed PER LANGUAGE, against that language's own target_rate_by_lang
+                # entry, then averaged with equal weight per language present this step --
+                # matches flexitokens.model.boundary_hinge_loss's own per-language pooling
+                # convention, and avoids a language that happens to dominate this step's
+                # batch (more sequences, or longer ones) drowning out every other
+                # language's own target in a single pooled mean.
+                per_lang_rate_losses = []
+                per_lang_mean_probs = {}
+                for lang, logits in step_lang_boundary_logits.items():
+                    logits_t = torch.stack(logits)
+                    mean_logit_lang = logits_t.mean()
+                    mean_prob_lang = torch.sigmoid(logits_t).mean()
+                    # target_rate_by_lang is bytes/token; D&W's mechanism operates on a
+                    # target fraction-of-positions-that-are-boundaries
+                    target_downsample_rate_lang = 1.0 / target_rate_by_lang.get(
+                        lang, target_rate
+                    )
+                    factor_lang = (mean_prob_lang - target_downsample_rate_lang).detach()
+                    per_lang_rate_losses.append(mean_logit_lang * factor_lang)
+                    per_lang_mean_probs[lang] = mean_prob_lang.item()
+                rate_consistency_loss = cfg.lambda_target * torch.stack(
+                    per_lang_rate_losses
+                ).mean()
+                # Aggregate scalars for the postfix/wandb logging below only -- the loss
+                # itself never pools across languages (see per_lang_rate_losses above).
+                mean_prob = float(np.mean(list(per_lang_mean_probs.values())))
+                target_downsample_rate = float(
+                    np.mean(
+                        [
+                            1.0 / target_rate_by_lang.get(lang, target_rate)
+                            for lang in per_lang_mean_probs
+                        ]
+                    )
+                )
 
                 loss = (
                     reinforce_loss
@@ -673,7 +750,7 @@ class GRPOTrainer:
                 postfix["loss"] = f"{loss.item():+.3f}"
                 postfix["acc"] = f"{byte_accuracy:.3f}"
                 postfix["bpb"] = f"{bits_per_byte:.3f}"
-                postfix["rate"] = f"{mean_prob.item():.3f}/{target_downsample_rate:.3f}"
+                postfix["rate"] = f"{mean_prob:.3f}/{target_downsample_rate:.3f}"
                 pbar.set_postfix(postfix)
 
                 if run is not None:
@@ -684,7 +761,7 @@ class GRPOTrainer:
                             "train/loss_nll": nll_loss.item(),
                             "train/loss_early_nll": early_nll_loss.item(),
                             "train/rate_consistency_loss": rate_consistency_loss.item(),
-                            "train/mean_downsample_rate": mean_prob.item(),
+                            "train/mean_downsample_rate": mean_prob,
                             "train/target_downsample_rate": target_downsample_rate,
                             "train/byte_accuracy": byte_accuracy,
                             "train/bits_per_byte": bits_per_byte,
