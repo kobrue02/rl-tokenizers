@@ -1,4 +1,6 @@
-"""Fairness/efficiency metrics, implemented once and reused unchanged in training and eval.
+"""Fairness/efficiency metrics, implemented once and reused unchanged across every
+tokenizer in this repo (fairtok's RL policy, and the magnet/flexitokens/manta
+baselines) -- comparing them meaningfully requires scoring them all the same way.
 
 Rényi efficiency: Zouhar et al., "Tokenization and the Noiseless Channel" (ACL 2023).
 Gini coefficient: Foroutan et al., "Parity-aware Byte-Pair Encoding" (2025), Eq. 5 -- the

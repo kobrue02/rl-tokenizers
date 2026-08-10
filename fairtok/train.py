@@ -47,13 +47,16 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.data import LANG_PROFILES, make_synthetic_parallel_groups
+from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.reporting import avg_span_length, collapse_stats, report_collapse
+from common.vocab import top_k_by_frequency, vocab_churn, vocab_snapshot_stats
+
 from .baseline_bpe import encode_with_merges, train_byte_bpe
-from .data import LANG_PROFILES, make_synthetic_parallel_groups
 from .inference import save_checkpoint
-from .metrics import compression_rate, gini_coefficient, renyi_efficiency
-from .policy import BytePolicy, batched_sample_rollout, bytes_to_tensor, spans_from_boundaries
+from .policy import BytePolicy, batched_sample_rollout
 from .reward import build_rewards, discounted_returns, group_relative_advantage
-from .vocab import top_k_by_frequency, vocab_churn, vocab_snapshot_stats
 
 
 @dataclasses.dataclass
@@ -188,25 +191,6 @@ def _plain_bpe_target_rate(train_groups, baseline_vocab_size, sample_groups, gro
     return float(np.mean([len(s) for s in pooled]) / np.mean(lengths))
 
 
-def _avg_span_length(token_freq):
-    total_spans = sum(sum(c.values()) for c in token_freq.values())
-    total_len = sum(len(s) * n for c in token_freq.values() for s, n in c.items())
-    return total_len / total_spans if total_spans else 0.0
-
-
-def _collapse_stats(token_freq, final_vocab):
-    return _avg_span_length(token_freq), len(final_vocab)
-
-
-def _report_collapse(token_freq, final_vocab):
-    avg_span_len, final_vocab_size = _collapse_stats(token_freq, final_vocab)
-    print(f"\nfinal vocab size={final_vocab_size}  avg span length={avg_span_len:.2f} bytes")
-    if avg_span_len < 1.2:
-        print("WARNING: near character-level collapse")
-    elif avg_span_len > 40:
-        print("WARNING: near full-sentence collapse")
-
-
 class ByteGroupDataset(Dataset):
     """Wraps a plain list of parallel groups (dicts {lang: text}) for GRPOTrainer's
     train_dataset -- a thin adapter, not a data-format change: __getitem__ returns
@@ -291,7 +275,7 @@ class GRPOTrainer:
     list either way -- evaluate() doesn't need DataLoader (no per-group rotation state
     to carry across calls; it just scores every language in every selected group once).
     Languages are read per-group (group.keys()), not from a fixed global list, since
-    different sources can contribute differently-sized groups (see fairtok.oldi_data).
+    different sources can contribute differently-sized groups (see common.oldi_data).
     eval_dataset, if given, is scored by .evaluate() every args.eval_steps steps
     during .train() (see that method) -- held out, never trained on.
     """
@@ -638,7 +622,7 @@ class GRPOTrainer:
                         len(compression_trace) > 3 and compression_trace[-1] < compression_trace[-4]
                     )
                     gaming_suspected = fairness_improving and compression_worsening
-                    avg_span_len = _avg_span_length(token_freq)
+                    avg_span_len = avg_span_length(token_freq)
                     top_spans, coverage, cross_lingual_share = vocab_snapshot_stats(token_freq, cfg.vocab_size)
                     churn = vocab_churn(prev_top_spans, top_spans)
                     prev_top_spans = top_spans
@@ -715,7 +699,7 @@ class GRPOTrainer:
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
 
         if run is not None:
-            avg_span_len, final_vocab_size = _collapse_stats(token_freq, final_vocab)
+            avg_span_len, final_vocab_size = collapse_stats(token_freq, final_vocab)
             run.log({
                 "final/vocab_size": final_vocab_size,
                 "final/avg_span_length_bytes": avg_span_len,
@@ -742,7 +726,7 @@ def run_smoke_test():
     langs = list(LANG_PROFILES)
     train_groups = make_synthetic_parallel_groups(400, langs=langs, seed=args.seed)
     policy, token_freq, final_vocab, target_rate = GRPOTrainer(args, train_groups).train()
-    _report_collapse(token_freq, final_vocab)
+    report_collapse(token_freq, final_vocab)
     return policy, token_freq, final_vocab, target_rate
 
 
@@ -752,12 +736,12 @@ def run_real_smoke_test(num_groups=60):
     confirms real UTF-8 multi-byte text flows through the whole pipeline correctly.
     Not a full training run: oldi_seed alone has 6193 groups, plus 562 from smol and
     6193 from flores_plus dev -- scaling this up is a separate, much longer run."""
-    from .oldi_data import load_oldi_seed
+    from common.oldi_data import load_oldi_seed
 
     args = GRPOConfig(max_steps=60, per_device_train_batch_size=4, vocab_size=384, fairness_refresh_steps=10)
     train_groups = load_oldi_seed()[:num_groups]
     policy, token_freq, final_vocab, target_rate = GRPOTrainer(args, train_groups).train()
-    _report_collapse(token_freq, final_vocab)
+    report_collapse(token_freq, final_vocab)
     return policy, token_freq, final_vocab, target_rate
 
 

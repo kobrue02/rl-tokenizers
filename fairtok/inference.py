@@ -13,8 +13,10 @@ from collections import Counter, defaultdict
 
 import torch
 
-from .policy import BytePolicy, bytes_to_tensor, segment_bytes
-from .vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
+from common.bytes_utils import bytes_to_tensor
+from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
+
+from .policy import BytePolicy, segment_bytes
 
 
 def save_checkpoint(policy, path):

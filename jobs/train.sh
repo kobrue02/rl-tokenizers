@@ -66,7 +66,7 @@ python3 main.py \
     --use-wandb \
     --wandb-project fairtok \
     --wandb-run-name "slurm-${SLURM_JOB_ID}" \
-    --checkpoint-out "$PROJECT_ROOT/checkpoints/policy_${SLURM_JOB_ID}.pt" \
+    --output-dir "$PROJECT_ROOT/checkpoints/policy_${SLURM_JOB_ID}.pt" \
     --vocab-out "$PROJECT_ROOT/vocab_out/vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/vocab_stats_${SLURM_JOB_ID}.json" \
     "$@"

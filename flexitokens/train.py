@@ -29,9 +29,9 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from fairtok.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from fairtok.policy import bytes_to_tensor, spans_from_boundaries
-from fairtok.vocab import top_k_by_frequency
+from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.vocab import top_k_by_frequency
 
 from .model import FlexiTokensModel, boundary_hinge_loss, next_byte_loss, pad_byte_batch
 
@@ -49,10 +49,10 @@ def derive_alpha_beta(train_groups, anchor_lang="eng", alpha_anchor=0.25, margin
 
     alpha_L (target rate, i.e. `k/N` this language "should" be near): pick one
     anchor language (English by default, matching this project's use of English
-    as the fairtok.oldi_data reporting pivot), and compute alpha_L PROPORTIONAL
+    as the common.oldi_data reporting pivot), and compute alpha_L PROPORTIONAL
     to how many bytes this language needs, on average, to say the same thing the
     anchor says -- using the genuinely N-way parallel groups from
-    fairtok.oldi_data (or fairtok.data's synthetic stand-in) directly, since
+    common.oldi_data (or common.data's synthetic stand-in) directly, since
     "the same content in language L" and "the same content in the anchor" are
     LITERALLY the same dict entry across languages in one group:
 
@@ -189,8 +189,8 @@ class FlexiTokensConfig:
 
 class FlexiTokensTrainer:
     """Shaped after fairtok.train.GRPOTrainer: construct with args + train_groups
-    (a plain list of {lang: text} dicts, see fairtok.oldi_data /
-    fairtok.data.make_synthetic_parallel_groups), call .train(), then read
+    (a plain list of {lang: text} dicts, see common.oldi_data /
+    common.data.make_synthetic_parallel_groups), call .train(), then read
     .model / .token_freq / .vocab / .alpha_by_lang / .beta_by_lang /
     .loss_history / .rate_history off the instance. train() also returns
     (model, token_freq, final_vocab, info) as a tuple for convenience."""
@@ -303,7 +303,7 @@ class FlexiTokensTrainer:
 
 
 def _print_vocab_metrics(token_freq):
-    """Sanity check requested alongside the smoke test: fairtok.metrics functions,
+    """Sanity check requested alongside the smoke test: common.metrics functions,
     UNMODIFIED, consuming this module's own token_freq output -- confirms
     FlexiTokens' induced vocabulary is a drop-in match for fairtok's existing
     evaluation pipeline, exactly like a fairtok.policy.BytePolicy vocabulary is."""
@@ -317,7 +317,7 @@ def _print_vocab_metrics(token_freq):
         per_lang_renyi[lang] = renyi_efficiency(list(counter.values()))
     gini = gini_coefficient(list(per_lang_renyi.values())) if per_lang_renyi else 0.0
 
-    print("\nfairtok.metrics sanity check on the FlexiTokens-induced vocabulary:")
+    print("\ncommon.metrics sanity check on the FlexiTokens-induced vocabulary:")
     for lang in sorted(per_lang_compression):
         print(
             f"  {lang:16s} compression_rate={per_lang_compression[lang]:.3f} bytes/token   "
@@ -329,7 +329,7 @@ def _print_vocab_metrics(token_freq):
 
 def run_smoke_test():
     """Mirrors fairtok.train.run_smoke_test's pattern/gate: a small run on
-    synthetic placeholder data (fairtok.data.make_synthetic_parallel_groups),
+    synthetic placeholder data (common.data.make_synthetic_parallel_groups),
     checked for:
       (a) no crash end-to-end,
       (b) loss actually decreasing (late-training average < early-training average),
@@ -338,10 +338,10 @@ def run_smoke_test():
           entire point of the per-language hinge loss is to NOT force every
           language to the same fixed rate, so identical rates across languages
           would mean the hinge loss isn't doing anything distinguishable.
-    Also prints fairtok.metrics (compression_rate, renyi_efficiency,
+    Also prints common.metrics (compression_rate, renyi_efficiency,
     gini_coefficient) on the induced vocabulary as a pipeline-compatibility check.
     """
-    from fairtok.data import LANG_PROFILES, make_synthetic_parallel_groups
+    from common.data import LANG_PROFILES, make_synthetic_parallel_groups
 
     args = FlexiTokensConfig(
         max_steps=80,

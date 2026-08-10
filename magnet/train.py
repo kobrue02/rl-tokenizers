@@ -23,10 +23,10 @@ import torch
 import torch.nn.functional as F
 from tqdm.auto import tqdm
 
-from fairtok.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from fairtok.oldi_data import LANG_SCRIPT
-from fairtok.policy import bytes_to_tensor, spans_from_boundaries
-from fairtok.vocab import top_k_by_frequency
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.oldi_data import LANG_SCRIPT
+from common.vocab import top_k_by_frequency
 
 from .model import MagnetModel
 
@@ -35,11 +35,11 @@ def lang_to_script(lang):
     """Group languages by SCRIPT, not by language, for the per-script boundary
     predictor -- e.g. arz_Arab and kas_Arab share ONE predictor and one target
     boundary rate (see model.py's MagnetModel/BoundaryPredictor).
-    fairtok.oldi_data.LANG_SCRIPT gives the real lang_Script code (e.g.
+    common.oldi_data.LANG_SCRIPT gives the real lang_Script code (e.g.
     "arz_Arab" -> the part after the underscore is the ISO 15924 script code:
     Arab, Latn, Beng, Nkoo cover this project's 9-language panel.
 
-    Synthetic placeholder "languages" (fairtok.data.make_synthetic_parallel_groups's
+    Synthetic placeholder "languages" (common.data.make_synthetic_parallel_groups's
     profile names, e.g. "high_resource") aren't real language codes and carry no
     script metadata, so each synthetic profile falls back to being its OWN
     one-language "script" bucket. This still exercises the exact same
@@ -101,7 +101,7 @@ class MagnetConfig:
 
     vocab_size: int = 384  # final harvested-vocabulary budget, same role as
     # GRPOConfig.vocab_size -- applied once, after training, by keeping the
-    # vocab_size most frequent distinct byte spans (see fairtok.vocab.top_k_by_frequency).
+    # vocab_size most frequent distinct byte spans (see common.vocab.top_k_by_frequency).
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     log_every: int = 10
     output_dir: str = ""  # empty string to skip; else a path model.state_dict() is saved to.
@@ -109,8 +109,8 @@ class MagnetConfig:
 
 class MagnetTrainer:
     """Construct with args + train_groups (a plain list of dicts {lang: text},
-    the same shape fairtok.oldi_data.load_all_training_groups /
-    fairtok.data.make_synthetic_parallel_groups both return), call .train(),
+    the same shape common.oldi_data.load_all_training_groups /
+    common.data.make_synthetic_parallel_groups both return), call .train(),
     then read .model / .token_freq / .vocab off the instance (train() also
     returns them, plus a per-step loss trace and boundary-rate trace, as a
     tuple for convenience -- see run_smoke_test below for the shape)."""
@@ -239,7 +239,7 @@ class MagnetTrainer:
                 # Harvest the induced vocabulary from THIS step's hard boundary
                 # decisions -- same running-frequency-table role as
                 # fairtok.train.GRPOTrainer's token_freq, and consumed the exact
-                # same way by fairtok.vocab.top_k_by_frequency at the end.
+                # same way by common.vocab.top_k_by_frequency at the end.
                 for b, (lang, seq) in enumerate(zip(langs, seqs)):
                     L = int(lengths[b].item())
                     boundaries = [int(v) for v in hard_boundaries[b, :L].round().tolist()]
@@ -278,8 +278,8 @@ class MagnetTrainer:
 
 def run_smoke_test():
     """The plan's own gate, MAGNET-flavored: a small trial run on
-    fairtok.data's synthetic placeholder corpus (fast, no network access
-    needed -- see fairtok.data's module docstring for why this stands in for
+    common.data's synthetic placeholder corpus (fast, no network access
+    needed -- see common.data's module docstring for why this stands in for
     real OLDI/FLORES+/SMOL data) that checks (1) no crash, (2) the loss trends
     down, (3) the boundary rate hasn't collapsed to ~0% (never cuts -- the
     hierarchical bottleneck becomes a no-op, see model.py's null_segment
@@ -287,13 +287,13 @@ def run_smoke_test():
     no compression at all).
 
     Also prints compression_rate / renyi_efficiency / gini_coefficient (all
-    from fairtok.metrics, completely unmodified) on the induced per-language
+    from common.metrics, completely unmodified) on the induced per-language
     vocabulary, as the sanity check that MAGNET's {lang: Counter(span->count)}
     output shape is consumable by the rest of the fairtok metrics pipeline with
     zero adapter code -- the same shape fairtok.train.GRPOTrainer.train()
     itself produces.
     """
-    from fairtok.data import LANG_PROFILES, make_synthetic_parallel_groups
+    from common.data import LANG_PROFILES, make_synthetic_parallel_groups
 
     args = MagnetConfig(max_steps=80, per_device_train_batch_size=6, vocab_size=256, log_every=10)
     langs = list(LANG_PROFILES)
@@ -309,7 +309,7 @@ def run_smoke_test():
     print(f"boundary rate (last-10-avg)={final_rate:.4f}  (collapsed={final_rate < 0.01 or final_rate > 0.99})")
     print(f"final vocab size={len(final_vocab)}")
 
-    print("\nper-language metrics on the induced vocabulary (fairtok.metrics, unmodified):")
+    print("\nper-language metrics on the induced vocabulary (common.metrics, unmodified):")
     lang_renyi = {}
     for lang, counter in sorted(token_freq.items()):
         num_bytes = sum(len(span) * n for span, n in counter.items())

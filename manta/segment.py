@@ -3,8 +3,8 @@
 MANTa itself never needs discrete boundaries -- the paper's whole point is
 that the soft (byte, block) assignment matrix (see manta.model.MantaModel)
 is enough to train an end-to-end language model without ever materializing
-a hard segmentation. But fairtok.metrics (compression_rate, renyi_efficiency,
-gini_coefficient) and fairtok.vocab all expect actual token COUNTS -- there
+a hard segmentation. But common.metrics (compression_rate, renyi_efficiency,
+gini_coefficient) and common.vocab all expect actual token COUNTS -- there
 is no way to plug a soft assignment matrix into "how many tokens did this
 sentence take," so *something* has to collapse it to hard boundaries for
 evaluation. This module is that something, and it is entirely this
@@ -19,7 +19,7 @@ shifts right as i increases) -- so wherever the argmax block index INCREASES
 from position i to i+1, that's a boundary: byte i is the last byte of its
 block, byte i+1 starts a new one.
 
-Encoded in fairtok's own convention (fairtok.policy.spans_from_boundaries):
+Encoded in fairtok's own convention (common.bytes_utils.spans_from_boundaries):
 boundary_actions[i] == 1 means "byte i is the LAST byte of a span" -- so a
 block-index increase from i to i+1 sets boundary_actions[i] = 1, not
 boundary_actions[i+1]. The very last position doesn't need an explicit 1:
@@ -40,11 +40,11 @@ effect is visible rather than papered over.
 
 import torch
 
-from fairtok.policy import bytes_to_tensor, spans_from_boundaries
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
 
 def _to_tensor(byte_seq, device="cpu"):
-    """Accepts str/bytes (delegates to fairtok.policy.bytes_to_tensor, so the
+    """Accepts str/bytes (delegates to common.bytes_utils.bytes_to_tensor, so the
     byte<->tensor convention is identical to fairtok's own) or an
     already-built LongTensor (just moved to `device`, unchanged) -- the
     latter matters for manta.train.py, which already holds padded tensors
@@ -65,7 +65,7 @@ def boundaries_from_assignment(assignment, lengths):
     to track token-frequency statistics during training.
 
     Returns: list of 0/1 boundary-action lists, one per batch row, each
-    directly usable by fairtok.policy.spans_from_boundaries.
+    directly usable by common.bytes_utils.spans_from_boundaries.
     """
     block_idx = assignment.argmax(dim=-1)  # (B, T)
     results = []
@@ -91,7 +91,7 @@ def induce_boundaries_batch(model, byte_seqs, device="cpu"):
 
     byte_seqs: list of str/bytes/1-D LongTensor (mixed is fine).
     Returns: list of 0/1 boundary-action lists, same order/length as
-    byte_seqs, each directly usable by fairtok.policy.spans_from_boundaries.
+    byte_seqs, each directly usable by common.bytes_utils.spans_from_boundaries.
     """
     tensors = [_to_tensor(s, device) for s in byte_seqs]
     lengths = torch.tensor([t.shape[0] for t in tensors], dtype=torch.long, device=device)
@@ -115,7 +115,7 @@ def induce_boundaries(model, byte_seq, device="cpu"):
 
 def induce_spans(model, byte_seq, device="cpu"):
     """Model + one raw byte sequence -> a list of byte-string spans, via
-    fairtok.policy.spans_from_boundaries (reused unmodified, so the spans
+    common.bytes_utils.spans_from_boundaries (reused unmodified, so the spans
     this produces are byte-for-byte the same kind of object fairtok's own
     vocab/metrics pipeline already consumes)."""
     tensor = _to_tensor(byte_seq, device)

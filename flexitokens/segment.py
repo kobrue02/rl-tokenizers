@@ -5,14 +5,14 @@ probability at 0.5, no Gumbel-sigmoid sampling (that noise only exists during
 training, to give the straight-through estimator something stochastic to explore --
 see flexitokens/model.py's module docstring, point 3). Producing a plain list of 0/1
 ints per byte position means a trained FlexiTokensModel's output plugs directly into
-fairtok.policy.spans_from_boundaries for span/vocabulary extraction, exactly the same
+common.bytes_utils.spans_from_boundaries for span/vocabulary extraction, exactly the same
 as a trained fairtok.policy.BytePolicy checkpoint does -- the two tokenizers are
 interchangeable from that point in the pipeline onward.
 """
 
 import torch
 
-from fairtok.policy import bytes_to_tensor, spans_from_boundaries
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
 from .model import FlexiTokensModel  # noqa: F401  (re-exported for convenience / type hints)
 
@@ -20,7 +20,7 @@ from .model import FlexiTokensModel  # noqa: F401  (re-exported for convenience 
 @torch.no_grad()
 def induce_boundaries(model, byte_seq, device="cpu"):
     """byte_seq: str, bytes, or a 1-D LongTensor of byte ids -- anything
-    fairtok.policy.bytes_to_tensor already accepts. Returns a plain list of 0/1
+    common.bytes_utils.bytes_to_tensor already accepts. Returns a plain list of 0/1
     ints, one per byte position, length == len(byte_seq). Deterministic: same
     model + same input always gives the same output (unlike training, which
     samples from the Gumbel-sigmoid relaxation)."""
@@ -40,7 +40,7 @@ def induce_boundaries(model, byte_seq, device="cpu"):
 
 
 def induce_spans(model, byte_seq, device="cpu"):
-    """Convenience wrapper: induce_boundaries + fairtok.policy.spans_from_boundaries
+    """Convenience wrapper: induce_boundaries + common.bytes_utils.spans_from_boundaries
     -- the same two-step pipeline fairtok.policy.segment_bytes does internally for
     BytePolicy checkpoints, just with this module's model/boundary source instead."""
     byte_seq_t = byte_seq if isinstance(byte_seq, torch.Tensor) else bytes_to_tensor(byte_seq, device)

@@ -127,7 +127,7 @@ fairtok's own compute scale (a CPU-trainable smoke test), not the paper's
      Hard-argmax discretization (turning the soft assignment into actual
      0/1 boundaries) is a SEPARATE, inference-only operation implemented in
      manta/segment.py -- it is never used inside the loss path, only to
-     extract token counts for fairtok.metrics after training. The paper
+     extract token counts for common.metrics after training. The paper
      never needs discrete boundaries at all, so this discretization
      heuristic is entirely this project's own addition; see segment.py's
      docstring for the exact rule and its caveats.

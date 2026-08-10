@@ -1,6 +1,10 @@
 """Real data loader: the OLDI-and-friends collection
 (https://huggingface.co/collections/openlanguagedata/oldi-and-friends), minus wmt24pp.
 
+Shared by every tokenizer in this repo (fairtok's RL policy, and the
+magnet/flexitokens/manta baselines) -- comparing them meaningfully requires
+training/evaluating them all on the same real multilingual data.
+
 Language panel (see conversation for how this was derived): the strict intersection of
 flores_plus / oldi_seed / smol_sent's language coverage is just {eng} once wmt24pp is
 included, because wmt24pp is a high/mid-resource-only benchmark unrelated to OLDI's
@@ -80,8 +84,9 @@ def _load_ngram_parallel(repo_id, dir_prefix, langs):
     lang_Script stem -- this also means script variants of the same language
     (e.g. kas_Arab and kas_Deva) become distinct entries rather than one
     curated choice, which is more information, not less. Compute cost is kept
-    bounded by randomly subsampling each group at training time
-    (GRPOConfig.group_sample_size), not by restricting what's loaded.
+    bounded by randomly subsampling each group at training time (each
+    trainer's own group_sample_size-equivalent field), not by restricting
+    what's loaded here.
     """
     if langs == "all":
         stems = _list_all_stems(repo_id, dir_prefix)

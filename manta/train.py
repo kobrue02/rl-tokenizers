@@ -6,7 +6,7 @@ rate-consistency loss -- see manta.model's module docstring, point 3, for
 why MANTa genuinely has none of that machinery, not just a simplified
 version of it. The only loss is next-byte cross-entropy
 (manta.model.next_byte_loss), and every byte position contributes to it
-independently; "groups" of parallel sentences (fairtok.oldi_data's unit of
+independently; "groups" of parallel sentences (common.oldi_data's unit of
 organization) are used here purely as a convenient SOURCE of many
 sentences across many languages, not as a training-time structure the way
 GRPOTrainer's group-relative advantage needs them to be. Concretely: this
@@ -32,10 +32,10 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from fairtok.data import LANG_PROFILES, make_synthetic_parallel_groups
-from fairtok.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from fairtok.policy import bytes_to_tensor, spans_from_boundaries
-from fairtok.vocab import top_k_by_frequency
+from common.data import LANG_PROFILES, make_synthetic_parallel_groups
+from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.vocab import top_k_by_frequency
 
 from .model import MantaModel, next_byte_loss
 from .segment import boundaries_from_assignment
@@ -56,7 +56,7 @@ class MantaConfig:
     # of the same name.
     learning_rate: float = 3e-3
     seed: int = 0
-    vocab_size: int = 384  # final vocab budget passed to fairtok.vocab.top_k_by_frequency,
+    vocab_size: int = 384  # final vocab budget passed to common.vocab.top_k_by_frequency,
     # applied once after training -- matches fairtok's own two-stage
     # "never enforce the budget during training, only harvest it after" design
     # (see fairtok/vocab.py's module docstring), even though MANTa has no in-loop
@@ -102,7 +102,7 @@ def _pad_batch(tensors, device):
 
 class MantaTrainer:
     """Construct with args + train_dataset (a list of dicts {lang: text}, the
-    same shape fairtok.oldi_data.load_all_training_groups / fairtok.data's
+    same shape common.oldi_data.load_all_training_groups / common.data's
     make_synthetic_parallel_groups produce -- reused unmodified), call
     .train(), then read .model / .token_freq / .vocab off the instance
     (train() also returns them as a tuple, mirroring GRPOTrainer's
@@ -242,7 +242,7 @@ def _span_length_histogram(token_freq):
 def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
     """Feed the smoke test's induced vocabulary straight into fairtok's own
     metrics functions, UNMODIFIED -- the whole point of reusing
-    fairtok.metrics/fairtok.vocab rather than writing MANTa-specific
+    common.metrics/common.vocab rather than writing MANTa-specific
     versions is to confirm this model's output is a drop-in match for
     whatever consumes fairtok's own tokenizer output."""
     avg_span_len = _avg_span_length(token_freq)
@@ -286,7 +286,7 @@ def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
 
 def run_smoke_test():
     """Mirrors fairtok.train.run_smoke_test's role: a small trial run on
-    synthetic placeholder data (fairtok.data.make_synthetic_parallel_groups,
+    synthetic placeholder data (common.data.make_synthetic_parallel_groups,
     reused unmodified), gated by three explicit assertions:
 
       1. no crash getting here at all (train() and metric computation ran

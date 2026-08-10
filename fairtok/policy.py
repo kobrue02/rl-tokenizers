@@ -18,6 +18,10 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries  # noqa: F401 -- re-exported
+# for backward-compat call sites (`from fairtok.policy import bytes_to_tensor, ...`); this
+# module also uses spans_from_boundaries itself (segment_bytes, below).
+
 
 class BytePolicy(nn.Module):
     """Early-exit baseline adapted from Dauncey & Wattenhofer, "You Can Learn
@@ -124,12 +128,6 @@ class StepRecord:
     # float -- precomputed and pulled off the device ONCE for the whole batch in
     # batched_sample_rollout (see actions_np/correct_np there), so reward.py's
     # build_rewards no longer needs its own per-(group, language) .cpu() sync
-
-
-def bytes_to_tensor(b, device="cpu"):
-    if isinstance(b, str):
-        b = b.encode("utf-8")
-    return torch.tensor(list(b), dtype=torch.long, device=device)
 
 
 def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False):
@@ -256,28 +254,3 @@ def segment_bytes(policy, byte_seq, deterministic=True, device="cpu"):
         prev_boundary = action
     actions = torch.cat(action_tensors).tolist() if action_tensors else []
     return spans_from_boundaries(byte_seq, actions)
-
-
-def spans_from_boundaries(byte_seq, actions):
-    """Byte spans induced by boundary decisions (a list of 0/1 ints -- either
-    pulled from StepRecords during training, or produced directly by
-    segment_bytes during inference). Content-keyed by construction (a span IS
-    its bytes) -- there is no separate id to dedupe by, which is what makes
-    this representation immune to Duplication-BPE-style gaming."""
-    if isinstance(byte_seq, torch.Tensor):
-        # ONE sync for the whole sequence (a no-op if byte_seq is already CPU, as it
-        # is at inference time), not one per span -- the previous version called
-        # `.tolist()` on a fresh tensor slice INSIDE the loop below, so on a CUDA
-        # byte_seq (as it is during training, see train.py's Phase 3) every span
-        # forced its own host-device sync. Average span length is ~2-3 bytes, so a
-        # ~150-byte sentence produced ~50-75 syncs, times ~150-200 sequences/step --
-        # tens of thousands of syncs/step, the single largest bottleneck found so far.
-        byte_seq = byte_seq.detach().tolist()
-    spans = []
-    start = 0
-    last = len(actions) - 1
-    for t, action in enumerate(actions):
-        if action == 1 or t == last:
-            spans.append(bytes(byte_seq[start:t + 1]))
-            start = t + 1
-    return spans

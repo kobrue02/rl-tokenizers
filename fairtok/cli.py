@@ -4,19 +4,12 @@ from the dataclass itself so this can't drift out of sync with fairtok.train.GRP
 import argparse
 import dataclasses
 
-from .data import LANG_PROFILES, make_synthetic_parallel_groups
-from .oldi_data import (
-    LANGS,
-    load_all_training_groups,
-    load_bouquet_dev,
-    load_flores_plus,
-    load_oldi_seed,
-    load_smol_groups,
-)
-from .train import GRPOConfig, GRPOTrainer, _report_collapse
-from .vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
+from common.cli_data import DATA_SOURCES, load_groups
+from common.oldi_data import load_bouquet_dev
+from common.reporting import report_collapse
+from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
 
-DATA_SOURCES = ["synthetic", "oldi_seed", "flores_dev", "smol", "all"]
+from .train import GRPOConfig, GRPOTrainer
 
 # Extra clarifying text for fields whose semantics aren't obvious from
 # "(GRPOConfig.field, default: X)" alone -- merged into the auto-generated help.
@@ -80,40 +73,8 @@ def _config_from_args(args):
     return GRPOConfig(**kwargs)
 
 
-def _load_groups(args):
-    if args.langs is None:
-        langs = None
-    elif args.langs == "all":
-        langs = "all"
-    else:
-        langs = args.langs.split(",")
-
-    if langs == "all" and args.data_source in ("synthetic", "smol"):
-        raise ValueError(
-            f"--langs all isn't supported for --data-source {args.data_source} "
-            "(synthetic has a fixed toy panel; smol needs a per-language-file rescan -- see oldi_data.py)"
-        )
-
-    if args.data_source == "synthetic":
-        groups = make_synthetic_parallel_groups(400, langs=langs or list(LANG_PROFILES), seed=args.seed)
-    elif args.data_source == "oldi_seed":
-        groups = load_oldi_seed(langs=langs or LANGS)
-    elif args.data_source == "flores_dev":
-        groups = load_flores_plus(split="dev", langs=langs or LANGS)
-    elif args.data_source == "smol":
-        groups = load_smol_groups(langs=langs or [l for l in LANGS if l != "eng"])
-    elif args.data_source == "all":
-        groups = load_all_training_groups(langs=langs or LANGS)
-    else:
-        raise ValueError(f"unknown data source: {args.data_source}")
-
-    if args.num_groups is not None:
-        groups = groups[: args.num_groups]
-    return groups
-
-
 def _load_eval_groups(cfg, args):
-    """BOUQuET dev (see fairtok.oldi_data) -- disjoint from every training source
+    """BOUQuET dev (see common.oldi_data) -- disjoint from every training source
     (oldi_seed/flores_plus/smol), so this is genuine held-out data for
     fairtok.train.GRPOTrainer.evaluate, not a slice of what the policy trains on.
     Only 6 of the 9-language panel (BOUQUET_LANGS); kas/mni/nqo aren't in BOUQuET
@@ -133,13 +94,13 @@ def _load_eval_groups(cfg, args):
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     cfg = _config_from_args(args)
-    train_groups = _load_groups(args)
+    train_groups = load_groups(args)
     eval_groups = _load_eval_groups(cfg, args)
 
     print(f"data_source={args.data_source} groups={len(train_groups)}\n{cfg}\n")
     trainer = GRPOTrainer(cfg, train_groups, eval_dataset=eval_groups)
     policy, token_freq, final_vocab, target_rate = trainer.train()
-    _report_collapse(token_freq, final_vocab)
+    report_collapse(token_freq, final_vocab)
 
     entries = vocab_with_stats(token_freq, cfg.vocab_size)
 

@@ -1,13 +1,16 @@
-"""Two-stage fixed-vocabulary extraction.
+"""Two-stage fixed-vocabulary extraction, shared by every tokenizer in this repo.
 
 The RL loop never enforces V_MAX in-loop (that would make the reward nonstationary --
 see the fixed-vocab-size discussion). Instead it trains against a compression-rate
 target, and the hard vocabulary budget is applied once, after training, by keeping the
-V_MAX most frequent distinct byte spans seen across all languages.
+V_MAX most frequent distinct byte spans seen across all languages. The differentiable
+baselines (magnet/flexitokens/manta) don't have this nonstationary-reward concern at
+all, but use the exact same two-stage extraction anyway so every tokenizer's final
+vocabulary is produced identically and is directly comparable.
 
 Spans are byte strings, so `Counter` keys them by content already -- there is no
 arbitrary id to accidentally alias two spans onto, which is the invariant that keeps
-this immune to Duplication-BPE-style gaming (see fairtok.policy.spans_from_boundaries).
+this immune to Duplication-BPE-style gaming (see common.bytes_utils.spans_from_boundaries).
 """
 
 import json
@@ -17,7 +20,7 @@ from collections import Counter
 def _bytes_to_unicode():
     """The GPT-2 / HuggingFace byte-level BPE trick: map every byte value 0-255
     to its own printable unicode character, so any byte string (including one
-    that isn't valid UTF-8 on its own -- our policy can place a boundary in the
+    that isn't valid UTF-8 on its own -- a boundary policy can place a cut in the
     middle of a multi-byte character) becomes a safe, reversible, JSON-writable
     string. Same scheme `vocab.json` uses in a real HF byte-level tokenizer."""
     bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("\xa1"), ord("\xac") + 1)) + list(

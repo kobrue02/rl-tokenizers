@@ -9,7 +9,7 @@ that couldn't be fully verified):
     so efficiency is exactly 0.0.
 """
 
-from fairtok.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 
 
 def test_renyi_efficiency_uniform_is_one():

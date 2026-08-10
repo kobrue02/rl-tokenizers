@@ -1,13 +1,19 @@
 """FlexiTokens-style differentiable byte-level tokenizer.
 
-A from-scratch, CLEAN-ROOM reimplementation of the architecture described in the
-FlexiTokens paper (ACL Findings 2026, https://aclanthology.org/2026.findings-acl.848.pdf).
-No reference implementation was consulted: the official repo
-(github.com/skai-research/flexitokens) ships with no LICENSE file, so it defaults to
-all-rights-reserved copyright and was deliberately never cloned, opened, or read while
-writing this. Everything below is derived from the paper's own prose/equations only.
-Every place where the paper's abstract-level description under-specifies a concrete
-mechanism, this file makes an explicit, documented choice -- search for "JUDGMENT CALL".
+Architecture described in the FlexiTokens paper (ACL Findings 2026,
+https://aclanthology.org/2026.findings-acl.848.pdf). The official repo
+(github.com/skai-research/flexitokens) ships with no LICENSE file, so this was
+originally built as a from-scratch, clean-room reimplementation from the paper's
+prose/equations alone, with the reference repo deliberately never opened. That has
+since changed: the project owner explicitly authorized reusing code from that repo
+(it's public, intended for research reuse), so the downsample/upsample segment-
+pooling step (common.dynamic_pooling) is now DIRECTLY REUSED from the reference's
+src/model/shortening.py -- see that module's own docstring. Everything else here
+(BoundaryPredictor, TransformerStage, boundary_hinge_loss, the per-language band
+derivation in train.py) remains this project's own code, derived from the paper's
+description, not the reference implementation's. Every place where the paper's
+abstract-level description under-specifies a concrete mechanism, this file makes
+an explicit, documented choice -- search for "JUDGMENT CALL".
 
 -------------------------------------------------------------------------------------
 SCALE-DOWN NOTICE: the paper trains 126M-388M parameter models on ~56B bytes of data.
@@ -36,22 +42,22 @@ Architecture (U-Net-shaped, byte-in / byte-out):
          boundary = hard - soft.detach() + soft
      At inference (`deterministic=True`, see flexitokens/segment.py) no noise is
      sampled at all -- `soft` is just sigmoid(logit), thresholded the same way.
-  4. Downsample: mean-pool the "pre" hidden states within each predicted segment.
-     Segment ids come from an EXCLUSIVE cumulative sum of the (detached, hardened)
-     boundary tensor -- JUDGMENT CALL: shifted right by one position first, so a
-     boundary AT position t closes the segment CONTAINING t. This matches
-     fairtok.policy.spans_from_boundaries's own convention exactly (boundary=1 at
-     position t means "this byte ends a token"), so induced spans behave
-     identically whether they came from fairtok's GRU policy or this model. See
-     `compute_segment_ids` below. Pooling itself is one `scatter_add_` call --
-     no Python loop over positions or segments.
+  4. Downsample (common.dynamic_pooling.downsample, directly reused from the
+     reference implementation): mean-pool the "pre" hidden states within each
+     predicted segment via a dense, differentiable (B, T, S) assignment matrix
+     built from the straight-through boundary tensor via a cumulative sum --
+     boundary=1 at position t means "this byte ends a token," matching
+     common.bytes_utils.spans_from_boundaries's own convention exactly, so
+     induced spans behave identically whether they came from fairtok's GRU
+     policy or this model.
   5. A "mid" stack of causal transformer layers on the pooled (shorter) sequence.
-  6. Upsample: gather each pooled segment's representation back out to every byte
-     position that segment covers (the exact inverse of step 4's scatter), add it
-     as a residual to the ORIGINAL "pre" hidden state (so byte-local detail lost by
-     mean-pooling isn't gone for good), run a "post" stack of causal transformer
-     layers over the full byte length again, and project to a 256-way next-byte
-     softmax.
+  6. Upsample (common.dynamic_pooling.upsample, same source): broadcast each
+     pooled segment's representation back out to every byte position that
+     segment covers, one-segment-shifted for causal safety (see that module's
+     docstring), add it as a residual to the ORIGINAL "pre" hidden state (so
+     byte-local detail lost by mean-pooling isn't gone for good), run a "post"
+     stack of causal transformer layers over the full byte length again, and
+     project to a 256-way next-byte softmax.
 
 Loss = next-byte cross-entropy (standard, teacher-forced byte-level LM loss) + a
 per-language HINGE/RANGE boundary-rate loss (`boundary_hinge_loss` below). This loss
@@ -77,26 +83,24 @@ queries from ever attending those fake slots. A key_padding_mask is only needed 
 NON-causal (bidirectional) attention, which this model deliberately never uses --
 next-byte prediction requires strict left-to-right causality at every stage anyway.
 
-JUDGMENT CALL -- gradient path into the boundary predictor. Segment ids (step 4) are
-plain integers used as scatter/gather indices, and integer indices carry no
-gradient. That means the reconstruction (next-byte) loss's gradient does NOT flow
-back into WHICH positions get grouped together -- only into the CONTENT of the
-representations that get pooled (via h_pre) and, downstream, into the boundary
-predictor's weights only through whatever path the straight-through boundary tensor
-itself participates in directly. In this implementation that direct path is exactly
-`boundary_hinge_loss`: it consumes the continuous straight-through `boundaries`
-tensor (not the integer segment ids), so it IS the primary training signal shaping
-boundary placement. A fully soft/continuous assignment matrix (as opposed to hard
-integer segment ids) could let the reconstruction loss shape boundaries too, but
-that is a heavier design not specified by the architecture description this file
-implements from (which explicitly calls for a cumsum-based integer segment id +
-scatter-mean), so it is not attempted here.
+Gradient path into the boundary predictor: since downsample/upsample build their
+assignment matrix directly from the continuous straight-through `boundaries`
+tensor (never detached to integer segment ids), the reconstruction (next-byte)
+loss's gradient flows through the POOLING ITSELF back into the boundary
+predictor's weights, not just through `boundary_hinge_loss`'s direct use of
+`boundaries`. Both channels shape boundary placement now. (An earlier version of
+this file hardened boundaries into integer scatter/gather indices, which severed
+the pooling-gradient channel and left the hinge loss as the only path -- see
+common.dynamic_pooling's own docstring for why the direct-reuse version doesn't
+have that limitation.)
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
+
+from common.dynamic_pooling import downsample, upsample
 
 BYTE_VOCAB_SIZE = 256
 
@@ -169,49 +173,19 @@ class BoundaryPredictor(nn.Module):
         return self.net(h).squeeze(-1)  # (B, T) raw logits
 
 
-def compute_segment_ids(boundaries):
-    """boundaries: (B,T) 0/1-valued tensor where boundaries[b,t]==1 means position t
-    is the LAST byte of its segment -- matches fairtok.policy.spans_from_boundaries's
-    convention exactly (see this module's docstring, point 4).
-
-    Segment id for position t = number of boundaries strictly BEFORE t (an exclusive
-    prefix sum), computed by shifting boundaries right by one position first, then
-    taking an ordinary inclusive cumsum. Position 0 is always segment 0; if
-    boundaries[b,0]==1 (position 0 closes its own segment), position 1 starts fresh
-    at segment 1.
-
-    Detaches and casts to long: integer indices are inherently non-differentiable,
-    so this is deliberately NOT part of the differentiable graph -- see this
-    module's docstring for what that implies for where boundary-predictor gradients
-    actually come from."""
-    b = boundaries.detach().to(torch.long)
-    shifted = torch.cat([torch.zeros_like(b[:, :1]), b[:, :-1]], dim=1)
-    return torch.cumsum(shifted, dim=1)
-
-
-def segment_mean_pool(hidden, segment_ids, valid_mask, num_segments):
-    """Vectorized scatter-mean: hidden (B,T,D), segment_ids (B,T) int in
-    [0, num_segments), valid_mask (B,T) float/bool marking real (non-pad) positions.
-
-    Padded positions are excluded from BOTH the running sum and the count via
-    valid_mask, not merely given a harmless index -- otherwise a segment
-    containing the last few real bytes of a sequence (if no boundary happened to
-    fall exactly on the sequence's last real byte) would have zero-valued padding
-    positions silently averaged into its mean, pulling every trailing segment
-    quietly toward zero regardless of what real content it actually contains.
-
-    Returns pooled: (B, num_segments, D)."""
-    B, T, D = hidden.shape
-    device = hidden.device
-    vmask = valid_mask.to(hidden.dtype)
-    masked_hidden = hidden * vmask.unsqueeze(-1)
-
-    pooled_sum = torch.zeros(B, num_segments, D, device=device, dtype=hidden.dtype)
-    counts = torch.zeros(B, num_segments, device=device, dtype=hidden.dtype)
-    idx = segment_ids.unsqueeze(-1).expand(-1, -1, D)
-    pooled_sum.scatter_add_(1, idx, masked_hidden)
-    counts.scatter_add_(1, segment_ids, vmask)
-    return pooled_sum / counts.clamp(min=1.0).unsqueeze(-1)
+def _seg_valid_mask(hard_boundaries, valid_mask, num_pooled_slots):
+    """Which of downsample()'s (B, S+1) pooled slots are real segments for each
+    batch item, vs. padding slots that exist only because ANOTHER sequence in
+    this batch needed more segments. Slot 0 (the null segment prepended by
+    common.dynamic_pooling.downsample) is always real. A batch item's own real
+    segment count is exactly how many boundaries it fired among its REAL
+    (non-pad) positions -- segments fill in order 0..count-1 with no gaps, so
+    "slot index < count" is exactly "slot is real" for that item."""
+    real_segment_count = (hard_boundaries * valid_mask).sum(dim=1, keepdim=True)  # (B, 1)
+    slot_idx = torch.arange(num_pooled_slots - 1, device=hard_boundaries.device).unsqueeze(0)  # (1, S)
+    real_slots = slot_idx < real_segment_count  # (B, S)
+    null_slot = torch.ones(hard_boundaries.size(0), 1, dtype=torch.bool, device=hard_boundaries.device)
+    return torch.cat([null_slot, real_slots], dim=1)  # (B, S+1)
 
 
 def next_byte_loss(logits, byte_ids, valid_mask):
@@ -311,6 +285,10 @@ class FlexiTokensModel(nn.Module):
 
         self.pre = TransformerStage(d_model, nhead, num_pre_layers, dim_feedforward, dropout)
         self.boundary_predictor = BoundaryPredictor(d_model)
+        self.null_group = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)  # segment-0
+        # placeholder for common.dynamic_pooling.downsample/upsample -- see that
+        # module's docstring for why upsample needs something to feed the first
+        # real segment's own byte positions with, causally.
         self.mid = TransformerStage(d_model, nhead, num_mid_layers, dim_feedforward, dropout)
         self.post = TransformerStage(d_model, nhead, num_post_layers, dim_feedforward, dropout)
         self.byte_head = nn.Linear(d_model, BYTE_VOCAB_SIZE)
@@ -322,8 +300,7 @@ class FlexiTokensModel(nn.Module):
         sigmoid threshold with no noise (inference -- see flexitokens/segment.py).
 
         Returns a dict: logits (B,T,256), boundaries (B,T) straight-through 0/1
-        (gradiented), valid_mask (B,T) float, segment_ids (B,T) long,
-        num_segments (int)."""
+        (gradiented), valid_mask (B,T) float."""
         B, T = byte_ids.shape
         device = byte_ids.device
 
@@ -342,28 +319,26 @@ class FlexiTokensModel(nn.Module):
         boundaries = hard - soft.detach() + soft  # straight-through estimator
 
         valid_mask = (torch.arange(T, device=device).unsqueeze(0) < lengths.unsqueeze(1)).float()
+        # Padded positions must never register as boundaries: downsample/upsample
+        # (below) size their pooled sequence directly off boundaries.sum(-1).max(),
+        # with no separate masking option, so a phantom boundary sampled in the
+        # padding region (nothing stops the boundary predictor's MLP from firing
+        # there -- it just sees whatever byte value 0-padding happens to embed as)
+        # would inflate the pooled segment count for no real content. Multiplying
+        # AFTER the straight-through construction keeps the gradient path to
+        # boundary_logits intact for real positions while making the forward value
+        # exactly 0 in the pad region -- same fix magnet/model.py's forward uses.
+        boundaries = boundaries * valid_mask
 
-        # Dynamic segment count: only allocate as many pooled slots as the batch's
-        # busiest REAL sequence actually needs, not a flat T -- a fixed T would
-        # force the "mid" transformer stage to attend over mostly-empty slots for
-        # every sequence shorter or coarser than the batch's longest/finest one.
-        raw_segment_ids = compute_segment_ids(boundaries)
-        masked_ids = torch.where(valid_mask.bool(), raw_segment_ids, torch.zeros_like(raw_segment_ids))
-        num_segments = int(masked_ids.max().item()) + 1 if T > 0 else 1
-        # Clamp (not just for real positions -- for ALL positions, including
-        # padding): padded positions can have segment ids past num_segments-1
-        # since padding can carry its own (meaningless) predicted boundaries, and
-        # scatter/gather need every index in-bounds regardless of whether the
-        # value at that position is ever used. Their contribution is exactly zero
-        # either way (valid_mask=0 zeroes them out in segment_mean_pool), so
-        # clamping them into range is safe and changes no real segment's value.
-        segment_ids = raw_segment_ids.clamp(max=num_segments - 1)
-
-        pooled = segment_mean_pool(h_pre, segment_ids, valid_mask, num_segments)  # (B, S, D)
-        mid_out = self.mid(pooled)  # (B, S, D)
-
-        gathered = torch.gather(mid_out, 1, segment_ids.unsqueeze(-1).expand(-1, -1, self.d_model))
-        upsampled = gathered + h_pre  # residual: byte-local detail the mean-pool discarded
+        pooled = downsample(boundaries, h_pre, self.null_group)  # (B, S+1, D)
+        mid_out = self.mid(pooled)  # (B, S+1, D)
+        upsampled = upsample(boundaries, mid_out) + h_pre  # residual: byte-local
+        # detail the mean-pool discarded. No key_padding_mask needed for `self.mid`
+        # even though pooled sequences vary in real length across the batch -- see
+        # this module's top-level docstring's key_padding_mask judgment call: causal
+        # masking alone suffices because segment index is non-decreasing in byte
+        # position, so a real segment's index is always lower than any padding-only
+        # segment index another (longer/finer) sequence in the batch needed.
 
         post_out = self.post(upsampled)
         logits = self.byte_head(post_out)
@@ -372,6 +347,4 @@ class FlexiTokensModel(nn.Module):
             "logits": logits,
             "boundaries": boundaries,
             "valid_mask": valid_mask,
-            "segment_ids": segment_ids,
-            "num_segments": num_segments,
         }

@@ -11,15 +11,15 @@ inside the model itself.
 
 import torch
 
-from fairtok.policy import bytes_to_tensor, spans_from_boundaries
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
 
 @torch.no_grad()
 def induce_boundaries(model, byte_seq, script, device="cpu"):
     """byte_seq: a 1-D LongTensor of byte ids, or a str/bytes (UTF-8 encoded on
-    the fly via fairtok.policy.bytes_to_tensor). Returns a list[int] of 0/1
+    the fly via common.bytes_utils.bytes_to_tensor). Returns a list[int] of 0/1
     boundary decisions, one per byte position -- exactly the format
-    fairtok.policy.spans_from_boundaries expects, so it can be passed straight
+    common.bytes_utils.spans_from_boundaries expects, so it can be passed straight
     through (see induce_spans below, which does exactly that)."""
     if isinstance(byte_seq, (bytes, str)):
         byte_seq = bytes_to_tensor(byte_seq, device)
@@ -39,7 +39,7 @@ def induce_boundaries(model, byte_seq, script, device="cpu"):
 
 
 def induce_spans(model, byte_seq, script, device="cpu"):
-    """Induced boundaries -> byte spans, reusing fairtok.policy.spans_from_boundaries
+    """Induced boundaries -> byte spans, reusing common.bytes_utils.spans_from_boundaries
     unchanged -- this is what makes a MAGNET-tokenized corpus a drop-in input to
     every existing fairtok tool (vocab.py's frequency-table builders,
     metrics.py's compression/fairness metrics) with zero adapter code."""

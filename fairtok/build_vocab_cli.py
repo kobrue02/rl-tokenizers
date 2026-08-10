@@ -17,7 +17,7 @@ def _iter_corpus(path):
     """Generic line-delimited text loader: one document per line, from a single
     file or every .txt file in a directory. A stand-in for whatever the real
     pretraining-corpus loader will be -- this project only has the Phase 1
-    fairness-training data wired up (see fairtok.oldi_data), not the actual
+    fairness-training data wired up (see common.oldi_data), not the actual
     downstream pretraining corpus, which lives outside this repo."""
     p = Path(path)
     files = [p] if p.is_file() else sorted(f for f in p.iterdir() if f.suffix == ".txt")

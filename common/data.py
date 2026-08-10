@@ -6,7 +6,9 @@ profile: high-resource profiles reuse a small, highly repetitive alphabet
 low-resource profiles draw from a larger, less repetitive byte range (the
 same structural disadvantage non-Latin/low-resource scripts have). This
 makes cross-language compression disparity a real, nontrivial signal on
-toy data, so the fairness reward has something to actually push against.
+toy data, so any fairness-aware or per-language reward/loss has something to
+actually push against -- used by every tokenizer in this repo's smoke tests
+(fairtok, magnet, flexitokens, manta), not just one of them.
 
 TODO(real data): replace with a loader over FLORES+ (train)/OLDI Seed/SMOL
 SmolSent+SmolDoc, once the Tier-1/Tier-2 language lists are confirmed
@@ -38,8 +40,9 @@ def _gen_sentence(profile, min_len, max_len, rng):
 
 
 def make_synthetic_parallel_groups(num_groups, langs=None, min_len=20, max_len=60, seed=0):
-    """Each group is one "parallel sentence": a dict {lang: byte_seq} -- the
-    unit GRPO's group-relative baseline is computed over."""
+    """Each group is one "parallel sentence": a dict {lang: byte_seq} -- the same
+    shape real data (common.oldi_data) produces, and the unit any group-relative
+    training signal (e.g. fairtok's GRPO baseline) is computed over."""
     rng = random.Random(seed)
     langs = langs or list(LANG_PROFILES)
     return [

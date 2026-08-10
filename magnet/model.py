@@ -1,12 +1,18 @@
 """MAGNET-style neural tokenizer baseline (heavily scaled down).
 
 Ahia et al., "MAGNET: Improving the Multilingual Fairness of Language Models"
-(arxiv.org/abs/2407.08818). The reference implementation this project studied
-(and cloned into a scratch dir for reading, MIT licensed) lives at
+(arxiv.org/abs/2407.08818). The reference implementation (MIT licensed) lives at
 github.com/orevaahia/magnet-tokenization -- specifically src/magnet.py
-(MagnetTransformerLM, BoundaryPredictor) and src/shortening.py (the
-downsample/upsample einsum trick). This module is an independent, much smaller
-reimplementation of the same *mechanism*, not a port of that code.
+(MagnetTransformerLM, BoundaryPredictor) and src/shortening.py. The overall
+architecture below (embed -> pre_layers -> boundary predictor -> downsample ->
+shortened_layers -> upsample -> post_layers -> byte head) is an independent,
+much smaller reimplementation of that paper's design, scaled to this project's
+compute budget -- but the downsample/upsample segment-pooling step itself
+(common.dynamic_pooling) is DIRECTLY REUSED from src/shortening.py (reused with
+the project owner's explicit authorization; see also flexitokens/model.py,
+which shares the exact same file -- both papers build on the same "dynamic
+pooling" lineage). Everything else (BoundaryPredictor, TransformerBlock, the
+per-script wiring) is this project's own code, not a port.
 
 Architecture (one forward call handles ONE script's sub-batch -- see
 MagnetTrainer in train.py for why a mixed-script training batch gets split by
@@ -19,7 +25,7 @@ script before calling this):
      up to and including the position in question, never later ones).
   3. `BoundaryPredictor` (one per SCRIPT, not per language -- languages that
      share a script, e.g. arz_Arab/kas_Arab, share one predictor and one target
-     boundary rate; see fairtok.oldi_data.LANG_SCRIPT, which is where the
+     boundary rate; see common.oldi_data.LANG_SCRIPT, which is where the
      lang -> script mapping is read from in train.py): a small MLP maps each
      position's hidden state to a boundary logit, sigmoid to a probability, then
      Gumbel-sigmoid (RelaxedBernoulli) reparameterized sampling gives a *soft*
@@ -30,18 +36,21 @@ script before calling this):
          boundary = hard - soft.detach() + soft
      (Bengio et al. 2013's straight-through trick; this is the exact formula the
      cloned reference implementation's BoundaryPredictor.forward uses too.)
-  4. Downsample: mean-pool hidden states within each predicted segment (a run of
-     bytes between consecutive boundaries), computed as a batched, vectorized op
-     via `torch.cumsum` over the boundary tensor to get a per-position segment id,
-     then `scatter_add_`/divide-by-count to get the per-segment mean -- no Python
-     loop over positions or segments.
+  4. Downsample (common.dynamic_pooling.downsample, ported directly from the
+     reference's shortening.py): mean-pool hidden states within each predicted
+     segment via a dense, differentiable (B, T, S) assignment matrix built from
+     the straight-through boundary tensor -- gradient flows through the pooling
+     WEIGHTS themselves, not just the pooled values, which a hard-integer-index
+     scatter/gather approach (this module's own earlier version) cannot do.
   5. `shortened_layers`: a few more CAUSAL transformer blocks, now over the much
      shorter per-segment sequence.
-  6. Upsample: broadcast each pooled segment's (post-shortened-layers)
-     representation back out to its member byte positions, via a `gather` on a
-     SHIFTED segment id (see "causal safety" below) + a residual add of the
-     pre_layers output, then `post_layers` (a couple more causal transformer
-     blocks) and a linear head to a 256-way byte softmax.
+  6. Upsample (common.dynamic_pooling.upsample, same file): broadcast each
+     pooled segment's (post-shortened-layers) representation back out to its
+     member byte positions via the same kind of differentiable assignment
+     matrix (transposed), one-segment-shifted for causal safety (see below) +
+     a residual add of the pre_layers output, then `post_layers` (a couple
+     more causal transformer blocks) and a linear head to a 256-way byte
+     softmax.
 
 Causal safety of the downsample/upsample round-trip (this is the one part of
 the mechanism that is easy to get subtly wrong, so it's worth spelling out):
@@ -50,17 +59,14 @@ segment's own byte positions would leak information from the END of the
 segment into predicting the byte immediately after its EARLIER positions (e.g.
 if segment = bytes [3,4,5] with a boundary at 5, giving position 3 that
 segment's pooled representation lets it "see" byte 5 when predicting byte 4 --
-a genuine leak, since byte 5 comes after byte 4). The fix, taken directly from
-the cloned reference implementation's shortening.py (see the comment there:
-"i-th group can be upsampled only to the tokens from (i+1)-th group, otherwise
-there's a leak"), is a one-segment SHIFT: a position receives the pooled
-representation of the most recently *closed* segment strictly before it, never
-its own (possibly still-open, possibly just-closed) segment. A learned
-`null_segment` parameter fills in for positions before any segment has closed
-yet (there's nothing causally-safe to give them otherwise). Concretely this
-falls out of computing two slightly different cumulative sums of the same
-boundary tensor -- see `_segment_ids` below -- rather than needing separate
-bookkeeping.
+a genuine leak, since byte 5 comes after byte 4). The fix, built into
+common.dynamic_pooling.downsample/upsample directly (see the comment there:
+"segment i's pooled representation is broadcast only to segment i+1's byte
+positions, never its own"), is a one-segment SHIFT: a position receives the
+pooled representation of the most recently *closed* segment strictly before
+it, never its own (possibly still-open, possibly just-closed) segment. The
+learned `null_segment` parameter (passed as `downsample`'s `null_group` arg)
+fills in for positions before any segment has closed yet.
 
 Loss (computed in train.py, not here): next-byte cross-entropy on the
 reconstructed byte sequence, plus a per-script boundary-rate term -- the
@@ -90,25 +96,21 @@ reproduction of the paper's 100M+ parameter model trained on 10B+ bytes):
   - No temperature annealing: the paper/reference anneal the Gumbel-sigmoid
     temperature over training (sharpening the relaxation as training
     progresses); here it's a fixed hyperparameter (MagnetConfig.boundary_temperature).
-  - Segment routing is NOT fully differentiable end-to-end the way the
-    reference implementation's dense einsum assignment matrix is (there,
-    gradient flows both through which hidden vectors get pooled/broadcast AND
-    through the pooling/broadcast WEIGHTS themselves, since the assignment
-    matrix is built from arithmetic on the straight-through boundary tensor).
-    Here, segment ids are cast to integers for `scatter_add_`/`gather` indexing,
-    which severs the gradient path through the routing decision itself --
-    only the POOLED VALUES (and, separately and directly, the boundary-rate
-    loss acting on the raw straight-through boundary tensor) carry gradient
-    back to the boundary predictor. This is a real reduction in signal
-    richness, but the boundary-rate loss is precisely the mechanism the task
-    specifies for shaping the predictor, so boundary placement is still
-    trained end-to-end -- just through one channel instead of two.
   - Attention implementation: plain `nn.MultiheadAttention` with a causal mask
     plus a padding mask, not a hand-rolled relative-attention kernel.
+
+(Segment routing WAS a simplification here -- an earlier version cast segment
+ids to integers for scatter_add_/gather indexing, which severed the gradient
+path through the routing decision itself, leaving the boundary-rate loss as
+the only channel training the boundary predictor. Now that downsample/upsample
+are directly reused from the reference implementation, gradient flows through
+the pooling weights too, matching the reference exactly -- see point 4/6 above.)
 """
 
 import torch
 import torch.nn as nn
+
+from common.dynamic_pooling import downsample, upsample
 
 
 class TransformerBlock(nn.Module):
@@ -193,82 +195,19 @@ class BoundaryPredictor(nn.Module):
         return logits, probs, boundary
 
 
-def _segment_ids(boundary):
-    """boundary: (B, T) straight-through 0/1 float tensor (1 = this position is
-    the LAST byte of its segment). Returns (down_id, up_id), each (B, T) long:
-
-    down_id[b, t] = which segment position t belongs to, FOR POOLING (0-indexed,
-    counting only segments already started). Subtracting `boundary` itself before
-    the cast means the position that CLOSES a segment is still counted as a
-    member of the segment it's closing, not bumped into the next one.
-
-    up_id[b, t] = which pooled segment (in the null-prepended pooled sequence,
-    see downsample_mean) gets BROADCAST to position t, for UPSAMPLING. NOT
-    subtracting `boundary` this time is exactly the one-segment shift that keeps
-    the whole thing causally safe (see module docstring): up_id lags down_id by
-    one step at every already-closed boundary, which is what makes position t
-    receive the most recently CLOSED segment strictly before it, rather than its
-    own (possibly not-yet-closed) segment.
-
-    Casting to `.long()` for indexing is where gradient stops flowing through
-    the routing decision itself (integer tensors can't require grad) -- see the
-    "segment routing is NOT fully differentiable" simplification in the module
-    docstring. The raw `boundary` tensor (still carrying the straight-through
-    gradient) is used separately and directly by the boundary-rate loss in
-    train.py, which is the channel that actually trains the boundary predictor.
-    """
-    cum = torch.cumsum(boundary, dim=1)
-    down_id = (cum - boundary).long()
-    up_id = cum.long()
-    return down_id, up_id
-
-
-def downsample_mean(hidden, boundary, null_segment):
-    """Mean-pool `hidden` (B, T, D) within each segment induced by `boundary`
-    (B, T), vectorized via scatter-add + divide-by-count (no Python loop over
-    positions or segments). Returns (pooled_with_null, seg_valid):
-
-      pooled_with_null: (B, S+1, D) -- index 0 is `null_segment` (a learned
-      parameter, broadcast to every batch item), indices 1..S are the S real
-      segments' mean-pooled hidden states, where S = the largest number of
-      segments any sequence in this batch actually has. Shorter sequences (fewer
-      segments) get zero-padding in the extra slots -- `seg_valid` marks which
-      slots are real, for the shortened_layers' padding mask.
-
-      seg_valid: (B, S+1) bool, True for real (non-padding) segment slots. Slot
-      0 (the null segment) is always valid.
-    """
-    B, T, D = hidden.shape
-    down_id, _ = _segment_ids(boundary)
-    n_segments = int(down_id.max().item()) + 1 if T > 0 else 0
-
-    pooled = hidden.new_zeros(B, n_segments, D)
-    counts = hidden.new_zeros(B, n_segments)
-    idx = down_id.unsqueeze(-1).expand(-1, -1, D)
-    pooled.scatter_add_(1, idx, hidden)
-    counts.scatter_add_(1, down_id, hidden.new_ones(B, T))
-    pooled = pooled / counts.clamp_min(1.0).unsqueeze(-1)
-
-    null = null_segment.expand(B, 1, D)
-    pooled_with_null = torch.cat([null, pooled], dim=1)  # (B, S+1, D)
-    seg_valid = torch.cat([torch.ones(B, 1, dtype=torch.bool, device=hidden.device), counts > 0], dim=1)
-    return pooled_with_null, seg_valid
-
-
-def upsample_broadcast(pooled_with_null, boundary):
-    """Broadcast each pooled segment back out to its member byte positions, via
-    a `gather` on the SHIFTED segment id (see `_segment_ids`'s up_id -- this is
-    what keeps this causally safe rather than a plain per-segment repeat).
-    pooled_with_null: (B, S+1, D). boundary: (B, T). Returns (B, T, D)."""
-    _, up_id = _segment_ids(boundary)
-    up_id = up_id.clamp(max=pooled_with_null.size(1) - 1)  # defensive: up_id's own
-    # max is bounded by the number of boundaries actually fired in THIS sequence,
-    # which is <= n_segments computed from down_id, so this should never actually
-    # clamp anything in practice -- kept as a cheap guard against off-by-one drift
-    # rather than a load-bearing correctness fix.
-    D = pooled_with_null.size(-1)
-    idx = up_id.unsqueeze(-1).expand(-1, -1, D)
-    return torch.gather(pooled_with_null, 1, idx)
+def _seg_valid_mask(hard_boundaries, valid, num_pooled_slots):
+    """Which of downsample()'s (B, S+1) pooled slots are real segments for each
+    batch item, vs. padding slots that exist only because ANOTHER sequence in
+    this batch needed more segments. Slot 0 (the null segment, see
+    common.dynamic_pooling.downsample) is always real. A batch item's own real
+    segment count is exactly how many boundaries it fired among its REAL (non-
+    padding) positions -- segments are filled in order 0..count-1 with no gaps,
+    so "slot index < count" is exactly "slot is real" for that item."""
+    real_segment_count = (hard_boundaries * valid).sum(dim=1, keepdim=True)  # (B, 1)
+    slot_idx = torch.arange(num_pooled_slots - 1, device=hard_boundaries.device).unsqueeze(0)  # (1, S)
+    real_slots = slot_idx < real_segment_count  # (B, S)
+    null_slot = torch.ones(hard_boundaries.size(0), 1, dtype=torch.bool, device=hard_boundaries.device)
+    return torch.cat([null_slot, real_slots], dim=1)  # (B, S+1)
 
 
 class MagnetModel(nn.Module):
@@ -365,13 +304,14 @@ class MagnetModel(nn.Module):
         valid = (~key_padding_mask).float()
         hard_boundaries = hard_boundaries * valid
 
-        pooled_with_null, seg_valid = downsample_mean(x, hard_boundaries, self.null_segment)
+        pooled_with_null = downsample(hard_boundaries, x, self.null_segment)
         pooled_with_null = self.down_ln(pooled_with_null)
+        seg_valid = _seg_valid_mask(hard_boundaries, valid, pooled_with_null.size(1))
         seg_padding_mask = ~seg_valid
         for layer in self.shortened_layers:
             pooled_with_null = layer(pooled_with_null, key_padding_mask=seg_padding_mask)
 
-        upsampled = upsample_broadcast(pooled_with_null, hard_boundaries)
+        upsampled = upsample(hard_boundaries, pooled_with_null)
         h = upsampled + x  # residual connection -- see module docstring step 6
         for layer in self.post_layers:
             h = layer(h, key_padding_mask=key_padding_mask)
