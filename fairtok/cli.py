@@ -6,8 +6,7 @@ import argparse
 import dataclasses
 
 from common.bytes_utils import bytes_to_tensor
-from common.cli_data import DATA_SOURCES, load_groups
-from common.oldi_data import load_bouquet_dev
+from common.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
 from common.reporting import (
     fertility_by_lang,
     report_collapse,
@@ -27,8 +26,6 @@ _HELP_OVERRIDES = {
     "with a raw step count instead (bypasses epoch semantics entirely)",
     "num_train_epochs": "1 epoch = 1 full shuffled traversal of every loaded group, however many "
     "steps that takes given per_device_train_batch_size -- not a fixed step count",
-    "eval_steps": "0 disables; > 0 automatically loads BOUQuET dev as held-out eval data "
-    "(skipped with a warning for --data-source synthetic, which has none)",
 }
 
 
@@ -103,33 +100,11 @@ def _config_from_args(args):
     return GRPOConfig(**kwargs)
 
 
-def _load_eval_groups(cfg, args):
-    """BOUQuET dev (see common.oldi_data) -- disjoint from every training source
-    (oldi_seed/flores_plus/smol), so this is genuine held-out data for
-    fairtok.train.GRPOTrainer.evaluate, not a slice of what the policy trains on.
-    Only 6 of the 9-language panel (BOUQUET_LANGS); kas/mni/nqo aren't in BOUQuET
-    at all -- see oldi_data.load_flores_devtest_fallback for a fallback covering
-    those, not wired in here since the user asked specifically for BOUQuET."""
-    if cfg.eval_steps <= 0:
-        return None
-    if args.data_source == "synthetic":
-        print(
-            "warning: --eval-steps > 0 but --data-source synthetic has no real "
-            "BOUQuET counterpart -- skipping periodic evaluation"
-        )
-        return None
-    eval_groups = load_bouquet_dev()
-    print(
-        f"loaded {len(eval_groups)} BOUQuET dev groups for periodic evaluation (every {cfg.eval_steps} steps)"
-    )
-    return eval_groups
-
-
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     cfg = _config_from_args(args)
     train_groups = load_groups(args)
-    eval_groups = _load_eval_groups(cfg, args)
+    eval_groups = load_bouquet_dev_for_training(args)
 
     print(f"data_source={args.data_source} groups={len(train_groups)}\n{cfg}\n")
     trainer = GRPOTrainer(cfg, train_groups, eval_dataset=eval_groups)

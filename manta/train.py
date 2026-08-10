@@ -33,13 +33,19 @@ import torch
 from tqdm.auto import tqdm
 
 from common.data import LANG_PROFILES, make_synthetic_parallel_groups
+from common.eval_common import (
+    eval_wandb_log_dict,
+    evaluate_on_groups,
+    report_eval,
+    sample_eval_groups,
+)
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from .model import MantaModel, next_byte_loss
-from .segment import boundaries_from_assignment
+from .segment import boundaries_from_assignment, induce_spans
 
 
 @dataclasses.dataclass
@@ -93,6 +99,11 @@ class MantaConfig:
     wandb_project: str = "manta"
     run_name: str = ""
 
+    max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
+    # each epoch-boundary evaluation (see MantaTrainer.train) -- 0 scores every
+    # loaded dev group. Kept small since this runs periodically DURING training,
+    # not once at the end (see evaluate.py, which always scores everything).
+
 
 def _avg_span_length(token_freq):
     total_spans = sum(sum(c.values()) for c in token_freq.values())
@@ -119,9 +130,11 @@ class MantaTrainer:
     (train() also returns them as a tuple, mirroring GRPOTrainer's
     return-and-store-on-self convention)."""
 
-    def __init__(self, args: MantaConfig, train_dataset):
+    def __init__(self, args: MantaConfig, train_dataset, eval_groups=None):
         self.args = args
         self.train_dataset = train_dataset
+        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
+        # epoch-boundary evaluation (see common.cli_data.load_bouquet_dev_for_training)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.token_freq = None
@@ -157,6 +170,25 @@ class MantaTrainer:
         print(f"model parameters: {model.num_parameters():,}")
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
+        # Unlike magnet/flexitokens/fanta's random-with-replacement group sampling,
+        # MANTa already has a REAL epoch boundary (the reshuffle-when-exhausted
+        # logic in the loop below) -- steps_per_epoch here is exact, not a rough
+        # periodic-checkpoint interval.
+        steps_per_epoch = max(1, len(flat_items) // cfg.per_device_train_batch_size)
+        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+
+        # Built ONCE against the live `model` object -- a closure over `model`
+        # keeps seeing its CURRENT weights on every call (Python closures capture
+        # the object reference, not a snapshot). MANTa's induce_spans is
+        # language-agnostic at inference time (no script arg, unlike magnet's).
+        eval_induce_fn_by_lang = None
+        if self.eval_groups:
+            eval_langs = {lang for group in self.eval_groups for lang in group}
+            eval_induce_fn_by_lang = {
+                lang: (lambda raw, m=model, d=device: induce_spans(m, raw, d))
+                for lang in eval_langs
+            }
+
         run = None
         if cfg.use_wandb:
             import wandb
@@ -169,6 +201,8 @@ class MantaTrainer:
                     "num_train_groups": len(self.train_dataset),
                     "num_flattened_sequences": len(flat_items),
                     "model_parameters": model.num_parameters(),
+                    "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
+                    "steps_per_epoch": steps_per_epoch,
                 },
             )
 
@@ -281,6 +315,18 @@ class MantaTrainer:
                         },
                         step=step,
                     )
+
+            # Epoch-boundary held-out eval against the CURRENT (still-training)
+            # model -- BOUQuET dev, capped by max_eval_samples since this runs
+            # periodically, unlike evaluate.py's one-time full scoring.
+            if eval_induce_fn_by_lang and step % steps_per_epoch == 0:
+                eval_sample = sample_eval_groups(
+                    self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
+                )
+                eval_results = evaluate_on_groups(eval_induce_fn_by_lang, eval_sample)
+                report_eval(eval_results, label=f"manta step {step} dev")
+                if run is not None:
+                    run.log(eval_wandb_log_dict(eval_results), step=step)
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         if cfg.output_dir:

@@ -1,9 +1,9 @@
 """Shared --data-source/--langs/--num-groups CLI data-loading logic, used
 identically by every tokenizer's CLI in this repo (fairtok.cli, magnet.cli,
-flexitokens.cli, manta.cli) -- extracted here so it's implemented exactly once
-instead of copy-pasted per tokenizer, which is exactly the kind of drift risk
-("did I update all four when the data sources changed?") a shared module exists
-to remove.
+flexitokens.cli, manta.cli, fanta.cli) -- extracted here so it's implemented
+exactly once instead of copy-pasted per tokenizer, which is exactly the kind of
+drift risk ("did I update all five when the data sources changed?") a shared
+module exists to remove.
 """
 
 from .data import LANG_PROFILES, make_synthetic_parallel_groups
@@ -54,3 +54,33 @@ def load_groups(args):
     if args.num_groups is not None:
         groups = groups[: args.num_groups]
     return groups
+
+
+def load_bouquet_dev_for_training(args):
+    """BOUQuET dev (see common.oldi_data.load_bouquet_dev) -- disjoint from every
+    --data-source load_groups above trains on, used for periodic in-training
+    evaluation at epoch boundaries (see each tokenizer's own Trainer.train()).
+    Skipped (returns None) for --data-source synthetic, which has no real
+    BOUQuET counterpart. Loads EVERY language BOUQuET covers ("all"), not just
+    this project's 9-language panel -- common.eval_common.evaluate_on_groups
+    already skips languages the training model has no entry for.
+
+    Reserve BOUQuET's TEST split (common.oldi_data.load_bouquet_test) for final
+    reported numbers, via each tokenizer's own evaluate.py
+    --eval-data-source bouquet_test, run once training is done -- using dev
+    here, repeatedly, across an entire training run's worth of epoch checks, is
+    exactly the exploratory/tuning use dev exists for.
+    """
+    if args.data_source == "synthetic":
+        print(
+            "warning: --data-source synthetic has no real BOUQuET counterpart -- "
+            "skipping periodic epoch-boundary evaluation"
+        )
+        return None
+    from .oldi_data import load_bouquet_dev
+
+    eval_groups = load_bouquet_dev("all")
+    print(
+        f"loaded {len(eval_groups)} BOUQuET dev groups for periodic epoch-boundary evaluation"
+    )
+    return eval_groups

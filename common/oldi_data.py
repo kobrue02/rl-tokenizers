@@ -80,18 +80,19 @@ def _load_jsonl(path):
         return [json.loads(line) for line in f if line.strip()]
 
 
-def _list_all_stems(repo_id, dir_prefix):
+def _list_all_stems(repo_id, dir_prefix, ext=".jsonl"):
     """Every lang[_Script[_variant]] stem this dataset natively offers in
     `dir_prefix`, discovered from the repo's file listing rather than our
     curated LANG_SCRIPT table -- this is what lets a group use everything a
-    fully N-way parallel source (oldi_seed, flores_plus) actually has, instead
-    of just the 9-language reporting panel."""
+    fully N-way parallel source (oldi_seed, flores_plus, bouquet) actually has,
+    instead of just the 9-language reporting panel. `ext` defaults to ".jsonl"
+    (oldi_seed/flores_plus's own layout); bouquet's own files are ".parquet"."""
     prefix = dir_prefix + "/"
     files = list_repo_files(repo_id, repo_type="dataset")
     return sorted(
-        f[len(prefix) : -len(".jsonl")]
+        f[len(prefix) : -len(ext)]
         for f in files
-        if f.startswith(prefix) and f.endswith(".jsonl")
+        if f.startswith(prefix) and f.endswith(ext)
     )
 
 
@@ -155,23 +156,77 @@ def load_smol_groups(langs=None):
     return groups
 
 
-def load_bouquet_dev(langs=BOUQUET_LANGS):
-    """paragraph_level/dev, joined by `par_id`. Each {lang}.parquet has src_lang == lang
-    and tgt_lang == eng_Latn fixed as a reference pivot -- so `src_text` is this file's
-    actual per-language content, and `tgt_text` is a constant English gloss (the same
-    string appears in every language's file for a given par_id, which is NOT the
-    per-language sentence -- easy bug to make, caught by comparing files directly)."""
+def _load_bouquet_split(split, langs):
+    """Shared implementation for load_bouquet_dev/load_bouquet_test. Combines
+    BOTH paragraph_level and sentence_level for the given split -- matching
+    BOUQuET's own HF "default" config (data_files: "data/*_level/{split}/*.parquet"),
+    not just paragraph_level alone. This roughly doubles row count per language
+    (e.g. English dev: 120 paragraph_level + 504 sentence_level rows) and is what
+    the dataset card's own stated totals (~162k dev / ~272k test rows, summed
+    across all 259 languages) refer to -- paragraph_level alone is only a fraction
+    of that.
+
+    Joined by `uniq_id`, NOT `par_id`: paragraph_level rows use `uniq_id == par_id`
+    (e.g. "P001"), sentence_level rows use a finer `uniq_id` per sentence within
+    that paragraph (e.g. "P001-S1", "P001-S2", ...) -- disjoint value spaces (no
+    collision risk), so paragraph- and sentence-level rows can be combined into
+    ONE dict per language and intersected across languages exactly like any other
+    parallel source in this module. Each row (whether a whole paragraph or a
+    single sentence) becomes its own independent group -- this is a
+    concatenation of the two levels' rows, not a merge of a sentence into its
+    parent paragraph's entry.
+
+    Each {lang}.parquet has src_lang == lang and tgt_lang == eng_Latn fixed as a
+    reference pivot -- so `src_text` is this file's actual per-language content,
+    and `tgt_text` is a constant English gloss (the same string appears in every
+    language's file for a given uniq_id, which is NOT the per-language sentence
+    -- easy bug to make, caught by comparing files directly).
+
+    BOUQUET_LANGS (the default) is NOT "BOUQuET's native language scope" -- the
+    real dataset covers 259 languages (confirmed via list_repo_files); it's just
+    the subset overlapping this project's own 9-language training panel.
+    langs="all" discovers and loads every language BOUQuET actually offers for
+    this split, keyed by its full lang_Script stem -- same "all" convention
+    _load_ngram_parallel (load_oldi_seed/load_flores_plus) already uses.
+    common.eval_common's evaluate_on_groups already skips languages a given
+    checkpoint has no entry for, so passing "all" here is always safe.
+    """
     import pyarrow.parquet as pq
 
-    per_lang = {}
-    for lang in langs:
-        path = _download(
-            "facebook/bouquet", f"data/paragraph_level/dev/{LANG_SCRIPT[lang]}.parquet"
+    if langs == "all":
+        stems = _list_all_stems(
+            "facebook/bouquet", f"data/paragraph_level/{split}", ext=".parquet"
         )
-        table = pq.read_table(path).to_pylist()
-        per_lang[lang] = {r["par_id"]: r["src_text"] for r in table}
+        lang_to_stem = dict(zip(stems, stems))
+    else:
+        lang_to_stem = {lang: LANG_SCRIPT[lang] for lang in langs}
+
+    per_lang = {}
+    for lang, stem in tqdm(
+        lang_to_stem.items(), desc=f"loading facebook/bouquet/{split}", unit="lang"
+    ):
+        rows = []
+        for level in ("paragraph_level", "sentence_level"):
+            path = _download(
+                "facebook/bouquet", f"data/{level}/{split}/{stem}.parquet"
+            )
+            rows.extend(pq.read_table(path).to_pylist())
+        per_lang[lang] = {r["uniq_id"]: r["src_text"] for r in rows}
     common_ids = sorted(set.intersection(*(set(d) for d in per_lang.values())))
-    return [{lang: per_lang[lang][i] for lang in langs} for i in common_ids]
+    return [{lang: per_lang[lang][i] for lang in lang_to_stem} for i in common_ids]
+
+
+def load_bouquet_dev(langs=BOUQUET_LANGS):
+    return _load_bouquet_split("dev", langs)
+
+
+def load_bouquet_test(langs=BOUQUET_LANGS):
+    """The genuinely held-out counterpart to load_bouquet_dev -- reserve this for
+    FINAL reported numbers; use load_bouquet_dev for any hyperparameter tuning or
+    exploratory comparison, to avoid the equivalent of test-set leakage from
+    repeatedly checking results against the same held-out data decisions get
+    tuned against."""
+    return _load_bouquet_split("test", langs)
 
 
 def load_flores_devtest_fallback(langs=FLORES_FALLBACK_LANGS):

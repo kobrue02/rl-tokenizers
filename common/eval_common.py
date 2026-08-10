@@ -91,3 +91,41 @@ def report_eval(results, label=""):
             f"renyi={results['renyi'][lang]:.4f}  "
             f"fertility={results['fertility'].get(lang, 0.0):.2f}"
         )
+
+
+def sample_eval_groups(eval_groups, max_eval_samples, seed=0):
+    """Cap eval_groups to a random sample of max_eval_samples (without
+    replacement), for periodic IN-TRAINING dev checks -- scoring hundreds of
+    BOUQuET groups every epoch boundary in a long run is wasteful when it's just
+    a training-time signal, not the final reported number (see evaluate.py's
+    --eval-data-source bouquet_test, which always scores everything).
+    max_eval_samples=0, or eval_groups already shorter than it, means score
+    everything -- no sampling applied."""
+    if not max_eval_samples or len(eval_groups) <= max_eval_samples:
+        return eval_groups
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(eval_groups), size=max_eval_samples, replace=False)
+    return [eval_groups[i] for i in idx]
+
+
+def eval_wandb_log_dict(results, prefix="eval"):
+    """Flatten an evaluate_on_groups result dict into a wandb.log-able dict,
+    matching fairtok.train.GRPOTrainer's own eval/* naming convention for its
+    (separately implemented, but equivalent-in-spirit) periodic held-out eval."""
+    log_dict = {
+        f"{prefix}/avg_compression": results["avg_compression"],
+        f"{prefix}/gini": results["gini"],
+    }
+    log_dict.update(
+        {f"{prefix}/renyi/{lang}": v for lang, v in results["renyi"].items()}
+    )
+    log_dict.update(
+        {
+            f"{prefix}/compression/{lang}": v
+            for lang, v in results["per_lang_compression"].items()
+        }
+    )
+    log_dict.update(
+        {f"{prefix}/fertility/{lang}": v for lang, v in results["fertility"].items()}
+    )
+    return log_dict

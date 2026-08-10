@@ -65,7 +65,7 @@ class GRPOConfig:
     """Named after Hugging Face/TRL's Trainer + Config pairing (e.g. trl.GRPOTrainer +
     trl.GRPOConfig) -- field names below mirror transformers.TrainingArguments /
     tokenizers-library conventions wherever a clean equivalent exists (max_steps,
-    num_train_epochs, learning_rate, save_steps, eval_steps, per_device_*_batch_size,
+    num_train_epochs, learning_rate, save_steps, per_device_*_batch_size,
     vocab_size, hidden_size, num_hidden_layers, run_name, output_dir), so anyone
     coming from HF tooling recognizes the shape immediately. Fields with no HF
     equivalent (gamma, lambda_*, group_sample_size, bpe_*) are this project's own
@@ -161,16 +161,20 @@ class GRPOConfig:
     # batched_sample_rollout (see policy.py) batches every sequence in a training step
     # together at each time step, so this now has real work to parallelize on GPU --
     # unlike the original one-sequence-at-a-time sample_rollout it replaced.
-    eval_steps: int = 0  # 0 disables periodic held-out evaluation; only takes effect if
-    # GRPOTrainer is actually given eval_dataset (see fairtok.cli, which loads BOUQuET
-    # dev for this) -- unlike fairness_refresh_steps's running training-batch stats,
-    # this scores the CURRENT policy, deterministically, against data it never trains
-    # on, so it's not subject to the same small-sample noise (see window_compressions_by_lang
-    # below) or to the risk of the training signal itself being what's being measured.
+    # Held-out evaluation runs automatically at every epoch boundary (step %
+    # steps_per_epoch == 0, see train() below) whenever GRPOTrainer is actually
+    # given eval_dataset (see fairtok.cli, which loads BOUQuET dev for this
+    # unless --data-source synthetic) -- no separate on/off step-count flag;
+    # unlike fairness_refresh_steps's running training-batch stats, this scores
+    # the CURRENT policy, deterministically, against data it never trains on, so
+    # it's not subject to the same small-sample noise (see
+    # window_compressions_by_lang below) or to the risk of the training signal
+    # itself being what's being measured.
     max_eval_samples: int = (
-        0  # 0 = evaluate every loaded eval group; cap this if the eval
+        20  # cap on how many eval groups get scored per epoch boundary; 0 = every
     )
-    # set is large enough that scoring it every eval_steps steps meaningfully slows training.
+    # loaded eval group. Kept small since this runs periodically DURING training,
+    # not once at the end.
     per_device_eval_batch_size: int = (
         32  # chunk size for the batched eval rollout -- kept
     )
@@ -320,7 +324,7 @@ class GRPOTrainer:
     to carry across calls; it just scores every language in every selected group once).
     Languages are read per-group (group.keys()), not from a fixed global list, since
     different sources can contribute differently-sized groups (see common.oldi_data).
-    eval_dataset, if given, is scored by .evaluate() every args.eval_steps steps
+    eval_dataset, if given, is scored by .evaluate() at every epoch boundary
     during .train() (see that method) -- held out, never trained on.
     """
 
@@ -885,11 +889,13 @@ class GRPOTrainer:
                         )
                         run.log(log_dict, step=step)
 
-                # Held-out evaluation: independently gated by its own eval_steps (not tied
-                # to fairness_refresh_steps) since this is a much heavier operation (a full
-                # deterministic rollout over eval_groups) than reading the running
-                # token_freq table costs -- typically wanted less often.
-                if eval_groups and cfg.eval_steps and step % cfg.eval_steps == 0:
+                # Held-out evaluation: runs at every epoch boundary (not tied to
+                # fairness_refresh_steps, and not a separately configurable step
+                # count -- matches magnet/flexitokens/manta/fanta's own
+                # steps_per_epoch-based dev-eval cadence) since this is a much
+                # heavier operation (a full deterministic rollout over eval_groups)
+                # than reading the running token_freq table costs.
+                if eval_groups and step % steps_per_epoch == 0:
                     eval_metrics = self.evaluate(eval_groups)
                     eval_per_lang = " ".join(
                         f"{lang}={v:.2f}"

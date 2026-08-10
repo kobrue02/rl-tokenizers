@@ -16,6 +16,7 @@ force-fitting HF naming that doesn't apply.
 """
 
 import dataclasses
+import math
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -24,6 +25,12 @@ import torch.nn.functional as F
 from tqdm.auto import tqdm
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.eval_common import (
+    eval_wandb_log_dict,
+    evaluate_on_groups,
+    report_eval,
+    sample_eval_groups,
+)
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.oldi_data import LANG_SCRIPT
 from common.reporting import collapse_stats
@@ -31,6 +38,7 @@ from common.vocab import top_k_by_frequency
 
 from .inference import save_checkpoint
 from .model import MagnetModel
+from .segment import induce_spans
 
 
 def lang_to_script(lang):
@@ -51,6 +59,37 @@ def lang_to_script(lang):
     the real script-sharing structure only real language metadata has."""
     if lang in LANG_SCRIPT:
         return LANG_SCRIPT[lang].split("_")[-1]
+    return lang
+
+
+def eval_lang_to_script(lang):
+    """Like lang_to_script, but ALSO resolves language keys that are already
+    full lang_Script stems (e.g. "arz_Arab", "aar_Latn") -- exactly what
+    common.oldi_data.load_bouquet_dev/load_bouquet_test's langs="all" mode
+    returns (see common.cli_data.load_bouquet_dev_for_training, which always
+    uses "all"), unlike training data's plain codes (which lang_to_script's own
+    LANG_SCRIPT-lookup path already handles). Without this, every BOUQuET
+    "all"-mode language silently fails lang_to_script's LANG_SCRIPT lookup,
+    falls through to returning the language key UNCHANGED (the whole stem,
+    e.g. "arz_Arab"), which then never matches any real script key in
+    model.boundary_predictors -- producing an EMPTY (falsy) eval closure dict
+    and silently skipping periodic/held-out evaluation entirely. Confirmed as
+    a real, not just theoretical, bug: an epoch-boundary eval that should have
+    fired 3 times in a 25-step test run fired zero times before this fix.
+
+    Falls back to lang_to_script's own convention (the whole string as its own
+    one-off script bucket) if `lang` has no underscore at all -- this never
+    actually collides with lang_to_script's SYNTHETIC-placeholder-profile
+    fallback (e.g. "high_resource", which DOES contain an underscore but isn't
+    a real stem): eval_groups only ever comes from real BOUQuET data or is
+    None (see load_bouquet_dev_for_training's synthetic skip), never from
+    common.data's synthetic profiles, so that collision risk can't occur in
+    practice -- but is called out here since it's the reason this is a
+    separate function rather than a change to lang_to_script itself."""
+    if lang in LANG_SCRIPT:
+        return lang_to_script(lang)
+    if "_" in lang:
+        return lang.rsplit("_", 1)[-1]
     return lang
 
 
@@ -116,6 +155,12 @@ class MagnetConfig:
     wandb_project: str = "magnet"
     run_name: str = ""
 
+    max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
+    # each epoch-boundary evaluation (see MagnetTrainer.train) -- 0 scores every
+    # loaded dev group. Kept small by default since this runs periodically DURING
+    # training, not once at the end (see evaluate.py, which always scores
+    # everything -- that one-time cost is fine; paying it every epoch isn't).
+
 
 class MagnetTrainer:
     """Construct with args + train_groups (a plain list of dicts {lang: text},
@@ -125,9 +170,11 @@ class MagnetTrainer:
     returns them, plus a per-step loss trace and boundary-rate trace, as a
     tuple for convenience -- see run_smoke_test below for the shape)."""
 
-    def __init__(self, args: MagnetConfig, train_groups):
+    def __init__(self, args: MagnetConfig, train_groups, eval_groups=None):
         self.args = args
         self.train_groups = train_groups
+        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
+        # epoch-boundary evaluation entirely (see common.cli_data.load_bouquet_dev_for_training)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.token_freq = None
@@ -175,6 +222,39 @@ class MagnetTrainer:
         }
         print(f"boundary priors={priors}")
 
+        # "Epoch" isn't a real traversal here either (see train loop's own comment
+        # on random-with-replacement sampling) -- steps_per_epoch is just used as a
+        # periodic-checkpoint INTERVAL (one epoch's worth of steps) for the BOUQuET
+        # dev eval below, not a guarantee every group is visited exactly once.
+        steps_per_epoch = max(
+            1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
+        )
+        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+
+        # Built ONCE against the live `model` object -- a closure over `model`
+        # keeps seeing its CURRENT weights on every call (Python closures capture
+        # the object reference, not a snapshot), so this doesn't need rebuilding
+        # each time the epoch boundary is hit. Languages whose script this model
+        # never saw during training (eval_lang_to_script(lang) not in
+        # model.boundary_predictors) are excluded here, same policy
+        # magnet/evaluate.py already applies for its own post-hoc eval. Uses
+        # eval_lang_to_script, NOT lang_to_script -- eval_groups' language keys
+        # are BOUQuET "all"-mode stems (e.g. "arz_Arab"), not the plain codes
+        # lang_to_script's LANG_SCRIPT lookup expects (see eval_lang_to_script's
+        # own docstring for why this distinction is load-bearing, not cosmetic).
+        eval_induce_fn_by_lang = None
+        if self.eval_groups:
+            eval_langs = {lang for group in self.eval_groups for lang in group}
+            eval_induce_fn_by_lang = {
+                lang: (
+                    lambda raw, m=model, s=eval_lang_to_script(lang), d=device: induce_spans(
+                        m, raw, s, d
+                    )
+                )
+                for lang in eval_langs
+                if eval_lang_to_script(lang) in model.boundary_predictors
+            }
+
         run = None
         if cfg.use_wandb:
             import wandb
@@ -187,6 +267,8 @@ class MagnetTrainer:
                     "scripts": scripts,
                     "boundary_priors": priors,
                     "num_train_groups": len(self.train_groups),
+                    "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
+                    "steps_per_epoch": steps_per_epoch,
                 },
             )
 
@@ -329,6 +411,21 @@ class MagnetTrainer:
                     },
                     step=step,
                 )
+
+            # Epoch-boundary held-out eval against the CURRENT (still-training)
+            # model -- BOUQuET dev, capped by max_eval_samples since this runs
+            # periodically, unlike evaluate.py's one-time full scoring. Model is
+            # left in eval mode only for the duration of the induce_spans calls
+            # inside evaluate_on_groups (each call flips it back via
+            # model.train(was_training) internally -- see magnet/segment.py).
+            if eval_induce_fn_by_lang and step % steps_per_epoch == 0:
+                eval_sample = sample_eval_groups(
+                    self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
+                )
+                eval_results = evaluate_on_groups(eval_induce_fn_by_lang, eval_sample)
+                report_eval(eval_results, label=f"magnet step {step} dev")
+                if run is not None:
+                    run.log(eval_wandb_log_dict(eval_results), step=step)
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         self.token_freq = token_freq

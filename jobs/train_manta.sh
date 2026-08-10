@@ -65,18 +65,26 @@ uv sync
 mkdir -p logs checkpoints vocab_out
 
 # 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
+CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/manta_${SLURM_JOB_ID}.pt"
 echo "Starting MANTa training with args: $@"
 python3 train.py manta \
     --use-wandb \
     --wandb-project manta \
     --run-name "slurm-${SLURM_JOB_ID}" \
-    --output-dir "$PROJECT_ROOT/checkpoints/manta_${SLURM_JOB_ID}.pt" \
+    --output-dir "$CHECKPOINT_PATH" \
     --vocab-out "$PROJECT_ROOT/vocab_out/manta_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/manta_vocab_stats_${SLURM_JOB_ID}.json" \
     "$@"
 
 if [ $? -eq 0 ]; then
     echo "Training complete."
+    # Held-out BOUQuET DEV was already scored periodically during training (see
+    # manta/train.py's epoch-boundary eval); this final job scores the
+    # genuinely held-out TEST split exactly once, using the checkpoint training
+    # just wrote -- no --dependency needed since training already finished by
+    # the time this line runs.
+    echo "Submitting final test-set evaluation job..."
+    sbatch jobs/evaluate.sh manta --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test
 else
     echo "Training failed." && exit 1
 fi

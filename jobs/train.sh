@@ -70,18 +70,26 @@ mkdir -p logs checkpoints vocab_out
 # each other (mirrors the %x_%j convention already used for the log files above).
 # Flags after these defaults come from sbatch's "$@" and can override any of them
 # (argparse takes the last occurrence of a repeated flag).
+CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/policy_${SLURM_JOB_ID}.pt"
 echo "Starting training with args: $@"
 python3 train.py fairtok \
     --use-wandb \
     --wandb-project fairtok \
     --run-name "slurm-${SLURM_JOB_ID}" \
-    --output-dir "$PROJECT_ROOT/checkpoints/policy_${SLURM_JOB_ID}.pt" \
+    --output-dir "$CHECKPOINT_PATH" \
     --vocab-out "$PROJECT_ROOT/vocab_out/vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/vocab_stats_${SLURM_JOB_ID}.json" \
     "$@"
 
 if [ $? -eq 0 ]; then
     echo "Training complete."
+    # Held-out BOUQuET DEV was already scored periodically during training (see
+    # fairtok/train.py's epoch-boundary eval); this final job scores the
+    # genuinely held-out TEST split exactly once, using the checkpoint training
+    # just wrote -- no --dependency needed since training already finished by
+    # the time this line runs.
+    echo "Submitting final test-set evaluation job..."
+    sbatch jobs/evaluate.sh fairtok --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test
 else
     echo "Training failed." && exit 1
 fi

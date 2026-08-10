@@ -26,6 +26,7 @@ difference from MantaConfig's field of the same name.
 """
 
 import dataclasses
+import math
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -34,13 +35,19 @@ from tqdm.auto import tqdm
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.data import make_synthetic_parallel_groups
+from common.eval_common import (
+    eval_wandb_log_dict,
+    evaluate_on_groups,
+    report_eval,
+    sample_eval_groups,
+)
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.parity import compute_lang_parity_ratios
 from common.reporting import avg_span_length, collapse_stats, report_collapse
 from common.vocab import top_k_by_frequency
 
 from .model import MantaModel, fairness_loss, next_byte_loss, rate_anchor_loss
-from .segment import boundaries_from_assignment
+from .segment import boundaries_from_assignment, induce_spans
 
 
 @dataclasses.dataclass
@@ -110,6 +117,11 @@ class FantaConfig:
     wandb_project: str = "fanta"
     run_name: str = ""
 
+    max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
+    # each epoch-boundary evaluation (see FantaTrainer.train) -- 0 scores every
+    # loaded dev group. Kept small since this runs periodically DURING training,
+    # not once at the end (see evaluate.py, which always scores everything).
+
 
 def _pad_batch(tensors, device):
     lengths = torch.tensor(
@@ -128,9 +140,11 @@ class FantaTrainer:
     then read .model / .token_freq / .vocab off the instance (train() also returns
     them, plus loss/fairness-loss traces, as a tuple for convenience)."""
 
-    def __init__(self, args: FantaConfig, train_groups):
+    def __init__(self, args: FantaConfig, train_groups, eval_groups=None):
         self.args = args
         self.train_groups = train_groups
+        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
+        # epoch-boundary evaluation (see common.cli_data.load_bouquet_dev_for_training)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
         self.token_freq = None
@@ -176,6 +190,27 @@ class FantaTrainer:
             for lang, ratio in parity_ratio_by_lang.items()
         }
 
+        # "Epoch" here means one pass' worth of steps (per_device_train_batch_size
+        # counts GROUPS, see class docstring) -- used as the periodic-checkpoint
+        # INTERVAL for the BOUQuET dev eval below, matching every other trainer's
+        # own steps_per_epoch convention in this repo.
+        steps_per_epoch = max(
+            1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
+        )
+        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+
+        # Built ONCE against the live `model` object -- a closure over `model`
+        # keeps seeing its CURRENT weights on every call (Python closures capture
+        # the object reference, not a snapshot). FANTA's induce_spans is
+        # identical to MANTa's -- language-agnostic at inference time.
+        eval_induce_fn_by_lang = None
+        if self.eval_groups:
+            eval_langs = {lang for group in self.eval_groups for lang in group}
+            eval_induce_fn_by_lang = {
+                lang: (lambda raw, m=model, d=device: induce_spans(m, raw, d))
+                for lang in eval_langs
+            }
+
         run = None
         if cfg.use_wandb:
             import wandb
@@ -188,6 +223,8 @@ class FantaTrainer:
                     "target_rate_by_lang": target_rate_by_lang,
                     "num_train_groups": len(self.train_groups),
                     "model_parameters": model.num_parameters(),
+                    "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
+                    "steps_per_epoch": steps_per_epoch,
                 },
             )
 
@@ -299,6 +336,18 @@ class FantaTrainer:
                         },
                         step=step,
                     )
+
+            # Epoch-boundary held-out eval against the CURRENT (still-training)
+            # model -- BOUQuET dev, capped by max_eval_samples since this runs
+            # periodically, unlike evaluate.py's one-time full scoring.
+            if eval_induce_fn_by_lang and step % steps_per_epoch == 0:
+                eval_sample = sample_eval_groups(
+                    self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
+                )
+                eval_results = evaluate_on_groups(eval_induce_fn_by_lang, eval_sample)
+                report_eval(eval_results, label=f"fanta step {step} dev")
+                if run is not None:
+                    run.log(eval_wandb_log_dict(eval_results), step=step)
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         if cfg.output_dir:

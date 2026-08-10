@@ -4,19 +4,25 @@ shape; see that module's docstring for the BOUQuET-as-held-out-set rationale.
 MAGNET's induce_spans needs an extra `script` argument per language (its boundary
 predictor is per-SCRIPT, not per-language -- see magnet/segment.py, magnet/train.py's
 lang_to_script), which is the one real difference from fairtok/flexitokens/manta's
-own evaluate.py here.
+own evaluate.py here. BOUQuET's langs="all" mode keys groups by full lang_Script
+stem (e.g. "arz_Arab"), which lang_to_script's LANG_SCRIPT lookup can't resolve
+(only plain codes like "arz") -- eval_lang_to_script handles that; synthetic data
+still uses plain (if fake) profile names, so main() picks the resolver based on
+--eval-data-source rather than guessing from string shape (see
+eval_lang_to_script's own docstring for why that guess would be unsafe: "high_resource"
+also contains an underscore but isn't a real stem).
 """
 
 import argparse
 
 from common.data import make_synthetic_parallel_groups
 from common.eval_common import evaluate_on_groups, report_eval
-from common.oldi_data import load_bouquet_dev
+from common.oldi_data import load_bouquet_dev, load_bouquet_test
 from common.stability import sequences_by_lang_from_groups
 
 from .inference import load_checkpoint
 from .segment import induce_spans
-from .train import lang_to_script
+from .train import eval_lang_to_script, lang_to_script
 
 
 def build_arg_parser():
@@ -32,9 +38,11 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--eval-data-source",
-        choices=["bouquet", "synthetic"],
+        choices=["bouquet", "bouquet_test", "synthetic"],
         default="bouquet",
-        help="'bouquet' (default): BOUQuET dev, held out from every training source; "
+        help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
+        "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
+        "reported numbers, not repeated tuning checks; "
         "'synthetic': the placeholder corpus, for a quick sanity check with no network access",
     )
     parser.add_argument(
@@ -50,7 +58,11 @@ def build_arg_parser():
 def _load_eval_groups(args):
     if args.eval_data_source == "synthetic":
         return make_synthetic_parallel_groups(args.num_groups or 40)
-    groups = load_bouquet_dev()
+    # "all": every language BOUQuET covers, not just the 9-language panel --
+    # common.eval_common.evaluate_on_groups already skips languages this
+    # checkpoint has no entry for, so this is always safe.
+    loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
+    groups = loader("all")
     if args.num_groups:
         groups = groups[: args.num_groups]
     return groups
@@ -71,14 +83,17 @@ def main(argv=None):
     # entry in model.boundary_predictors -- skip them rather than erroring, same
     # policy as common.eval_common.evaluate_on_groups already applies to languages
     # missing from induce_fn_by_lang entirely.
+    script_of = (
+        lang_to_script if args.eval_data_source == "synthetic" else eval_lang_to_script
+    )
     induce_fn_by_lang = {
         lang: (
-            lambda raw, m=model, s=lang_to_script(lang), d=args.device: induce_spans(
+            lambda raw, m=model, s=script_of(lang), d=args.device: induce_spans(
                 m, raw, s, d
             )
         )
         for lang in sequences_by_lang
-        if lang_to_script(lang) in model.boundary_predictors
+        if script_of(lang) in model.boundary_predictors
     }
     results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
     report_eval(results, label="magnet")

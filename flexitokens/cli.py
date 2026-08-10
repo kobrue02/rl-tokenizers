@@ -9,7 +9,7 @@ by every tokenizer's CLI in this repo (fairtok, magnet, flexitokens, manta).
 import argparse
 import dataclasses
 
-from common.cli_data import DATA_SOURCES, load_groups
+from common.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
 from common.reporting import (
     fertility_by_lang,
     report_collapse,
@@ -80,9 +80,10 @@ def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     cfg = _config_from_args(args)
     train_groups = load_groups(args)
+    eval_groups = load_bouquet_dev_for_training(args)
 
     print(f"data_source={args.data_source} groups={len(train_groups)}\n{cfg}\n")
-    trainer = FlexiTokensTrainer(cfg, train_groups)
+    trainer = FlexiTokensTrainer(cfg, train_groups, eval_groups=eval_groups)
     model, token_freq, final_vocab, info = trainer.train()
     report_collapse(token_freq, final_vocab)
     _print_vocab_metrics(token_freq)
