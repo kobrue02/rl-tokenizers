@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=tokenizer_eval
+#SBATCH --partition=gpu_a100_il
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -12,10 +13,13 @@
 # Held-out BOUQuET evaluation for any trained checkpoint in this repo (fairtok/
 # magnet/flexitokens/manta) -- see evaluate.py's module docstring for the dispatch
 # pattern and common/eval_common.py for the shared scoring logic every tokenizer's
-# own evaluate.py uses. Unlike jobs/train*.sh, this needs no GPU and finishes in
-# seconds-to-minutes (a handful of forward passes over BOUQuET dev, not a training
-# loop) -- deliberately no --partition/--gres here; add
-# `#SBATCH --partition=...` above if this cluster requires an explicit CPU partition.
+# own evaluate.py uses. This needs no GPU and finishes in seconds-to-minutes (a
+# handful of forward passes over BOUQuET dev, not a training loop) -- the
+# --partition above reuses jobs/train*.sh's GPU partition purely because this
+# cluster has no default partition and errors without one specified; no --gres
+# here, so this doesn't actually request a GPU device, just a slot on that
+# partition. Swap to a CPU-only partition (`sinfo` lists what's available) if this
+# cluster has one and you want to free up GPU-partition queue slots for eval jobs.
 #
 # Usage:
 #   sbatch jobs/evaluate.sh fairtok --checkpoint checkpoints/policy_12345.pt
