@@ -26,6 +26,7 @@ here to count instead (see above).
 """
 
 import dataclasses
+import math
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -55,9 +56,16 @@ class MantaConfig:
     loop is structurally simpler -- no group/fairness/rate-consistency
     machinery to name fields for)."""
 
-    max_steps: int = 100  # fixed step count -- MANTa's smoke test (like fairtok's
-    # run_smoke_test) wants a small, predictable number of updates regardless of
-    # corpus size, not epoch-based semantics.
+    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
+    # (see MantaTrainer.train) -- matches fairtok.train.GRPOConfig's own
+    # max_steps/num_train_epochs convention; set explicitly to override with a
+    # raw step count instead (run_smoke_test below does exactly this, for a
+    # fixed, predictable number of updates regardless of corpus size).
+    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. Unlike
+    # magnet/flexitokens/fanta, MANTa's steps_per_epoch IS a real traversal
+    # boundary (this trainer reshuffles a full permutation of every flattened
+    # sequence once it's exhausted -- see the loop below), so "5 epochs" here
+    # really does mean 5 full passes over the corpus.
     per_device_train_batch_size: int = 8  # counts individual byte SEQUENCES (see
     # module docstring) -- NOT parallel-sentence groups, unlike GRPOConfig's field
     # of the same name.
@@ -175,7 +183,15 @@ class MantaTrainer:
         # logic in the loop below) -- steps_per_epoch here is exact, not a rough
         # periodic-checkpoint interval.
         steps_per_epoch = max(1, len(flat_items) // cfg.per_device_train_batch_size)
-        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+        total_steps = (
+            cfg.max_steps
+            if cfg.max_steps > 0
+            else math.ceil(cfg.num_train_epochs * steps_per_epoch)
+        )
+        print(
+            f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval) "
+            f"-> total_steps={total_steps} ({total_steps / steps_per_epoch:.2f} epochs)"
+        )
 
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
@@ -203,6 +219,7 @@ class MantaTrainer:
                     "model_parameters": model.num_parameters(),
                     "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
                     "steps_per_epoch": steps_per_epoch,
+                    "total_steps": total_steps,
                 },
             )
 
@@ -213,7 +230,7 @@ class MantaTrainer:
         token_freq = defaultdict(Counter)
         loss_trace = []
 
-        pbar = tqdm(range(cfg.max_steps), desc="training", unit="step")
+        pbar = tqdm(range(total_steps), desc="training", unit="step")
         postfix = {}
         for step in pbar:
             if pos + cfg.per_device_train_batch_size > len(order):

@@ -152,7 +152,16 @@ class FlexiTokensConfig:
     no GRPOConfig analogue keep their own domain-specific names, the same convention
     GRPOConfig itself uses for gamma/lambda_target/lambda_fair."""
 
-    max_steps: int = 100
+    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
+    # (see FlexiTokensTrainer.train) -- matches fairtok.train.GRPOConfig's own
+    # max_steps/num_train_epochs convention; set explicitly to override with a
+    # raw step count instead.
+    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. 1 "epoch"
+    # here is steps_per_epoch steps (see FlexiTokensTrainer.train) -- a periodic-
+    # checkpoint INTERVAL, not a guaranteed every-group-visited-once traversal
+    # (this trainer samples groups randomly WITHOUT replacement per step but
+    # doesn't track visitation ACROSS steps, unlike fairtok's shuffled
+    # DataLoader) -- so "5 epochs" means "5 * steps_per_epoch steps."
     per_device_train_batch_size: int = 8  # counts parallel-sentence GROUPS, not raw
     # byte sequences -- same meaning as GRPOConfig's field of the same name.
     learning_rate: float = 3e-3
@@ -253,7 +262,15 @@ class FlexiTokensTrainer:
         steps_per_epoch = max(
             1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
         )
-        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+        total_steps = (
+            cfg.max_steps
+            if cfg.max_steps > 0
+            else math.ceil(cfg.num_train_epochs * steps_per_epoch)
+        )
+        print(
+            f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval) "
+            f"-> total_steps={total_steps} ({total_steps / steps_per_epoch:.2f} epochs)"
+        )
 
         run = None
         if cfg.use_wandb:
@@ -270,6 +287,7 @@ class FlexiTokensTrainer:
                     "num_train_groups": len(self.train_groups),
                     "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
                     "steps_per_epoch": steps_per_epoch,
+                    "total_steps": total_steps,
                 },
             )
 
@@ -302,7 +320,7 @@ class FlexiTokensTrainer:
         token_freq = defaultdict(Counter)
         n_groups = len(self.train_groups)
 
-        pbar = tqdm(range(cfg.max_steps), desc="training", unit="step")
+        pbar = tqdm(range(total_steps), desc="training", unit="step")
         for step in pbar:
             batch_size = min(cfg.per_device_train_batch_size, n_groups)
             group_idx = rng.choice(n_groups, size=batch_size, replace=False)

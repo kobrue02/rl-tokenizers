@@ -64,7 +64,15 @@ class FantaConfig:
     needs multiple languages' compression rates in ONE forward pass.
     """
 
-    max_steps: int = 100
+    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
+    # (see FantaTrainer.train) -- matches fairtok.train.GRPOConfig's own
+    # max_steps/num_train_epochs convention; set explicitly to override with a
+    # raw step count instead.
+    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. 1 "epoch"
+    # here is steps_per_epoch steps (see FantaTrainer.train) -- a periodic-
+    # checkpoint INTERVAL, not a guaranteed every-group-visited-once traversal
+    # (this trainer samples groups randomly per step, same caveat as
+    # magnet/flexitokens) -- so "5 epochs" means "5 * steps_per_epoch steps."
     per_device_train_batch_size: int = 8  # counts GROUPS -- see class docstring.
     group_sample_size: int = 24  # cap languages rolled out per group per step,
     # regardless of how many a group actually offers -- same meaning as
@@ -197,7 +205,15 @@ class FantaTrainer:
         steps_per_epoch = max(
             1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
         )
-        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+        total_steps = (
+            cfg.max_steps
+            if cfg.max_steps > 0
+            else math.ceil(cfg.num_train_epochs * steps_per_epoch)
+        )
+        print(
+            f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval) "
+            f"-> total_steps={total_steps} ({total_steps / steps_per_epoch:.2f} epochs)"
+        )
 
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
@@ -225,6 +241,7 @@ class FantaTrainer:
                     "model_parameters": model.num_parameters(),
                     "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
                     "steps_per_epoch": steps_per_epoch,
+                    "total_steps": total_steps,
                 },
             )
 
@@ -233,7 +250,7 @@ class FantaTrainer:
         fairness_loss_trace = []
         n_groups = len(self.train_groups)
 
-        pbar = tqdm(range(cfg.max_steps), desc="training", unit="step")
+        pbar = tqdm(range(total_steps), desc="training", unit="step")
         postfix = {}
         for step in pbar:
             batch_size = min(cfg.per_device_train_batch_size, n_groups)

@@ -97,7 +97,18 @@ def eval_lang_to_script(lang):
 class MagnetConfig:
     """See module docstring for the naming-convention rationale."""
 
-    max_steps: int = 100
+    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
+    # (see MagnetTrainer.train) -- matches fairtok.train.GRPOConfig's own
+    # max_steps/num_train_epochs convention; set explicitly to override with a
+    # raw step count instead (bypasses epoch semantics entirely -- run_smoke_test
+    # below does exactly this, for a fixed small step count regardless of corpus
+    # size).
+    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. 1 "epoch"
+    # here is steps_per_epoch steps (see MagnetTrainer.train) -- a periodic-
+    # checkpoint INTERVAL, not a guaranteed every-group-visited-once traversal
+    # (this trainer samples groups randomly WITH replacement each step, unlike
+    # fairtok's shuffled DataLoader) -- so "5 epochs" means "5 * steps_per_epoch
+    # steps," not a literal 5 full passes with full coverage guarantees.
     per_device_train_batch_size: int = 8  # counts parallel-sentence GROUPS (like
     # GRPOConfig), which then expand to one flattened (lang, byte_seq) item per
     # language in each sampled group -- see MagnetTrainer.train.
@@ -229,7 +240,15 @@ class MagnetTrainer:
         steps_per_epoch = max(
             1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
         )
-        print(f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval)")
+        total_steps = (
+            cfg.max_steps
+            if cfg.max_steps > 0
+            else math.ceil(cfg.num_train_epochs * steps_per_epoch)
+        )
+        print(
+            f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval) "
+            f"-> total_steps={total_steps} ({total_steps / steps_per_epoch:.2f} epochs)"
+        )
 
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
@@ -269,6 +288,7 @@ class MagnetTrainer:
                     "num_train_groups": len(self.train_groups),
                     "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,
                     "steps_per_epoch": steps_per_epoch,
+                    "total_steps": total_steps,
                 },
             )
 
@@ -276,7 +296,7 @@ class MagnetTrainer:
         loss_trace = []
         boundary_rate_trace = []
 
-        pbar = tqdm(range(cfg.max_steps), desc="training", unit="step")
+        pbar = tqdm(range(total_steps), desc="training", unit="step")
         for step in pbar:
             # Plain random-with-replacement group sampling per step, rather than
             # GRPOTrainer's shuffled-epoch DataLoader machinery -- a deliberate
