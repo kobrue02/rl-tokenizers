@@ -23,10 +23,10 @@
 #   sbatch jobs/train_manta.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
 #   sbatch jobs/train_manta.sh --data-source oldi_seed --max-steps 2000   # quicker, single source
 #
-# All train_manta.py / manta.cli flags are forwarded directly -- see
-# `python train_manta.py --help`.
+# All train.py manta / manta.cli flags are forwarded directly -- see
+# `python train.py manta --help`.
 #
-# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see fairtok/oldi_data.py,
+# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/oldi_data.py,
 # reused here for data loading). Same HF_TOKEN handling as jobs/train.sh -- see below.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
@@ -57,7 +57,7 @@ mkdir -p logs checkpoints vocab_out
 
 # 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
 echo "Starting MANTa training with args: $@"
-python3 train_manta.py \
+python3 train.py manta \
     --output-dir "$PROJECT_ROOT/checkpoints/manta_${SLURM_JOB_ID}.pt" \
     --vocab-out "$PROJECT_ROOT/vocab_out/manta_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/manta_vocab_stats_${SLURM_JOB_ID}.json" \

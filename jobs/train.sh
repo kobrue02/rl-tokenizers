@@ -17,9 +17,10 @@
 #   sbatch jobs/train.sh --data-source all --langs all --num-train-epochs 3 --lambda-target 20.0 --vocab-size 50000
 #   sbatch jobs/train.sh --data-source oldi_seed --num-train-epochs 1   # quicker, single source
 #
-# All main.py / fairtok.cli flags are forwarded directly -- see `python main.py --help`.
+# All train.py fairtok / fairtok.cli flags are forwarded directly -- see
+# `python train.py fairtok --help`.
 #
-# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see fairtok/oldi_data.py).
+# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/oldi_data.py).
 # If you've already run `huggingface-cli login` on this cluster (not just your laptop --
 # the token lives in $HOME on whichever machine you logged in on), that's picked up
 # automatically below. Otherwise export HF_TOKEN before submitting:
@@ -62,7 +63,7 @@ mkdir -p logs checkpoints vocab_out
 # Flags after these defaults come from sbatch's "$@" and can override any of them
 # (argparse takes the last occurrence of a repeated flag).
 echo "Starting training with args: $@"
-python3 main.py \
+python3 train.py fairtok \
     --use-wandb \
     --wandb-project fairtok \
     --wandb-run-name "slurm-${SLURM_JOB_ID}" \
