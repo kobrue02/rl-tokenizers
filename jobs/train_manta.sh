@@ -36,6 +36,15 @@ PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 module load devel/cuda/12.8
 module load devel/python/3.13.3-llvm-19.1
 echo "CUDA: $CUDA_HOME"
+# This module puts its OWN (older) cuDNN on LD_LIBRARY_PATH, which shadows the
+# newer cuDNN PyTorch already bundles for itself (the nvidia-cudnn-cu12 wheel in
+# .venv) -- MANTa's block-level GRU is the first cuDNN-using op in any of this
+# repo's four models to actually run, which is why this job specifically hits
+# "PyTorch was compiled against (9, 20, 0) but found runtime version (9, 7, 1)" the
+# moment it runs on a CUDA tensor. PyTorch doesn't need the module's CUDA toolkit
+# at RUNTIME (only nvcc, which nothing here calls), so unset this and let PyTorch
+# fall back to its own bundled libraries.
+unset LD_LIBRARY_PATH
 
 # 3. Environment
 if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.cache/huggingface/token" ]; then

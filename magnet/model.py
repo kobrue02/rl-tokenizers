@@ -322,7 +322,18 @@ class MagnetModel(nn.Module):
         pos_idx = torch.arange(T, device=device)
         key_padding_mask = pos_idx[None, :] >= lengths[:, None]  # True = PAD
 
-        x = self.byte_embed(byte_ids) + self.pos_embed(pos_idx)[None, :, :]
+        # clamp BEFORE indexing pos_embed, not after -- pos_idx is also used above
+        # for key_padding_mask, which needs the true (unclamped) position to compare
+        # against `lengths` correctly. Without this clamp, any sequence longer than
+        # self.max_len (1024 by default) makes T > max_len, and pos_embed(pos_idx) --
+        # an nn.Embedding(max_len, d_model) -- does an out-of-bounds gather on CUDA
+        # (a silent, uncaught index error on CPU, but a hard "vectorized_gather_kernel
+        # index out of bounds" device-side assert on GPU, reported asynchronously
+        # at the next synchronizing call, which made it look like the CRASH SITE was
+        # somewhere unrelated further down the model). flexitokens/model.py's
+        # TransformerStage.forward already guards this exact case the same way.
+        clamped_pos_idx = pos_idx.clamp(max=self.max_len - 1)
+        x = self.byte_embed(byte_ids) + self.pos_embed(clamped_pos_idx)[None, :, :]
         for layer in self.pre_layers:
             x = layer(x, key_padding_mask=key_padding_mask)
 
