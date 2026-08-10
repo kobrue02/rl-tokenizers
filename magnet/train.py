@@ -139,7 +139,13 @@ class MagnetTrainer:
         # adding a key after construction would create parameters the optimizer
         # below never sees.
         all_langs = sorted({lang for group in self.train_groups for lang in group})
-        scripts = sorted({lang_to_script(lang) for lang in all_langs})
+        # Precomputed once: lang_to_script(lang) is a pure function of `lang` alone
+        # (a dict lookup + string split), but the loop below calls it once per
+        # (group, lang) pair on EVERY training step -- for a fixed, small set of
+        # languages that's the same lookup repeated thousands of times over a real
+        # run, for no reason, since the mapping never changes after this point.
+        lang_script = {lang: lang_to_script(lang) for lang in all_langs}
+        scripts = sorted(set(lang_script.values()))
         print(f"languages={all_langs}")
         print(f"scripts={scripts}")
 
@@ -189,7 +195,7 @@ class MagnetTrainer:
             items_by_script = defaultdict(list)
             for group in batch_groups:
                 for lang, text in group.items():
-                    items_by_script[lang_to_script(lang)].append(
+                    items_by_script[lang_script[lang]].append(
                         (lang, bytes_to_tensor(text, device))
                     )
 

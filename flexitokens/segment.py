@@ -14,10 +14,6 @@ import torch
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
-from .model import (
-    FlexiTokensModel,
-)  # noqa: F401  (re-exported for convenience / type hints)
-
 
 @torch.no_grad()
 def induce_boundaries(model, byte_seq, device="cpu"):
