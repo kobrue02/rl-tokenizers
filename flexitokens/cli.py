@@ -17,31 +17,48 @@ from .train import FlexiTokensConfig, FlexiTokensTrainer, _print_vocab_metrics
 
 
 def build_arg_parser():
-    parser = argparse.ArgumentParser(description="Train the FlexiTokens baseline tokenizer.")
+    parser = argparse.ArgumentParser(
+        description="Train the FlexiTokens baseline tokenizer."
+    )
 
     for field in dataclasses.fields(FlexiTokensConfig):
         flag = "--" + field.name.replace("_", "-")
         help_text = f"(FlexiTokensConfig.{field.name}, default: {field.default})"
         if field.type is bool:
-            parser.add_argument(flag, action=argparse.BooleanOptionalAction, default=field.default, help=help_text)
+            parser.add_argument(
+                flag,
+                action=argparse.BooleanOptionalAction,
+                default=field.default,
+                help=help_text,
+            )
         else:
-            parser.add_argument(flag, type=field.type, default=field.default, help=help_text)
+            parser.add_argument(
+                flag, type=field.type, default=field.default, help=help_text
+            )
 
     parser.add_argument(
-        "--data-source", choices=DATA_SOURCES, default="all",
+        "--data-source",
+        choices=DATA_SOURCES,
+        default="all",
         help="'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus",
     )
     parser.add_argument(
-        "--num-groups", type=int, default=None,
+        "--num-groups",
+        type=int,
+        default=None,
         help="cap the number of parallel groups loaded (real sources are large; omit for the full set)",
     )
     parser.add_argument(
-        "--langs", type=str, default=None,
+        "--langs",
+        type=str,
+        default=None,
         help="comma-separated language codes; 'all' to use every language oldi_seed/flores_dev natively "
-             "offer; defaults to the 9-language panel for the chosen data source",
+        "offer; defaults to the 9-language panel for the chosen data source",
     )
     parser.add_argument("--vocab-out", type=str, default="flexitokens_vocab.json")
-    parser.add_argument("--vocab-stats-out", type=str, default="flexitokens_vocab_stats.json")
+    parser.add_argument(
+        "--vocab-stats-out", type=str, default="flexitokens_vocab_stats.json"
+    )
     parser.add_argument("--vocab-preview", type=int, default=20)
     return parser
 
@@ -65,9 +82,14 @@ def main(argv=None):
 
     entries = vocab_with_stats(token_freq, cfg.vocab_size)
     if args.vocab_preview:
-        print(f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:")
+        print(
+            f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:"
+        )
         for span, total, per_lang in entries[: args.vocab_preview]:
-            langs = ", ".join(f"{lang}:{c}" for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1]))
+            langs = ", ".join(
+                f"{lang}:{c}"
+                for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1])
+            )
             print(f"  {total:6d}  {span!r:20s} [{langs}]")
     if args.vocab_out:
         save_vocab_json(entries, args.vocab_out)

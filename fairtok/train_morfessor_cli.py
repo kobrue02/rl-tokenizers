@@ -20,45 +20,66 @@ from .morphology import MORPH_SOURCES, collect_word_counts, train_morfessor
 
 
 def build_arg_parser():
-    parser = argparse.ArgumentParser(description="Train per-language Morfessor 2.0 models for a MorphScore proxy.")
+    parser = argparse.ArgumentParser(
+        description="Train per-language Morfessor 2.0 models for a MorphScore proxy."
+    )
     parser.add_argument(
-        "--langs", type=str, default=None,
+        "--langs",
+        type=str,
+        default=None,
         help=f"comma-separated language codes; defaults to the full 9-language panel ({','.join(LANGS)}). "
-             "Languages with no configured source (kas, nqo) are skipped with a warning, not an error.",
+        "Languages with no configured source (kas, nqo) are skipped with a warning, not an error.",
     )
     parser.add_argument(
-        "--max-words-per-source", type=int, default=2_000_000,
+        "--max-words-per-source",
+        type=int,
+        default=2_000_000,
         help="per-language, per-SOURCE word budget -- e.g. a language with 2 sources can use up to 2x this "
-             "total. Fetchers stop streaming shards as soon as this is hit (see morphology.py).",
+        "total. Fetchers stop streaming shards as soon as this is hit (see morphology.py).",
     )
     parser.add_argument(
-        "--max-word-types", type=int, default=300_000,
+        "--max-word-types",
+        type=int,
+        default=300_000,
         help="cap on distinct word types fed into Morfessor after pooling all sources -- bounds training "
-             "time for high-resource languages (eng/spa); rarely binds for the low-resource ones.",
+        "time for high-resource languages (eng/spa); rarely binds for the low-resource ones.",
     )
     parser.add_argument(
-        "--freq-threshold", type=int, default=1,
+        "--freq-threshold",
+        type=int,
+        default=1,
         help="discard word types occurring fewer than this many times before training (crawl-noise/typo "
-             "filtering) -- kept permissive (1 = keep everything) by default since low-resource languages "
-             "can't afford to throw away scarce vocabulary; raise it for high-resource languages if their "
-             "output looks noisy.",
+        "filtering) -- kept permissive (1 = keep everything) by default since low-resource languages "
+        "can't afford to throw away scarce vocabulary; raise it for high-resource languages if their "
+        "output looks noisy.",
     )
     parser.add_argument(
-        "--corpusweight", type=float, default=1.0,
+        "--corpusweight",
+        type=float,
+        default=1.0,
         help="Morfessor's corpus-cost weight -- HIGHER values make it MORE conservative (fewer splits), "
-             "not more aggressive; counterintuitive, verified empirically (see morphology.py). Not yet "
-             "properly tuned against a hand-checked dev set -- probe this if output looks off.",
+        "not more aggressive; counterintuitive, verified empirically (see morphology.py). Not yet "
+        "properly tuned against a hand-checked dev set -- probe this if output looks off.",
     )
     parser.add_argument(
-        "--init-rand-split", type=float, default=0.5,
+        "--init-rand-split",
+        type=float,
+        default=0.5,
         help="probability of an initial random split at each character position before training -- NOT "
-             "cosmetic: without this, Morfessor's default recursive search converges to zero splits even "
-             "on textbook cases (see morphology.py docstring on train_morfessor for why).",
+        "cosmetic: without this, Morfessor's default recursive search converges to zero splits even "
+        "on textbook cases (see morphology.py docstring on train_morfessor for why).",
     )
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out-dir", type=str, default="morfessor_out", help="where to save per-language .bin models + stats")
     parser.add_argument(
-        "--preview-count", type=int, default=20,
+        "--out-dir",
+        type=str,
+        default="morfessor_out",
+        help="where to save per-language .bin models + stats",
+    )
+    parser.add_argument(
+        "--preview-count",
+        type=int,
+        default=20,
         help="segment this many of the most frequent words per language for a quick human sanity-check; 0 to skip",
     )
     return parser
@@ -78,27 +99,40 @@ def main(argv=None):
     for lang in langs:
         sources = MORPH_SOURCES.get(lang, [])
         if not sources:
-            print(f"[{lang}] skipped -- no configured monolingual source (see morphology.MORPH_SOURCES)")
+            print(
+                f"[{lang}] skipped -- no configured monolingual source (see morphology.MORPH_SOURCES)"
+            )
             summary[lang] = {"status": "skipped_no_source"}
             continue
 
-        print(f"[{lang}] fetching from {[s for s, _ in sources]} (budget {args.max_words_per_source}/source)...")
+        print(
+            f"[{lang}] fetching from {[s for s, _ in sources]} (budget {args.max_words_per_source}/source)..."
+        )
         t0 = time.time()
         word_counts = collect_word_counts(
-            lang, max_words_per_source=args.max_words_per_source, max_word_types=args.max_word_types,
+            lang,
+            max_words_per_source=args.max_words_per_source,
+            max_word_types=args.max_word_types,
         )
         fetch_s = time.time() - t0
         if not word_counts:
-            print(f"[{lang}] skipped -- sources configured but yielded zero words (unexpected; check access)")
+            print(
+                f"[{lang}] skipped -- sources configured but yielded zero words (unexpected; check access)"
+            )
             summary[lang] = {"status": "skipped_empty"}
             continue
 
         total_words = sum(word_counts.values())
-        print(f"[{lang}] {total_words} words, {len(word_counts)} distinct types (fetch took {fetch_s:.1f}s) -- training...")
+        print(
+            f"[{lang}] {total_words} words, {len(word_counts)} distinct types (fetch took {fetch_s:.1f}s) -- training..."
+        )
         t0 = time.time()
         model = train_morfessor(
-            word_counts, freq_threshold=args.freq_threshold, corpusweight=args.corpusweight,
-            init_rand_split=args.init_rand_split, seed=args.seed,
+            word_counts,
+            freq_threshold=args.freq_threshold,
+            corpusweight=args.corpusweight,
+            init_rand_split=args.init_rand_split,
+            seed=args.seed,
         )
         train_s = time.time() - t0
 
@@ -114,10 +148,19 @@ def main(argv=None):
             # so preview the most frequent words that are actually long enough to
             # potentially contain an interesting stem+affix split.
             candidates = [w for w in word_counts if len(w) >= 5]
-            preview_words = sorted(candidates, key=lambda w: -word_counts[w])[: args.preview_count]
+            preview_words = sorted(candidates, key=lambda w: -word_counts[w])[
+                : args.preview_count
+            ]
             for word in preview_words:
                 segments, logprob = model.viterbi_segment(word)
-                preview.append({"word": word, "count": word_counts[word], "segments": segments, "logprob": logprob})
+                preview.append(
+                    {
+                        "word": word,
+                        "count": word_counts[word],
+                        "segments": segments,
+                        "logprob": logprob,
+                    }
+                )
 
         stats = {
             "status": "trained",
@@ -137,7 +180,9 @@ def main(argv=None):
     print("\n=== summary ===")
     for lang, s in summary.items():
         if s["status"] == "trained":
-            print(f"  {lang}: {s['total_words']} words, {s['distinct_types']} types -> {s['model_path']}")
+            print(
+                f"  {lang}: {s['total_words']} words, {s['distinct_types']} types -> {s['model_path']}"
+            )
         else:
             print(f"  {lang}: {s['status']}")
 

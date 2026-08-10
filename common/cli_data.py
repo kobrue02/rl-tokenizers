@@ -7,7 +7,13 @@ to remove.
 """
 
 from .data import LANG_PROFILES, make_synthetic_parallel_groups
-from .oldi_data import LANGS, load_all_training_groups, load_flores_plus, load_oldi_seed, load_smol_groups
+from .oldi_data import (
+    LANGS,
+    load_all_training_groups,
+    load_flores_plus,
+    load_oldi_seed,
+    load_smol_groups,
+)
 
 DATA_SOURCES = ["synthetic", "oldi_seed", "flores_dev", "smol", "all"]
 
@@ -31,7 +37,9 @@ def load_groups(args):
         )
 
     if args.data_source == "synthetic":
-        groups = make_synthetic_parallel_groups(400, langs=langs or list(LANG_PROFILES), seed=args.seed)
+        groups = make_synthetic_parallel_groups(
+            400, langs=langs or list(LANG_PROFILES), seed=args.seed
+        )
     elif args.data_source == "oldi_seed":
         groups = load_oldi_seed(langs=langs or LANGS)
     elif args.data_source == "flores_dev":

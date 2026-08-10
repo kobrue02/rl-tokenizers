@@ -84,12 +84,16 @@ class GRPOConfig:
     # the whole step's batch size, matching HF's naming for a single-GPU/CPU run.
     hidden_size: int = 128  # widened again from 64 (originally 32); GRU cost scales
     # roughly ~hidden_size^2 per layer, so this alone is ~4x the (64, 2) setup's per-layer cost
-    num_hidden_layers: int = 3  # stacked GRU cells for both the main and early-exit paths
+    num_hidden_layers: int = (
+        3  # stacked GRU cells for both the main and early-exit paths
+    )
     # (see BytePolicy) -- one deeper than the (64, 2) setup. Combined with the hidden_size
     # bump, expect roughly ~6x the compute of the (64, 2) config, and roughly ~50-60x the
     # original (32, 1) single-cell policy this whole project started with.
     gamma: float = 0.99
-    lambda_target: float = 2.0  # weight on the rate-consistency loss (see GRPOTrainer.train) --
+    lambda_target: float = (
+        2.0  # weight on the rate-consistency loss (see GRPOTrainer.train) --
+    )
     # adapted from Dauncey & Wattenhofer's `consistency_loss_weight`
     # (github.com/SamD770/bitter-lesson-tokenization, model/model.py
     # `off_policy_flexible_training_step`), whose default of 2.0 this matches. This is no
@@ -105,7 +109,9 @@ class GRPOConfig:
     learning_rate: float = 3e-3
     seed: int = 0
     bpe_sample_groups: int = 300  # groups sampled for the plain-BPE target-rate anchor
-    bpe_baseline_vocab_size: int = 4000  # the anchor BPE's OWN vocab size -- independent
+    bpe_baseline_vocab_size: int = (
+        4000  # the anchor BPE's OWN vocab size -- independent
+    )
     # of vocab_size, since the anchor is just a reference number, not the real vocab.
     # The naive from-scratch trainer is O(vocab_size * corpus_size); if this tracked
     # vocab_size directly, a vocab_size=50000 run would need ~49700 merges just to
@@ -113,20 +119,28 @@ class GRPOConfig:
     use_wandb: bool = False
     wandb_project: str = "fairtok"
     run_name: str = ""
-    output_dir: str = "policy.pt"  # empty string to skip; see fairtok.inference to reuse it.
+    output_dir: str = (
+        "policy.pt"  # empty string to skip; see fairtok.inference to reuse it.
+    )
     # A single file path, not a directory of numbered checkpoints like HF's output_dir --
     # see save_steps below for why.
-    save_steps: int = 100  # 0 to disable periodic saving; overwrites output_dir in place
+    save_steps: int = (
+        100  # 0 to disable periodic saving; overwrites output_dir in place
+    )
     # each time (not one file per interval, unlike HF's checkpoint-N convention) -- a long
     # run interrupted mid-loop (Ctrl+C or otherwise) still leaves a usable, reasonably
     # fresh checkpoint on disk.
-    group_sample_size: int = 24  # cap languages rolled out per group, regardless of how many
+    group_sample_size: int = (
+        24  # cap languages rolled out per group, regardless of how many
+    )
     # a group actually has available (oldi_seed/flores_plus can offer 46/212 with langs="all").
     # Each group has its own persistent rotation through its language list (see
     # GRPOTrainer.train) -- not independent random draws -- so every language a group has is
     # guaranteed to appear at least once every ceil(num_languages / group_sample_size)
     # visits to that specific group, rather than merely likely to show up eventually.
-    device: str = ""  # "" auto-detects cuda if available, else cpu; set explicitly to override.
+    device: str = (
+        ""  # "" auto-detects cuda if available, else cpu; set explicitly to override.
+    )
     # batched_sample_rollout (see policy.py) batches every sequence in a training step
     # together at each time step, so this now has real work to parallelize on GPU --
     # unlike the original one-sequence-at-a-time sample_rollout it replaced.
@@ -136,13 +150,19 @@ class GRPOConfig:
     # this scores the CURRENT policy, deterministically, against data it never trains
     # on, so it's not subject to the same small-sample noise (see window_compressions_by_lang
     # below) or to the risk of the training signal itself being what's being measured.
-    max_eval_samples: int = 0  # 0 = evaluate every loaded eval group; cap this if the eval
+    max_eval_samples: int = (
+        0  # 0 = evaluate every loaded eval group; cap this if the eval
+    )
     # set is large enough that scoring it every eval_steps steps meaningfully slows training.
-    per_device_eval_batch_size: int = 32  # chunk size for the batched eval rollout -- kept
+    per_device_eval_batch_size: int = (
+        32  # chunk size for the batched eval rollout -- kept
+    )
     # independent of (and smaller than) per_device_train_batch_size * group_sample_size,
     # since eval data can be paragraph-length (BOUQuET is paragraph_level) rather than
     # sentence-length, and a padded batch's memory cost scales with the longest sequence in it.
-    dataloader_num_workers: int = 0  # matches HF TrainingArguments.dataloader_num_workers.
+    dataloader_num_workers: int = (
+        0  # matches HF TrainingArguments.dataloader_num_workers.
+    )
     # 0 = load/collate in the main process (default -- exactly reproduces the single-process
     # behavior this replaced). > 0 moves GroupLanguageCollator into worker subprocesses for
     # background prefetching (byte-encoding overlapped with the previous step's GPU compute)
@@ -158,7 +178,9 @@ def _num_tokens(records):
     return sum(1 for r in records[:-1] if r.boundary_action == 1) + 1
 
 
-def _plain_bpe_target_rate(train_groups, baseline_vocab_size, sample_groups, group_sample_size, seed):
+def _plain_bpe_target_rate(
+    train_groups, baseline_vocab_size, sample_groups, group_sample_size, seed
+):
     """target_rate is only ever used as a soft anchor for the compression-rate
     penalty, not something requiring the full corpus or the real vocab_size --
     so this trains the naive O(vocab_size * corpus_size) baseline BPE (see
@@ -182,7 +204,9 @@ def _plain_bpe_target_rate(train_groups, baseline_vocab_size, sample_groups, gro
         langs = list(g.keys())
         if group_sample_size and len(langs) > group_sample_size:
             langs = list(rng.choice(langs, size=group_sample_size, replace=False))
-        pooled.extend(bytes_to_tensor(g[lang]).numpy().astype("uint8").tobytes() for lang in langs)
+        pooled.extend(
+            bytes_to_tensor(g[lang]).numpy().astype("uint8").tobytes() for lang in langs
+        )
     _, merges = train_byte_bpe(pooled, baseline_vocab_size)
     lengths = [
         len(encode_with_merges(seq, merges))
@@ -241,13 +265,16 @@ class GroupLanguageCollator:
         for i, group in batch:
             group_indices.append(i)
             group_langs_full = list(group.keys())
-            if self.group_sample_size and len(group_langs_full) > self.group_sample_size:
+            if (
+                self.group_sample_size
+                and len(group_langs_full) > self.group_sample_size
+            ):
                 order = self.group_lang_order.get(i)
                 pos = self.group_lang_pos.get(i, 0)
                 if order is None or pos >= len(order):
                     order = list(self.rng.permutation(group_langs_full))
                     pos = 0
-                group_langs = order[pos:pos + self.group_sample_size]
+                group_langs = order[pos : pos + self.group_sample_size]
                 self.group_lang_order[i] = order
                 self.group_lang_pos[i] = pos + self.group_sample_size
             else:
@@ -280,9 +307,15 @@ class GRPOTrainer:
     during .train() (see that method) -- held out, never trained on.
     """
 
-    def __init__(self, args: GRPOConfig, train_dataset, eval_dataset=None, target_rate=None):
+    def __init__(
+        self, args: GRPOConfig, train_dataset, eval_dataset=None, target_rate=None
+    ):
         self.args = args
-        self.train_dataset = train_dataset if isinstance(train_dataset, Dataset) else ByteGroupDataset(train_dataset)
+        self.train_dataset = (
+            train_dataset
+            if isinstance(train_dataset, Dataset)
+            else ByteGroupDataset(train_dataset)
+        )
         self.eval_dataset = eval_dataset
         self.target_rate = target_rate
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -337,7 +370,9 @@ class GRPOTrainer:
 
         if cfg.max_eval_samples and len(eval_dataset) > cfg.max_eval_samples:
             rng = np.random.default_rng(cfg.seed)
-            idx = rng.choice(len(eval_dataset), size=cfg.max_eval_samples, replace=False)
+            idx = rng.choice(
+                len(eval_dataset), size=cfg.max_eval_samples, replace=False
+            )
             eval_dataset = [eval_dataset[i] for i in idx]
 
         batch_items = [
@@ -351,22 +386,41 @@ class GRPOTrainer:
         token_freq = defaultdict(Counter)
         compressions_by_lang = defaultdict(list)
         for start in range(0, len(batch_items), cfg.per_device_eval_batch_size):
-            chunk = batch_items[start:start + cfg.per_device_eval_batch_size]
-            records_per_seq = batched_sample_rollout(policy, [seq for _, seq in chunk], device, deterministic=True)
+            chunk = batch_items[start : start + cfg.per_device_eval_batch_size]
+            records_per_seq = batched_sample_rollout(
+                policy, [seq for _, seq in chunk], device, deterministic=True
+            )
             for (lang, byte_seq), records in zip(chunk, records_per_seq):
-                spans = spans_from_boundaries(byte_seq, [r.boundary_action for r in records])
+                spans = spans_from_boundaries(
+                    byte_seq, [r.boundary_action for r in records]
+                )
                 token_freq[lang].update(spans)
-                compressions_by_lang[lang].append(compression_rate(len(byte_seq), _num_tokens(records)))
+                compressions_by_lang[lang].append(
+                    compression_rate(len(byte_seq), _num_tokens(records))
+                )
         policy.train(was_training)
 
-        renyi = {lang: renyi_efficiency(list(c.values())) for lang, c in token_freq.items() if c}
+        renyi = {
+            lang: renyi_efficiency(list(c.values()))
+            for lang, c in token_freq.items()
+            if c
+        }
         renyi_variance = float(np.var(list(renyi.values()))) if renyi else 0.0
         gini = gini_coefficient(list(renyi.values())) if renyi else 0.0
-        per_lang_compression = {lang: float(np.mean(vals)) for lang, vals in compressions_by_lang.items()}
-        avg_compression = float(np.mean(list(per_lang_compression.values()))) if per_lang_compression else 0.0
+        per_lang_compression = {
+            lang: float(np.mean(vals)) for lang, vals in compressions_by_lang.items()
+        }
+        avg_compression = (
+            float(np.mean(list(per_lang_compression.values())))
+            if per_lang_compression
+            else 0.0
+        )
         return {
-            "renyi": renyi, "renyi_variance": renyi_variance, "gini": gini,
-            "per_lang_compression": per_lang_compression, "avg_compression": avg_compression,
+            "renyi": renyi,
+            "renyi_variance": renyi_variance,
+            "gini": gini,
+            "per_lang_compression": per_lang_compression,
+            "avg_compression": avg_compression,
         }
 
     def train(self):
@@ -376,7 +430,11 @@ class GRPOTrainer:
         # ByteGroupDataset's (index, group) items -- unwrap back to the raw list for
         # that one call; everything else below only needs len()/DataLoader, which work
         # on the Dataset directly.
-        raw_train_groups = train_dataset.groups if isinstance(train_dataset, ByteGroupDataset) else train_dataset
+        raw_train_groups = (
+            train_dataset.groups
+            if isinstance(train_dataset, ByteGroupDataset)
+            else train_dataset
+        )
         eval_groups = self.eval_dataset
         target_rate = self.target_rate
         device = self.device
@@ -385,7 +443,11 @@ class GRPOTrainer:
 
         if target_rate is None:
             target_rate = _plain_bpe_target_rate(
-                raw_train_groups, cfg.bpe_baseline_vocab_size, cfg.bpe_sample_groups, cfg.group_sample_size, cfg.seed
+                raw_train_groups,
+                cfg.bpe_baseline_vocab_size,
+                cfg.bpe_sample_groups,
+                cfg.group_sample_size,
+                cfg.seed,
             )
 
         run = None
@@ -396,11 +458,15 @@ class GRPOTrainer:
                 project=cfg.wandb_project,
                 name=cfg.run_name or None,
                 config={
-                    **dataclasses.asdict(cfg), "target_rate": target_rate, "num_train_groups": len(train_dataset),
+                    **dataclasses.asdict(cfg),
+                    "target_rate": target_rate,
+                    "num_train_groups": len(train_dataset),
                 },
             )
 
-        policy = BytePolicy(hidden_dim=cfg.hidden_size, num_layers=cfg.num_hidden_layers).to(device)
+        policy = BytePolicy(
+            hidden_dim=cfg.hidden_size, num_layers=cfg.num_hidden_layers
+        ).to(device)
         self.model = policy  # set now (not just at the end) so self.evaluate() mid-loop
         # below sees the live, training-in-progress policy, not None
         optimizer = torch.optim.Adam(policy.parameters(), lr=cfg.learning_rate)
@@ -417,8 +483,14 @@ class GRPOTrainer:
         # exactly once per epoch (shuffle=True permutes; it doesn't sample with
         # replacement, so this isn't subject to the coupon-collector problem independent
         # re-sampling would have).
-        steps_per_epoch = math.ceil(len(train_dataset) / cfg.per_device_train_batch_size)
-        total_steps = cfg.max_steps if cfg.max_steps > 0 else math.ceil(cfg.num_train_epochs * steps_per_epoch)
+        steps_per_epoch = math.ceil(
+            len(train_dataset) / cfg.per_device_train_batch_size
+        )
+        total_steps = (
+            cfg.max_steps
+            if cfg.max_steps > 0
+            else math.ceil(cfg.num_train_epochs * steps_per_epoch)
+        )
         print(
             f"corpus={len(train_dataset)} groups, per_device_train_batch_size={cfg.per_device_train_batch_size} "
             f"-> steps_per_epoch={steps_per_epoch}, total_steps={total_steps} "
@@ -479,7 +551,9 @@ class GRPOTrainer:
                 step_boundary_logprobs = []
                 step_next_byte_logprobs = []
                 step_early_byte_logprobs = []
-                step_advantages = []  # plain floats, index-aligned with the three lists above
+                step_advantages = (
+                    []
+                )  # plain floats, index-aligned with the three lists above
                 byte_correct, byte_total = 0, 0
 
                 # Phase 2: ONE batched rollout across every sequence in this entire step
@@ -488,7 +562,9 @@ class GRPOTrainer:
                 # independent single-sequence forward passes, this is a single call
                 # processing all of them together, padded/masked, max(len(s)) sequential
                 # steps instead of sum(len(s)) of them.
-                all_records = batched_sample_rollout(policy, [item[2] for item in batch_items], device)
+                all_records = batched_sample_rollout(
+                    policy, [item[2] for item in batch_items], device
+                )
 
                 # Phase 3: redistribute back into per-group structure -- everything past
                 # this point (token_freq, compression, rewards, GRPO baseline, loss
@@ -497,7 +573,11 @@ class GRPOTrainer:
                 groups_records = defaultdict(dict)
                 for (i, lang, byte_seq), records in zip(batch_items, all_records):
                     groups_records[i][lang] = (byte_seq, records)
-                    token_freq[lang].update(spans_from_boundaries(byte_seq, [r.boundary_action for r in records]))
+                    token_freq[lang].update(
+                        spans_from_boundaries(
+                            byte_seq, [r.boundary_action for r in records]
+                        )
+                    )
                     byte_correct += sum(1 for r in records if r.byte_correct)
                     byte_total += sum(1 for r in records if r.byte_correct is not None)
 
@@ -508,7 +588,9 @@ class GRPOTrainer:
                     for lang, (byte_seq, records) in group_records.items():
                         c_rate = compression_rate(len(byte_seq), _num_tokens(records))
                         window_compressions_by_lang[lang].append(c_rate)
-                        rewards = build_rewards(records, fairness_scalar, cfg.lambda_fair)
+                        rewards = build_rewards(
+                            records, fairness_scalar, cfg.lambda_fair
+                        )
                         returns_by_lang[lang] = discounted_returns(rewards, cfg.gamma)
 
                     advantages = group_relative_advantage(returns_by_lang)
@@ -516,9 +598,15 @@ class GRPOTrainer:
                         adv = advantages[lang]
                         for t, rec in enumerate(records):
                             step_boundary_logits.append(rec.boundary_logit)
-                            step_boundary_logprobs.append(rec.boundary_logprob)  # score-function term
-                            step_next_byte_logprobs.append(rec.next_byte_logprob)  # main head, differentiable
-                            step_early_byte_logprobs.append(rec.early_byte_logprob)  # early-exit head, differentiable
+                            step_boundary_logprobs.append(
+                                rec.boundary_logprob
+                            )  # score-function term
+                            step_next_byte_logprobs.append(
+                                rec.next_byte_logprob
+                            )  # main head, differentiable
+                            step_early_byte_logprobs.append(
+                                rec.early_byte_logprob
+                            )  # early-exit head, differentiable
                             step_advantages.append(float(adv[t]))
 
                 # One vectorized pass instead of the B*T sequential kernel launches the loop
@@ -526,7 +614,9 @@ class GRPOTrainer:
                 boundary_logprob_t = torch.stack(step_boundary_logprobs)
                 next_byte_logprob_t = torch.stack(step_next_byte_logprobs)
                 early_byte_logprob_t = torch.stack(step_early_byte_logprobs)
-                advantage_t = torch.tensor(step_advantages, dtype=boundary_logprob_t.dtype, device=device)
+                advantage_t = torch.tensor(
+                    step_advantages, dtype=boundary_logprob_t.dtype, device=device
+                )
                 reinforce_loss = -(advantage_t * boundary_logprob_t).sum()
                 nll_loss = -next_byte_logprob_t.sum()
                 early_nll_loss = -early_byte_logprob_t.sum()
@@ -537,8 +627,14 @@ class GRPOTrainer:
                 # Captured here, before the batch-size normalization below, since it needs
                 # the raw summed nats over all byte positions actually predicted this step
                 # (byte_total), not a sum normalized by number of groups.
-                bits_per_byte = nll_loss.item() / (byte_total * math.log(2)) if byte_total else 0.0
-                early_bits_per_byte = early_nll_loss.item() / (byte_total * math.log(2)) if byte_total else 0.0
+                bits_per_byte = (
+                    nll_loss.item() / (byte_total * math.log(2)) if byte_total else 0.0
+                )
+                early_bits_per_byte = (
+                    early_nll_loss.item() / (byte_total * math.log(2))
+                    if byte_total
+                    else 0.0
+                )
 
                 # normalize by the actual batch size, not the configured
                 # cfg.per_device_train_batch_size -- the last batch of an epoch is smaller
@@ -557,12 +653,19 @@ class GRPOTrainer:
                 all_logits = torch.stack(step_boundary_logits)
                 mean_logit = all_logits.mean()
                 mean_prob = torch.sigmoid(all_logits).mean()
-                target_downsample_rate = 1.0 / target_rate  # target_rate is bytes/token; D&W's
+                target_downsample_rate = (
+                    1.0 / target_rate
+                )  # target_rate is bytes/token; D&W's
                 # mechanism operates on a target fraction-of-positions-that-are-boundaries
                 factor = (mean_prob - target_downsample_rate).detach()
                 rate_consistency_loss = cfg.lambda_target * mean_logit * factor
 
-                loss = reinforce_loss + nll_loss + cfg.lambda_early * early_nll_loss + rate_consistency_loss
+                loss = (
+                    reinforce_loss
+                    + nll_loss
+                    + cfg.lambda_early * early_nll_loss
+                    + rate_consistency_loss
+                )
                 loss.backward()
                 optimizer.step()
 
@@ -574,24 +677,36 @@ class GRPOTrainer:
                 pbar.set_postfix(postfix)
 
                 if run is not None:
-                    run.log({
-                        "train/loss": loss.item(),
-                        "train/loss_reinforce": reinforce_loss.item(),
-                        "train/loss_nll": nll_loss.item(),
-                        "train/loss_early_nll": early_nll_loss.item(),
-                        "train/rate_consistency_loss": rate_consistency_loss.item(),
-                        "train/mean_downsample_rate": mean_prob.item(),
-                        "train/target_downsample_rate": target_downsample_rate,
-                        "train/byte_accuracy": byte_accuracy,
-                        "train/bits_per_byte": bits_per_byte,
-                        "train/early_bits_per_byte": early_bits_per_byte,
-                    }, step=step)
+                    run.log(
+                        {
+                            "train/loss": loss.item(),
+                            "train/loss_reinforce": reinforce_loss.item(),
+                            "train/loss_nll": nll_loss.item(),
+                            "train/loss_early_nll": early_nll_loss.item(),
+                            "train/rate_consistency_loss": rate_consistency_loss.item(),
+                            "train/mean_downsample_rate": mean_prob.item(),
+                            "train/target_downsample_rate": target_downsample_rate,
+                            "train/byte_accuracy": byte_accuracy,
+                            "train/bits_per_byte": bits_per_byte,
+                            "train/early_bits_per_byte": early_bits_per_byte,
+                        },
+                        step=step,
+                    )
 
-                if cfg.output_dir and cfg.save_steps and step > 0 and step % cfg.save_steps == 0:
+                if (
+                    cfg.output_dir
+                    and cfg.save_steps
+                    and step > 0
+                    and step % cfg.save_steps == 0
+                ):
                     save_checkpoint(policy, cfg.output_dir)
 
                 if step % cfg.fairness_refresh_steps == 0:
-                    renyi = {lang: renyi_efficiency(list(c.values())) for lang, c in token_freq.items() if c}
+                    renyi = {
+                        lang: renyi_efficiency(list(c.values()))
+                        for lang, c in token_freq.items()
+                        if c
+                    }
                     fairness_scalar = float(np.var(list(renyi.values())))
                     gini = gini_coefficient(list(renyi.values()))
                     # variance/gini shrinking is ambiguous by itself: it can't distinguish
@@ -604,34 +719,53 @@ class GRPOTrainer:
                     renyi_min = renyi[min_lang]
                     renyi_max = renyi[max_lang]
                     per_lang_compression = {
-                        lang: float(np.mean(vals)) for lang, vals in window_compressions_by_lang.items()
+                        lang: float(np.mean(vals))
+                        for lang, vals in window_compressions_by_lang.items()
                     }
-                    window_compressions_by_lang = defaultdict(list)  # reset for the next window --
+                    window_compressions_by_lang = defaultdict(
+                        list
+                    )  # reset for the next window --
                     # see the comment where this was declared for why it accumulates across the
                     # whole window instead of resetting every step
                     # macro-average across languages, not micro-average over pooled sentences,
                     # so a batch skewed toward one language doesn't dominate the reported rate
                     avg_compression = (
-                        float(np.mean(list(per_lang_compression.values()))) if per_lang_compression else 0.0
+                        float(np.mean(list(per_lang_compression.values())))
+                        if per_lang_compression
+                        else 0.0
                     )
                     fairness_trace.append(fairness_scalar)
                     compression_trace.append(avg_compression)
 
-                    fairness_improving = len(fairness_trace) > 3 and fairness_trace[-1] < fairness_trace[-4]
+                    fairness_improving = (
+                        len(fairness_trace) > 3
+                        and fairness_trace[-1] < fairness_trace[-4]
+                    )
                     compression_worsening = (
-                        len(compression_trace) > 3 and compression_trace[-1] < compression_trace[-4]
+                        len(compression_trace) > 3
+                        and compression_trace[-1] < compression_trace[-4]
                     )
                     gaming_suspected = fairness_improving and compression_worsening
                     avg_span_len = avg_span_length(token_freq)
-                    top_spans, coverage, cross_lingual_share = vocab_snapshot_stats(token_freq, cfg.vocab_size)
+                    top_spans, coverage, cross_lingual_share = vocab_snapshot_stats(
+                        token_freq, cfg.vocab_size
+                    )
                     churn = vocab_churn(prev_top_spans, top_spans)
                     prev_top_spans = top_spans
-                    warn = " <-- CHECK: fairness up / compression down (possible gaming)" if gaming_suspected else ""
+                    warn = (
+                        " <-- CHECK: fairness up / compression down (possible gaming)"
+                        if gaming_suspected
+                        else ""
+                    )
                     collapse_warn = ""
                     if avg_span_len < 1.2:
-                        collapse_warn = " <-- CHECK: drifting toward character-level collapse"
+                        collapse_warn = (
+                            " <-- CHECK: drifting toward character-level collapse"
+                        )
                     elif avg_span_len > 40:
-                        collapse_warn = " <-- CHECK: drifting toward full-sentence collapse"
+                        collapse_warn = (
+                            " <-- CHECK: drifting toward full-sentence collapse"
+                        )
                     pbar.write(
                         f"[step {step:4d}] loss={loss.item():+.4f} acc={byte_accuracy:.3f} renyi_var={fairness_scalar:.5f} "
                         f"gini={gini:.4f} avg_compression={avg_compression:.2f} target={target_rate:.2f} "
@@ -640,8 +774,10 @@ class GRPOTrainer:
                         f"{warn}{collapse_warn}"
                     )
                     postfix.update(
-                        renyi_var=f"{fairness_scalar:.4f}", gini=f"{gini:.3f}",
-                        compression=f"{avg_compression:.2f}", span=f"{avg_span_len:.2f}",
+                        renyi_var=f"{fairness_scalar:.4f}",
+                        gini=f"{gini:.3f}",
+                        compression=f"{avg_compression:.2f}",
+                        span=f"{avg_span_len:.2f}",
                     )
                     pbar.set_postfix(postfix)
 
@@ -657,10 +793,19 @@ class GRPOTrainer:
                             "compression/avg_rate_macro": avg_compression,
                             "flags/gaming_suspected": int(gaming_suspected),
                             "vocab/avg_span_length_running": avg_span_len,
-                            "vocab/num_distinct_spans_running": sum(len(c) for c in token_freq.values()),
+                            "vocab/num_distinct_spans_running": sum(
+                                len(c) for c in token_freq.values()
+                            ),
                         }
-                        log_dict.update({f"fairness/renyi/{lang}": v for lang, v in renyi.items()})
-                        log_dict.update({f"compression/rate/{lang}": v for lang, v in per_lang_compression.items()})
+                        log_dict.update(
+                            {f"fairness/renyi/{lang}": v for lang, v in renyi.items()}
+                        )
+                        log_dict.update(
+                            {
+                                f"compression/rate/{lang}": v
+                                for lang, v in per_lang_compression.items()
+                            }
+                        )
                         run.log(log_dict, step=step)
 
                 # Held-out evaluation: independently gated by its own eval_steps (not tied
@@ -670,7 +815,10 @@ class GRPOTrainer:
                 if eval_groups and cfg.eval_steps and step % cfg.eval_steps == 0:
                     eval_metrics = self.evaluate(eval_groups)
                     eval_per_lang = " ".join(
-                        f"{lang}={v:.2f}" for lang, v in sorted(eval_metrics["per_lang_compression"].items())
+                        f"{lang}={v:.2f}"
+                        for lang, v in sorted(
+                            eval_metrics["per_lang_compression"].items()
+                        )
                     )
                     pbar.write(
                         f"[eval  step {step:4d}] avg_compression={eval_metrics['avg_compression']:.2f} "
@@ -683,29 +831,40 @@ class GRPOTrainer:
                             "eval/renyi_variance": eval_metrics["renyi_variance"],
                             "eval/gini": eval_metrics["gini"],
                         }
-                        eval_log.update({f"eval/renyi/{lang}": v for lang, v in eval_metrics["renyi"].items()})
+                        eval_log.update(
+                            {
+                                f"eval/renyi/{lang}": v
+                                for lang, v in eval_metrics["renyi"].items()
+                            }
+                        )
                         eval_log.update(
                             {
                                 f"eval/compression/{lang}": v
-                                for lang, v in eval_metrics["per_lang_compression"].items()
+                                for lang, v in eval_metrics[
+                                    "per_lang_compression"
+                                ].items()
                             }
                         )
                         run.log(eval_log, step=step)
         except KeyboardInterrupt:
             pbar.close()
-            print(f"\ninterrupted at step {step} -- finalizing with training done so far "
-                  f"(vocab, checkpoint, and wandb summary below reflect this partial run)")
+            print(
+                f"\ninterrupted at step {step} -- finalizing with training done so far "
+                f"(vocab, checkpoint, and wandb summary below reflect this partial run)"
+            )
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
 
         if run is not None:
             avg_span_len, final_vocab_size = collapse_stats(token_freq, final_vocab)
-            run.log({
-                "final/vocab_size": final_vocab_size,
-                "final/avg_span_length_bytes": avg_span_len,
-                "final/char_collapse": int(avg_span_len < 1.2),
-                "final/sentence_collapse": int(avg_span_len > 40),
-            })
+            run.log(
+                {
+                    "final/vocab_size": final_vocab_size,
+                    "final/avg_span_length_bytes": avg_span_len,
+                    "final/char_collapse": int(avg_span_len < 1.2),
+                    "final/sentence_collapse": int(avg_span_len > 40),
+                }
+            )
             run.finish()
 
         if cfg.output_dir:
@@ -722,10 +881,17 @@ def run_smoke_test():
     """The plan's own gate: a small trial run checking the loss moves and the
     policy hasn't collapsed (boundary at every byte, or never) before scaling up.
     Uses synthetic placeholder data -- see run_real_smoke_test for the real corpus."""
-    args = GRPOConfig(max_steps=60, per_device_train_batch_size=4, vocab_size=384, fairness_refresh_steps=10)
+    args = GRPOConfig(
+        max_steps=60,
+        per_device_train_batch_size=4,
+        vocab_size=384,
+        fairness_refresh_steps=10,
+    )
     langs = list(LANG_PROFILES)
     train_groups = make_synthetic_parallel_groups(400, langs=langs, seed=args.seed)
-    policy, token_freq, final_vocab, target_rate = GRPOTrainer(args, train_groups).train()
+    policy, token_freq, final_vocab, target_rate = GRPOTrainer(
+        args, train_groups
+    ).train()
     report_collapse(token_freq, final_vocab)
     return policy, token_freq, final_vocab, target_rate
 
@@ -738,9 +904,16 @@ def run_real_smoke_test(num_groups=60):
     6193 from flores_plus dev -- scaling this up is a separate, much longer run."""
     from common.oldi_data import load_oldi_seed
 
-    args = GRPOConfig(max_steps=60, per_device_train_batch_size=4, vocab_size=384, fairness_refresh_steps=10)
+    args = GRPOConfig(
+        max_steps=60,
+        per_device_train_batch_size=4,
+        vocab_size=384,
+        fairness_refresh_steps=10,
+    )
     train_groups = load_oldi_seed()[:num_groups]
-    policy, token_freq, final_vocab, target_rate = GRPOTrainer(args, train_groups).train()
+    policy, token_freq, final_vocab, target_rate = GRPOTrainer(
+        args, train_groups
+    ).train()
     report_collapse(token_freq, final_vocab)
     return policy, token_freq, final_vocab, target_rate
 

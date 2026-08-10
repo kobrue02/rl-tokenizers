@@ -34,9 +34,15 @@ TOKENIZERS = {
 
 def _print_usage(file=sys.stdout):
     names = ", ".join(sorted(TOKENIZERS))
-    print(f"usage: python train.py {{{'|'.join(sorted(TOKENIZERS))}}} [tokenizer-specific args...]", file=file)
+    print(
+        f"usage: python train.py {{{'|'.join(sorted(TOKENIZERS))}}} [tokenizer-specific args...]",
+        file=file,
+    )
     print(f"\navailable tokenizers: {names}", file=file)
-    print("see a specific tokenizer's own flags with e.g.:  python train.py magnet --help", file=file)
+    print(
+        "see a specific tokenizer's own flags with e.g.:  python train.py magnet --help",
+        file=file,
+    )
 
 
 def main(argv=None):

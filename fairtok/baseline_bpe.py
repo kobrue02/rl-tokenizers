@@ -38,7 +38,9 @@ def train_byte_bpe(byte_sequences, vocab_size):
     # Naive from-scratch trainer: rescans every sequence on every merge, so this
     # is O(vocab_size * corpus_size) -- fine for a few thousand sample sentences
     # (see _plain_bpe_target_rate's sampling), NOT fine over a full real corpus.
-    pbar = tqdm(total=vocab_size - 256, desc="plain-BPE baseline (merges)", unit="merge")
+    pbar = tqdm(
+        total=vocab_size - 256, desc="plain-BPE baseline (merges)", unit="merge"
+    )
     while len(vocab) < vocab_size:
         pair_counts = Counter()
         for seq in sequences:

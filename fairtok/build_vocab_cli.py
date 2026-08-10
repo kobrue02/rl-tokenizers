@@ -33,15 +33,27 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Apply a trained policy checkpoint to a corpus to build the final tokenizer vocabulary."
     )
-    parser.add_argument("--checkpoint", required=True, help="policy checkpoint saved by fairtok.train (GRPOConfig.output_dir)")
-    parser.add_argument("--corpus", required=True, help="a text file, or a directory of .txt files, one document per line")
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="policy checkpoint saved by fairtok.train (GRPOConfig.output_dir)",
+    )
+    parser.add_argument(
+        "--corpus",
+        required=True,
+        help="a text file, or a directory of .txt files, one document per line",
+    )
     parser.add_argument("--vocab-size", type=int, default=50000)
     parser.add_argument(
-        "--deterministic", action=argparse.BooleanOptionalAction, default=True,
+        "--deterministic",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="threshold boundary probability at 0.5 (default) instead of sampling -- reproducible given the same corpus",
     )
     parser.add_argument("--vocab-out", type=str, default="corpus_vocab.json")
-    parser.add_argument("--vocab-stats-out", type=str, default="corpus_vocab_stats.json")
+    parser.add_argument(
+        "--vocab-stats-out", type=str, default="corpus_vocab_stats.json"
+    )
     parser.add_argument("--vocab-preview", type=int, default=20)
     return parser
 
@@ -52,16 +64,24 @@ def main(argv=None):
     texts = _iter_corpus(args.corpus)
 
     token_freq, entries = build_and_save_vocab(
-        policy, texts, args.vocab_size, args.vocab_out, args.vocab_stats_out,
+        policy,
+        texts,
+        args.vocab_size,
+        args.vocab_out,
+        args.vocab_stats_out,
         deterministic=args.deterministic,
         progress=lambda it, desc: tqdm(it, desc=desc, unit="doc"),
     )
 
     distinct_spans = sum(len(c) for c in token_freq.values())
-    print(f"\nvocab entries kept: {len(entries)} (of {distinct_spans} distinct spans seen)")
+    print(
+        f"\nvocab entries kept: {len(entries)} (of {distinct_spans} distinct spans seen)"
+    )
 
     if args.vocab_preview:
-        print(f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:")
+        print(
+            f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:"
+        )
         for span, total, _ in entries[: args.vocab_preview]:
             print(f"  {total:6d}  {span!r}")
 

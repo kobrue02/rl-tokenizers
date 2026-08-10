@@ -94,7 +94,9 @@ def induce_boundaries_batch(model, byte_seqs, device="cpu"):
     byte_seqs, each directly usable by common.bytes_utils.spans_from_boundaries.
     """
     tensors = [_to_tensor(s, device) for s in byte_seqs]
-    lengths = torch.tensor([t.shape[0] for t in tensors], dtype=torch.long, device=device)
+    lengths = torch.tensor(
+        [t.shape[0] for t in tensors], dtype=torch.long, device=device
+    )
     T = int(lengths.max().item()) if len(tensors) else 0
     B = len(tensors)
     padded = torch.zeros(B, T, dtype=torch.long, device=device)

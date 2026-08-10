@@ -17,7 +17,7 @@ def renyi_entropy(probs, alpha):
         return 0.0
     if abs(alpha - 1.0) < 1e-9:
         return float(-np.sum(probs * np.log(probs)))  # Shannon entropy, limiting case
-    return float((1.0 / (1.0 - alpha)) * np.log(np.sum(probs ** alpha)))
+    return float((1.0 / (1.0 - alpha)) * np.log(np.sum(probs**alpha)))
 
 
 def renyi_efficiency(freqs, alpha=2.5, vocab_size=None):

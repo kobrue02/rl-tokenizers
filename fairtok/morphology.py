@@ -70,7 +70,11 @@ def _iter_glot500_words(stem, max_words, _file_cache={}):
     # ~7 languages we train would re-list Glot500's full ~1800-file tree from scratch.
     if GLOT500_REPO not in _file_cache:
         _file_cache[GLOT500_REPO] = list_repo_files(GLOT500_REPO, repo_type="dataset")
-    files = sorted(f for f in _file_cache[GLOT500_REPO] if f.startswith(f"{stem}/train/") and f.endswith(".arrow"))
+    files = sorted(
+        f
+        for f in _file_cache[GLOT500_REPO]
+        if f.startswith(f"{stem}/train/") and f.endswith(".arrow")
+    )
 
     import pyarrow as pa
     import pyarrow.ipc as ipc
@@ -99,7 +103,9 @@ def _iter_madlad_words(code, max_words, _file_cache={}):
     files = [f for f in _file_cache[MADLAD_REPO] if f.startswith(f"data-v1p5/{code}/")]
     # prefer clean_docs (filtered) shards; only fall through to noisy_docs if clean
     # doesn't cover the word budget on its own
-    ordered = sorted(f for f in files if "clean_docs" in f) + sorted(f for f in files if "noisy_docs" in f)
+    ordered = sorted(f for f in files if "clean_docs" in f) + sorted(
+        f for f in files if "noisy_docs" in f
+    )
 
     total = 0
     for f in ordered:
@@ -117,7 +123,9 @@ def _iter_madlad_words(code, max_words, _file_cache={}):
 _FETCHERS = {"glot500": _iter_glot500_words, "madlad400": _iter_madlad_words}
 
 
-def collect_word_counts(lang, max_words_per_source=2_000_000, max_word_types=300_000, sources=None):
+def collect_word_counts(
+    lang, max_words_per_source=2_000_000, max_word_types=300_000, sources=None
+):
     """sources defaults to MORPH_SOURCES[lang]; pass explicitly to override (e.g. for
     a language not in the built-in registry). Returns a Counter, or an empty Counter
     if lang has no configured source (e.g. kas/nqo) -- callers check for emptiness,
@@ -134,7 +142,9 @@ def collect_word_counts(lang, max_words_per_source=2_000_000, max_word_types=300
     return counts
 
 
-def train_morfessor(word_counts, freq_threshold=1, corpusweight=1.0, init_rand_split=0.5, seed=0):
+def train_morfessor(
+    word_counts, freq_threshold=1, corpusweight=1.0, init_rand_split=0.5, seed=0
+):
     """word_counts: a Counter (or dict) of {word: count} -- see collect_word_counts.
     freq_threshold is forwarded to Morfessor's own load_data (discard word types
     occurring fewer than this many times -- crawl noise/OCR-error/singleton-typo
@@ -169,7 +179,8 @@ def train_morfessor(word_counts, freq_threshold=1, corpusweight=1.0, init_rand_s
     model = morfessor.BaselineModel(corpusweight=corpusweight)
     model.load_data(
         [(count, word) for word, count in word_counts.items()],
-        freqthreshold=freq_threshold, init_rand_split=init_rand_split,
+        freqthreshold=freq_threshold,
+        init_rand_split=init_rand_split,
     )
     model.train_batch(algorithm="recursive")
     return model

@@ -1,5 +1,6 @@
 """Command-line entry point. Every GRPOConfig field becomes a `--flag`, generated
-from the dataclass itself so this can't drift out of sync with fairtok.train.GRPOConfig."""
+from the dataclass itself so this can't drift out of sync with fairtok.train.GRPOConfig.
+"""
 
 import argparse
 import dataclasses
@@ -15,16 +16,18 @@ from .train import GRPOConfig, GRPOTrainer
 # "(GRPOConfig.field, default: X)" alone -- merged into the auto-generated help.
 _HELP_OVERRIDES = {
     "max_steps": "0 derives the step count from num_train_epochs; set explicitly to override "
-                 "with a raw step count instead (bypasses epoch semantics entirely)",
+    "with a raw step count instead (bypasses epoch semantics entirely)",
     "num_train_epochs": "1 epoch = 1 full shuffled traversal of every loaded group, however many "
-                         "steps that takes given per_device_train_batch_size -- not a fixed step count",
+    "steps that takes given per_device_train_batch_size -- not a fixed step count",
     "eval_steps": "0 disables; > 0 automatically loads BOUQuET dev as held-out eval data "
-                  "(skipped with a warning for --data-source synthetic, which has none)",
+    "(skipped with a warning for --data-source synthetic, which has none)",
 }
 
 
 def build_arg_parser():
-    parser = argparse.ArgumentParser(description="Train the fairness-aware byte-boundary policy.")
+    parser = argparse.ArgumentParser(
+        description="Train the fairness-aware byte-boundary policy."
+    )
 
     for field in dataclasses.fields(GRPOConfig):
         flag = "--" + field.name.replace("_", "-")
@@ -34,34 +37,53 @@ def build_arg_parser():
         if field.type is bool:
             # type=bool would make "--flag false" truthy (any non-empty string is
             # truthy) -- BooleanOptionalAction gives a real --flag/--no-flag pair.
-            parser.add_argument(flag, action=argparse.BooleanOptionalAction, default=field.default, help=help_text)
+            parser.add_argument(
+                flag,
+                action=argparse.BooleanOptionalAction,
+                default=field.default,
+                help=help_text,
+            )
         else:
-            parser.add_argument(flag, type=field.type, default=field.default, help=help_text)
+            parser.add_argument(
+                flag, type=field.type, default=field.default, help=help_text
+            )
 
     parser.add_argument(
-        "--data-source", choices=DATA_SOURCES, default="all",
+        "--data-source",
+        choices=DATA_SOURCES,
+        default="all",
         help="'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus",
     )
     parser.add_argument(
-        "--num-groups", type=int, default=None,
+        "--num-groups",
+        type=int,
+        default=None,
         help="cap the number of parallel groups loaded (real sources are large; omit for the full set)",
     )
     parser.add_argument(
-        "--langs", type=str, default=None,
+        "--langs",
+        type=str,
+        default=None,
         help="comma-separated language codes; 'all' to use every language oldi_seed/flores_dev "
-             "natively offer (smol stays on the 9-language panel regardless); "
-             "defaults to the 9-language panel for the chosen data source",
+        "natively offer (smol stays on the 9-language panel regardless); "
+        "defaults to the 9-language panel for the chosen data source",
     )
     parser.add_argument(
-        "--vocab-out", type=str, default="vocab.json",
+        "--vocab-out",
+        type=str,
+        default="vocab.json",
         help="where to save the final vocab as a HuggingFace-style {token: id} JSON file; empty string to skip",
     )
     parser.add_argument(
-        "--vocab-stats-out", type=str, default="vocab_stats.json",
+        "--vocab-stats-out",
+        type=str,
+        default="vocab_stats.json",
         help="companion file with per-entry frequency and per-language usage breakdown; empty string to skip",
     )
     parser.add_argument(
-        "--vocab-preview", type=int, default=20,
+        "--vocab-preview",
+        type=int,
+        default=20,
         help="print this many of the most frequent vocab entries to the terminal; 0 to skip",
     )
     return parser
@@ -83,11 +105,15 @@ def _load_eval_groups(cfg, args):
     if cfg.eval_steps <= 0:
         return None
     if args.data_source == "synthetic":
-        print("warning: --eval-steps > 0 but --data-source synthetic has no real "
-              "BOUQuET counterpart -- skipping periodic evaluation")
+        print(
+            "warning: --eval-steps > 0 but --data-source synthetic has no real "
+            "BOUQuET counterpart -- skipping periodic evaluation"
+        )
         return None
     eval_groups = load_bouquet_dev()
-    print(f"loaded {len(eval_groups)} BOUQuET dev groups for periodic evaluation (every {cfg.eval_steps} steps)")
+    print(
+        f"loaded {len(eval_groups)} BOUQuET dev groups for periodic evaluation (every {cfg.eval_steps} steps)"
+    )
     return eval_groups
 
 
@@ -105,9 +131,14 @@ def main(argv=None):
     entries = vocab_with_stats(token_freq, cfg.vocab_size)
 
     if args.vocab_preview:
-        print(f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:")
+        print(
+            f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:"
+        )
         for span, total, per_lang in entries[: args.vocab_preview]:
-            langs = ", ".join(f"{lang}:{c}" for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1]))
+            langs = ", ".join(
+                f"{lang}:{c}"
+                for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1])
+            )
             print(f"  {total:6d}  {span!r:20s} [{langs}]")
 
     if args.vocab_out:

@@ -6,7 +6,12 @@ reverse, and never edits anything under fairtok/.
 """
 
 from .model import MantaModel, MantaOutput, next_byte_loss
-from .segment import boundaries_from_assignment, induce_boundaries, induce_boundaries_batch, induce_spans
+from .segment import (
+    boundaries_from_assignment,
+    induce_boundaries,
+    induce_boundaries_batch,
+    induce_spans,
+)
 from .train import MantaConfig, MantaTrainer, run_smoke_test
 
 __all__ = [

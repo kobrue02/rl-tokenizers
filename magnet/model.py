@@ -127,7 +127,9 @@ class TransformerBlock(nn.Module):
         super().__init__()
         d_ff = d_ff or 4 * d_model
         self.ln1 = nn.LayerNorm(d_model)
-        self.attn = nn.MultiheadAttention(d_model, n_heads, dropout=dropout, batch_first=True)
+        self.attn = nn.MultiheadAttention(
+            d_model, n_heads, dropout=dropout, batch_first=True
+        )
         self.ln2 = nn.LayerNorm(d_model)
         self.ff = nn.Sequential(
             nn.Linear(d_model, d_ff),
@@ -146,9 +148,18 @@ class TransformerBlock(nn.Module):
         # length for pre/post_layers, much shorter segment count for
         # shortened_layers), and at this model scale the cost of a fresh
         # (L, L) triu is negligible next to the attention matmul itself.
-        causal_mask = torch.triu(torch.ones(L, L, dtype=torch.bool, device=x.device), diagonal=1)
+        causal_mask = torch.triu(
+            torch.ones(L, L, dtype=torch.bool, device=x.device), diagonal=1
+        )
         h = self.ln1(x)
-        attn_out, _ = self.attn(h, h, h, attn_mask=causal_mask, key_padding_mask=key_padding_mask, need_weights=False)
+        attn_out, _ = self.attn(
+            h,
+            h,
+            h,
+            attn_mask=causal_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=False,
+        )
         x = x + attn_out
         x = x + self.ff(self.ln2(x))
         return x
@@ -161,7 +172,9 @@ class BoundaryPredictor(nn.Module):
     def __init__(self, d_model, d_hidden=None, temperature=0.5, threshold=0.5):
         super().__init__()
         d_hidden = d_hidden or d_model
-        self.net = nn.Sequential(nn.Linear(d_model, d_hidden), nn.GELU(), nn.Linear(d_hidden, 1))
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_hidden), nn.GELU(), nn.Linear(d_hidden, 1)
+        )
         self.temperature = temperature
         self.threshold = threshold
 
@@ -182,7 +195,9 @@ class BoundaryPredictor(nn.Module):
         logits = self.net(hidden).squeeze(-1)
         probs = torch.sigmoid(logits)
         if sample:
-            soft = torch.distributions.RelaxedBernoulli(temperature=self.temperature, probs=probs).rsample()
+            soft = torch.distributions.RelaxedBernoulli(
+                temperature=self.temperature, probs=probs
+            ).rsample()
         else:
             soft = probs
         hard = (soft > self.threshold).float()
@@ -204,9 +219,15 @@ def _seg_valid_mask(hard_boundaries, valid, num_pooled_slots):
     padding) positions -- segments are filled in order 0..count-1 with no gaps,
     so "slot index < count" is exactly "slot is real" for that item."""
     real_segment_count = (hard_boundaries * valid).sum(dim=1, keepdim=True)  # (B, 1)
-    slot_idx = torch.arange(num_pooled_slots - 1, device=hard_boundaries.device).unsqueeze(0)  # (1, S)
+    slot_idx = torch.arange(
+        num_pooled_slots - 1, device=hard_boundaries.device
+    ).unsqueeze(
+        0
+    )  # (1, S)
     real_slots = slot_idx < real_segment_count  # (B, S)
-    null_slot = torch.ones(hard_boundaries.size(0), 1, dtype=torch.bool, device=hard_boundaries.device)
+    null_slot = torch.ones(
+        hard_boundaries.size(0), 1, dtype=torch.bool, device=hard_boundaries.device
+    )
     return torch.cat([null_slot, real_slots], dim=1)  # (B, S+1)
 
 
@@ -242,7 +263,10 @@ class MagnetModel(nn.Module):
         # simplification for why this isn't the reference's relative attention
 
         self.pre_layers = nn.ModuleList(
-            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_pre_layers)]
+            [
+                TransformerBlock(d_model, n_heads, d_ff, dropout)
+                for _ in range(n_pre_layers)
+            ]
         )
 
         # One predictor per SCRIPT (see module docstring point 3) -- ModuleDict
@@ -250,7 +274,10 @@ class MagnetModel(nn.Module):
         # since adding a key later would need a fresh optimizer to see the new
         # parameters).
         self.boundary_predictors = nn.ModuleDict(
-            {script: BoundaryPredictor(d_model, temperature=boundary_temperature) for script in scripts}
+            {
+                script: BoundaryPredictor(d_model, temperature=boundary_temperature)
+                for script in scripts
+            }
         )
 
         self.null_segment = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
@@ -259,10 +286,16 @@ class MagnetModel(nn.Module):
         # variable number of vectors), LayerNorm re-stabilizes it; the reference
         # implementation does the same (`self.down_ln` in magnet.py) at the same spot.
         self.shortened_layers = nn.ModuleList(
-            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_shortened_layers)]
+            [
+                TransformerBlock(d_model, n_heads, d_ff, dropout)
+                for _ in range(n_shortened_layers)
+            ]
         )
         self.post_layers = nn.ModuleList(
-            [TransformerBlock(d_model, n_heads, d_ff, dropout) for _ in range(n_post_layers)]
+            [
+                TransformerBlock(d_model, n_heads, d_ff, dropout)
+                for _ in range(n_post_layers)
+            ]
         )
         self.output_head = nn.Linear(d_model, vocab_size)
 
@@ -293,7 +326,9 @@ class MagnetModel(nn.Module):
         for layer in self.pre_layers:
             x = layer(x, key_padding_mask=key_padding_mask)
 
-        boundary_logits, boundary_probs, hard_boundaries = self.boundary_predictors[script](x, sample=sample)
+        boundary_logits, boundary_probs, hard_boundaries = self.boundary_predictors[
+            script
+        ](x, sample=sample)
         # Padded positions must never register as boundaries -- a phantom cut
         # inside the padding region would corrupt the segment ids computed below
         # (scatter/gather indices), and would double-count in the boundary-rate
@@ -309,7 +344,9 @@ class MagnetModel(nn.Module):
         seg_valid = _seg_valid_mask(hard_boundaries, valid, pooled_with_null.size(1))
         seg_padding_mask = ~seg_valid
         for layer in self.shortened_layers:
-            pooled_with_null = layer(pooled_with_null, key_padding_mask=seg_padding_mask)
+            pooled_with_null = layer(
+                pooled_with_null, key_padding_mask=seg_padding_mask
+            )
 
         upsampled = upsample(hard_boundaries, pooled_with_null)
         h = upsampled + x  # residual connection -- see module docstring step 6

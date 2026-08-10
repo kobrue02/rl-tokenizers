@@ -35,6 +35,6 @@ def spans_from_boundaries(byte_seq, actions):
     last = len(actions) - 1
     for t, action in enumerate(actions):
         if action == 1 or t == last:
-            spans.append(bytes(byte_seq[start:t + 1]))
+            spans.append(bytes(byte_seq[start : t + 1]))
             start = t + 1
     return spans

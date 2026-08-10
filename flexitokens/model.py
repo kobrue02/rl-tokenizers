@@ -112,7 +112,9 @@ def pad_byte_batch(byte_seqs, device="cpu"):
     "no key_padding_mask needed" argument in this module's docstring hold (padding
     is always at the tail, never interleaved with or preceding real content).
     Returns (padded: (B,T) long, lengths: (B,) long)."""
-    lengths = torch.tensor([int(s.shape[0]) for s in byte_seqs], dtype=torch.long, device=device)
+    lengths = torch.tensor(
+        [int(s.shape[0]) for s in byte_seqs], dtype=torch.long, device=device
+    )
     T = int(lengths.max().item()) if len(byte_seqs) else 0
     padded = torch.zeros(len(byte_seqs), T, dtype=torch.long, device=device)
     for i, seq in enumerate(byte_seqs):
@@ -173,21 +175,6 @@ class BoundaryPredictor(nn.Module):
         return self.net(h).squeeze(-1)  # (B, T) raw logits
 
 
-def _seg_valid_mask(hard_boundaries, valid_mask, num_pooled_slots):
-    """Which of downsample()'s (B, S+1) pooled slots are real segments for each
-    batch item, vs. padding slots that exist only because ANOTHER sequence in
-    this batch needed more segments. Slot 0 (the null segment prepended by
-    common.dynamic_pooling.downsample) is always real. A batch item's own real
-    segment count is exactly how many boundaries it fired among its REAL
-    (non-pad) positions -- segments fill in order 0..count-1 with no gaps, so
-    "slot index < count" is exactly "slot is real" for that item."""
-    real_segment_count = (hard_boundaries * valid_mask).sum(dim=1, keepdim=True)  # (B, 1)
-    slot_idx = torch.arange(num_pooled_slots - 1, device=hard_boundaries.device).unsqueeze(0)  # (1, S)
-    real_slots = slot_idx < real_segment_count  # (B, S)
-    null_slot = torch.ones(hard_boundaries.size(0), 1, dtype=torch.bool, device=hard_boundaries.device)
-    return torch.cat([null_slot, real_slots], dim=1)  # (B, S+1)
-
-
 def next_byte_loss(logits, byte_ids, valid_mask):
     """Standard teacher-forced next-byte cross-entropy: logits[:, t] predicts
     byte_ids[:, t+1]. Masked by valid_mask shifted the same way, so padded
@@ -205,7 +192,15 @@ def next_byte_loss(logits, byte_ids, valid_mask):
     return per_position.sum() / denom, mask
 
 
-def boundary_hinge_loss(boundaries, valid_mask, langs, alpha_by_lang, beta_by_lang, default_alpha, default_beta):
+def boundary_hinge_loss(
+    boundaries,
+    valid_mask,
+    langs,
+    alpha_by_lang,
+    beta_by_lang,
+    default_alpha,
+    default_beta,
+):
     """The paper's per-language hinge/range boundary-rate loss:
 
         L_BP(lang) = max(rate - alpha_L, 0) + max(beta_L - rate, 0)
@@ -243,7 +238,11 @@ def boundary_hinge_loss(boundaries, valid_mask, langs, alpha_by_lang, beta_by_la
     losses = []
     unique_langs = sorted(set(langs))
     for lang in unique_langs:
-        idx = torch.tensor([i for i, l in enumerate(langs) if l == lang], device=device, dtype=torch.long)
+        idx = torch.tensor(
+            [i for i, l in enumerate(langs) if l == lang],
+            device=device,
+            dtype=torch.long,
+        )
         b = boundaries.index_select(0, idx)
         m = valid_mask.index_select(0, idx)
         denom = m.sum().clamp(min=1.0)
@@ -283,14 +282,20 @@ class FlexiTokensModel(nn.Module):
         self.byte_embed = nn.Embedding(BYTE_VOCAB_SIZE, d_model)
         self.pos_embed = nn.Embedding(max_position_embeddings, d_model)
 
-        self.pre = TransformerStage(d_model, nhead, num_pre_layers, dim_feedforward, dropout)
+        self.pre = TransformerStage(
+            d_model, nhead, num_pre_layers, dim_feedforward, dropout
+        )
         self.boundary_predictor = BoundaryPredictor(d_model)
         self.null_group = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)  # segment-0
         # placeholder for common.dynamic_pooling.downsample/upsample -- see that
         # module's docstring for why upsample needs something to feed the first
         # real segment's own byte positions with, causally.
-        self.mid = TransformerStage(d_model, nhead, num_mid_layers, dim_feedforward, dropout)
-        self.post = TransformerStage(d_model, nhead, num_post_layers, dim_feedforward, dropout)
+        self.mid = TransformerStage(
+            d_model, nhead, num_mid_layers, dim_feedforward, dropout
+        )
+        self.post = TransformerStage(
+            d_model, nhead, num_post_layers, dim_feedforward, dropout
+        )
         self.byte_head = nn.Linear(d_model, BYTE_VOCAB_SIZE)
 
     def forward(self, byte_ids, lengths, deterministic=False):
@@ -304,7 +309,9 @@ class FlexiTokensModel(nn.Module):
         B, T = byte_ids.shape
         device = byte_ids.device
 
-        positions = torch.arange(T, device=device).clamp(max=self.max_position_embeddings - 1)
+        positions = torch.arange(T, device=device).clamp(
+            max=self.max_position_embeddings - 1
+        )
         x = self.byte_embed(byte_ids) + self.pos_embed(positions).unsqueeze(0)
 
         h_pre = self.pre(x)  # (B,T,D)
@@ -313,12 +320,18 @@ class FlexiTokensModel(nn.Module):
         if deterministic:
             soft = torch.sigmoid(boundary_logits)
         else:
-            temperature = torch.tensor(self.gumbel_temperature, device=device, dtype=boundary_logits.dtype)
-            soft = RelaxedBernoulli(temperature=temperature, logits=boundary_logits).rsample()
+            temperature = torch.tensor(
+                self.gumbel_temperature, device=device, dtype=boundary_logits.dtype
+            )
+            soft = RelaxedBernoulli(
+                temperature=temperature, logits=boundary_logits
+            ).rsample()
         hard = (soft > 0.5).float()
         boundaries = hard - soft.detach() + soft  # straight-through estimator
 
-        valid_mask = (torch.arange(T, device=device).unsqueeze(0) < lengths.unsqueeze(1)).float()
+        valid_mask = (
+            torch.arange(T, device=device).unsqueeze(0) < lengths.unsqueeze(1)
+        ).float()
         # Padded positions must never register as boundaries: downsample/upsample
         # (below) size their pooled sequence directly off boundaries.sum(-1).max(),
         # with no separate masking option, so a phantom boundary sampled in the

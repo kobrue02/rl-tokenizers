@@ -86,7 +86,9 @@ class MagnetConfig:
     # plain-BPE anchor (contrast fairtok.train._plain_bpe_target_rate) -- the
     # task spec explicitly allows this simplification ("simpler -- just expose
     # it as a configurable per-script hyperparameter").
-    per_script_boundary_prior: dict = dataclasses.field(default_factory=dict)  # optional
+    per_script_boundary_prior: dict = dataclasses.field(
+        default_factory=dict
+    )  # optional
     # {script: prior} overrides for default_boundary_prior -- e.g. a script with
     # denser byte-per-character encoding (e.g. Beng, Arab under UTF-8, which use
     # 2-3 bytes per character vs Latn's 1) might warrant a lower boundary rate
@@ -104,7 +106,9 @@ class MagnetConfig:
     # vocab_size most frequent distinct byte spans (see common.vocab.top_k_by_frequency).
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     log_every: int = 10
-    output_dir: str = ""  # empty string to skip; else a path model.state_dict() is saved to.
+    output_dir: str = (
+        ""  # empty string to skip; else a path model.state_dict() is saved to.
+    )
 
 
 class MagnetTrainer:
@@ -151,7 +155,12 @@ class MagnetTrainer:
         self.model = model
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
-        priors = {script: cfg.per_script_boundary_prior.get(script, cfg.default_boundary_prior) for script in scripts}
+        priors = {
+            script: cfg.per_script_boundary_prior.get(
+                script, cfg.default_boundary_prior
+            )
+            for script in scripts
+        }
         print(f"boundary priors={priors}")
 
         token_freq = defaultdict(Counter)
@@ -166,7 +175,9 @@ class MagnetTrainer:
             # state to maintain, since MAGNET doesn't need GRPO's group-relative
             # baseline at all); fine at smoke-test / baseline scale, but means
             # "epoch" isn't a meaningful concept here the way it is in GRPOConfig.
-            group_idx = rng.integers(0, len(self.train_groups), size=cfg.per_device_train_batch_size)
+            group_idx = rng.integers(
+                0, len(self.train_groups), size=cfg.per_device_train_batch_size
+            )
             batch_groups = [self.train_groups[i] for i in group_idx]
 
             # Flatten every (lang, text) pair in the batch and bucket by script --
@@ -178,7 +189,9 @@ class MagnetTrainer:
             items_by_script = defaultdict(list)
             for group in batch_groups:
                 for lang, text in group.items():
-                    items_by_script[lang_to_script(lang)].append((lang, bytes_to_tensor(text, device)))
+                    items_by_script[lang_to_script(lang)].append(
+                        (lang, bytes_to_tensor(text, device))
+                    )
 
             optimizer.zero_grad()
             total_lm_loss = torch.zeros((), device=device)
@@ -197,7 +210,9 @@ class MagnetTrainer:
                 for b, s in enumerate(seqs):
                     byte_ids[b, : s.shape[0]] = s
 
-                logits, boundary_probs, hard_boundaries, pad_mask = model(byte_ids, lengths, script, sample=True)
+                logits, boundary_probs, hard_boundaries, pad_mask = model(
+                    byte_ids, lengths, script, sample=True
+                )
 
                 # Next-byte CE, masked to real (b, t) pairs that both (a) aren't
                 # padding and (b) actually have a next byte (i.e. t isn't that
@@ -211,7 +226,9 @@ class MagnetTrainer:
                 shift_targets = byte_ids[:, 1:]
                 shift_mask = has_next[:, :-1]
                 ce = F.cross_entropy(
-                    shift_logits.reshape(-1, shift_logits.size(-1)), shift_targets.reshape(-1), reduction="none"
+                    shift_logits.reshape(-1, shift_logits.size(-1)),
+                    shift_targets.reshape(-1),
+                    reduction="none",
                 )
                 ce = ce.view(B, T - 1) * shift_mask.float()
                 n_valid = shift_mask.sum().clamp_min(1)
@@ -226,7 +243,10 @@ class MagnetTrainer:
                 boundary_count = hard_boundaries.sum(dim=1)
                 total_count = lengths.to(hard_boundaries.dtype)
                 binomial = torch.distributions.Binomial(
-                    total_count=total_count, probs=torch.tensor(prior, device=device, dtype=hard_boundaries.dtype)
+                    total_count=total_count,
+                    probs=torch.tensor(
+                        prior, device=device, dtype=hard_boundaries.dtype
+                    ),
                 )
                 boundary_loss = -binomial.log_prob(boundary_count).mean()
 
@@ -242,7 +262,9 @@ class MagnetTrainer:
                 # same way by common.vocab.top_k_by_frequency at the end.
                 for b, (lang, seq) in enumerate(zip(langs, seqs)):
                     L = int(lengths[b].item())
-                    boundaries = [int(v) for v in hard_boundaries[b, :L].round().tolist()]
+                    boundaries = [
+                        int(v) for v in hard_boundaries[b, :L].round().tolist()
+                    ]
                     token_freq[lang].update(spans_from_boundaries(seq, boundaries))
 
             lm_loss_avg = total_lm_loss / n_subbatches
@@ -251,7 +273,9 @@ class MagnetTrainer:
             loss.backward()
             optimizer.step()
 
-            boundary_rate = total_boundary_count / total_real_bytes if total_real_bytes else 0.0
+            boundary_rate = (
+                total_boundary_count / total_real_bytes if total_real_bytes else 0.0
+            )
             loss_trace.append(float(loss.item()))
             boundary_rate_trace.append(boundary_rate)
 
@@ -263,7 +287,10 @@ class MagnetTrainer:
             }
             pbar.set_postfix(postfix)
             if step % cfg.log_every == 0:
-                pbar.write(f"[step {step:4d}] " + " ".join(f"{k}={v}" for k, v in postfix.items()))
+                pbar.write(
+                    f"[step {step:4d}] "
+                    + " ".join(f"{k}={v}" for k, v in postfix.items())
+                )
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         self.token_freq = token_freq
@@ -295,7 +322,9 @@ def run_smoke_test():
     """
     from common.data import LANG_PROFILES, make_synthetic_parallel_groups
 
-    args = MagnetConfig(max_steps=80, per_device_train_batch_size=6, vocab_size=256, log_every=10)
+    args = MagnetConfig(
+        max_steps=80, per_device_train_batch_size=6, vocab_size=256, log_every=10
+    )
     langs = list(LANG_PROFILES)
     train_groups = make_synthetic_parallel_groups(200, langs=langs, seed=args.seed)
 
@@ -305,11 +334,17 @@ def run_smoke_test():
     first_10 = float(np.mean(loss_trace[:10]))
     last_10 = float(np.mean(loss_trace[-10:]))
     final_rate = float(np.mean(boundary_rate_trace[-10:]))
-    print(f"\nloss: first-10-avg={first_10:.4f}  last-10-avg={last_10:.4f}  (decreased={last_10 < first_10})")
-    print(f"boundary rate (last-10-avg)={final_rate:.4f}  (collapsed={final_rate < 0.01 or final_rate > 0.99})")
+    print(
+        f"\nloss: first-10-avg={first_10:.4f}  last-10-avg={last_10:.4f}  (decreased={last_10 < first_10})"
+    )
+    print(
+        f"boundary rate (last-10-avg)={final_rate:.4f}  (collapsed={final_rate < 0.01 or final_rate > 0.99})"
+    )
     print(f"final vocab size={len(final_vocab)}")
 
-    print("\nper-language metrics on the induced vocabulary (common.metrics, unmodified):")
+    print(
+        "\nper-language metrics on the induced vocabulary (common.metrics, unmodified):"
+    )
     lang_renyi = {}
     for lang, counter in sorted(token_freq.items()):
         num_bytes = sum(len(span) * n for span, n in counter.items())

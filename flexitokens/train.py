@@ -40,8 +40,14 @@ def _byte_len(text):
     return len(text.encode("utf-8")) if isinstance(text, str) else len(text)
 
 
-def derive_alpha_beta(train_groups, anchor_lang="eng", alpha_anchor=0.25, margin_lambda=1.0,
-                       alpha_floor=0.05, alpha_ceiling=0.9):
+def derive_alpha_beta(
+    train_groups,
+    anchor_lang="eng",
+    alpha_anchor=0.25,
+    margin_lambda=1.0,
+    alpha_floor=0.05,
+    alpha_ceiling=0.9,
+):
     """Per-language target boundary rate alpha_L and band floor beta_L.
 
     Neither quantity is pinned down by the paper at the level of a concrete
@@ -100,17 +106,27 @@ def derive_alpha_beta(train_groups, anchor_lang="eng", alpha_anchor=0.25, margin
         for lang, text in group.items():
             lengths_by_lang[lang].append(_byte_len(text))
 
-    anchor = anchor_lang if anchor_lang in lengths_by_lang else next(iter(lengths_by_lang), None)
+    anchor = (
+        anchor_lang
+        if anchor_lang in lengths_by_lang
+        else next(iter(lengths_by_lang), None)
+    )
     if anchor is None:
-        raise ValueError("train_groups is empty -- cannot derive alpha_L/beta_L from no data")
+        raise ValueError(
+            "train_groups is empty -- cannot derive alpha_L/beta_L from no data"
+        )
     if anchor != anchor_lang:
         print(
             f"[flexitokens] anchor language {anchor_lang!r} not present in this corpus; "
             f"falling back to {anchor!r} as the alpha_L anchor"
         )
 
-    paired_anchor_lengths = defaultdict(list)  # lang -> anchor's length in groups where both present
-    paired_lang_lengths = defaultdict(list)  # lang -> lang's own length in those same groups
+    paired_anchor_lengths = defaultdict(
+        list
+    )  # lang -> anchor's length in groups where both present
+    paired_lang_lengths = defaultdict(
+        list
+    )  # lang -> lang's own length in those same groups
     for group in train_groups:
         if anchor not in group:
             continue
@@ -124,7 +140,9 @@ def derive_alpha_beta(train_groups, anchor_lang="eng", alpha_anchor=0.25, margin
         anchor_lens = paired_anchor_lengths.get(lang, [])
         lang_lens = paired_lang_lengths.get(lang, [])
         if anchor_lens and sum(anchor_lens) > 0:
-            ratio = (sum(lang_lens) / len(lang_lens)) / (sum(anchor_lens) / len(anchor_lens))
+            ratio = (sum(lang_lens) / len(lang_lens)) / (
+                sum(anchor_lens) / len(anchor_lens)
+            )
         else:
             ratio = 1.0  # no group pairs this language with the anchor -- no evidence
             # of a byte-length disparity, so fall back to treating it like the anchor
@@ -215,22 +233,33 @@ class FlexiTokensTrainer:
         print(f"device={device}")
 
         alpha_by_lang, beta_by_lang, anchor = derive_alpha_beta(
-            self.train_groups, cfg.anchor_lang, cfg.alpha_anchor, cfg.margin_lambda,
-            cfg.alpha_floor, cfg.alpha_ceiling,
+            self.train_groups,
+            cfg.anchor_lang,
+            cfg.alpha_anchor,
+            cfg.margin_lambda,
+            cfg.alpha_floor,
+            cfg.alpha_ceiling,
         )
         self.alpha_by_lang, self.beta_by_lang = alpha_by_lang, beta_by_lang
         print(f"anchor language: {anchor!r}")
         for lang in sorted(alpha_by_lang):
-            print(f"  alpha[{lang}]={alpha_by_lang[lang]:.4f}  beta[{lang}]={beta_by_lang[lang]:.4f}")
+            print(
+                f"  alpha[{lang}]={alpha_by_lang[lang]:.4f}  beta[{lang}]={beta_by_lang[lang]:.4f}"
+            )
         default_alpha = float(np.mean(list(alpha_by_lang.values())))
         default_beta = float(np.mean(list(beta_by_lang.values())))
 
         model = FlexiTokensModel(
-            d_model=cfg.d_model, nhead=cfg.nhead, num_pre_layers=cfg.num_pre_layers,
-            num_mid_layers=cfg.num_mid_layers, num_post_layers=cfg.num_post_layers,
+            d_model=cfg.d_model,
+            nhead=cfg.nhead,
+            num_pre_layers=cfg.num_pre_layers,
+            num_mid_layers=cfg.num_mid_layers,
+            num_post_layers=cfg.num_post_layers,
             gumbel_temperature=cfg.gumbel_temperature,
         ).to(device)
-        self.model = model  # set now so anything inspecting mid-training sees the live model
+        self.model = (
+            model  # set now so anything inspecting mid-training sees the live model
+        )
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
         token_freq = defaultdict(Counter)
@@ -246,7 +275,9 @@ class FlexiTokensTrainer:
             for group in batch_groups:
                 langs = list(group.keys())
                 if cfg.group_sample_size and len(langs) > cfg.group_sample_size:
-                    langs = list(rng.choice(langs, size=cfg.group_sample_size, replace=False))
+                    langs = list(
+                        rng.choice(langs, size=cfg.group_sample_size, replace=False)
+                    )
                 for lang in langs:
                     batch_items.append((lang, bytes_to_tensor(group[lang], device)))
             langs = [lang for lang, _ in batch_items]
@@ -256,8 +287,13 @@ class FlexiTokensTrainer:
             out = model(byte_ids, lengths, deterministic=False)
             ce_loss, _ = next_byte_loss(out["logits"], byte_ids, out["valid_mask"])
             hinge_loss, per_lang_rate = boundary_hinge_loss(
-                out["boundaries"], out["valid_mask"], langs, alpha_by_lang, beta_by_lang,
-                default_alpha, default_beta,
+                out["boundaries"],
+                out["valid_mask"],
+                langs,
+                alpha_by_lang,
+                beta_by_lang,
+                default_alpha,
+                default_beta,
             )
             loss = ce_loss + cfg.lambda_hinge * hinge_loss
             loss.backward()
@@ -282,7 +318,9 @@ class FlexiTokensTrainer:
                 token_freq[lang].update(spans_from_boundaries(byte_seq, actions))
 
             pbar.set_postfix(
-                loss=f"{loss.item():.3f}", ce=f"{ce_loss.item():.3f}", hinge=f"{hinge_loss.item():.4f}"
+                loss=f"{loss.item():.3f}",
+                ce=f"{ce_loss.item():.3f}",
+                hinge=f"{hinge_loss.item():.4f}",
             )
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
@@ -291,13 +329,17 @@ class FlexiTokensTrainer:
 
         if cfg.output_dir:
             torch.save(
-                {"state_dict": model.state_dict(), "config": dataclasses.asdict(cfg)}, cfg.output_dir
+                {"state_dict": model.state_dict(), "config": dataclasses.asdict(cfg)},
+                cfg.output_dir,
             )
             print(f"saved checkpoint to {cfg.output_dir}")
 
         info = {
-            "alpha": alpha_by_lang, "beta": beta_by_lang, "anchor": anchor,
-            "loss_history": self.loss_history, "rate_history": dict(self.rate_history),
+            "alpha": alpha_by_lang,
+            "beta": beta_by_lang,
+            "anchor": anchor,
+            "loss_history": self.loss_history,
+            "rate_history": dict(self.rate_history),
         }
         return model, token_freq, final_vocab, info
 
@@ -351,7 +393,9 @@ def run_smoke_test():
         # anchor explicitly rather than relying on derive_alpha_beta's fallback.
     )
     langs = list(LANG_PROFILES)
-    train_groups = make_synthetic_parallel_groups(300, langs=langs, seed=args.seed, min_len=30, max_len=80)
+    train_groups = make_synthetic_parallel_groups(
+        300, langs=langs, seed=args.seed, min_len=30, max_len=80
+    )
 
     trainer = FlexiTokensTrainer(args, train_groups)
     model, token_freq, final_vocab, info = trainer.train()
@@ -359,16 +403,24 @@ def run_smoke_test():
     window = min(10, len(trainer.loss_history) // 2) or 1
     early = float(np.mean(trainer.loss_history[:window]))
     late = float(np.mean(trainer.loss_history[-window:]))
-    print(f"\nloss: early_avg(first {window})={early:.4f}  late_avg(last {window})={late:.4f}")
+    print(
+        f"\nloss: early_avg(first {window})={early:.4f}  late_avg(last {window})={late:.4f}"
+    )
     assert late < early, f"loss did not decrease: early={early:.4f} late={late:.4f}"
 
-    final_rates = {lang: float(np.mean(v[-window:])) for lang, v in trainer.rate_history.items()}
-    print(f"final per-language boundary rates (avg of last {window} steps): {final_rates}")
+    final_rates = {
+        lang: float(np.mean(v[-window:])) for lang, v in trainer.rate_history.items()
+    }
+    print(
+        f"final per-language boundary rates (avg of last {window} steps): {final_rates}"
+    )
     for lang, rate in final_rates.items():
         assert 0.01 < rate < 0.99, f"boundary rate collapsed for {lang!r}: {rate:.4f}"
     rate_spread = max(final_rates.values()) - min(final_rates.values())
     print(f"boundary-rate spread across languages: {rate_spread:.4f}")
-    assert rate_spread > 1e-3, "boundary rates identical across languages -- hinge loss had no differentiating effect"
+    assert (
+        rate_spread > 1e-3
+    ), "boundary rates identical across languages -- hinge loss had no differentiating effect"
 
     print(f"final vocab size={len(final_vocab)}")
     _print_vocab_metrics(token_freq)

@@ -177,9 +177,12 @@ def sinusoidal_positional_encoding(length, dim, device):
     for pooling -- see MantaModel.forward), matching the fact that only the
     frontier decision, not the pooled block content, needs position info.
     """
-    position = torch.arange(length, device=device, dtype=torch.float32).unsqueeze(1)  # (T, 1)
+    position = torch.arange(length, device=device, dtype=torch.float32).unsqueeze(
+        1
+    )  # (T, 1)
     div_term = torch.exp(
-        torch.arange(0, dim, 2, device=device, dtype=torch.float32) * (-math.log(10000.0) / dim)
+        torch.arange(0, dim, 2, device=device, dtype=torch.float32)
+        * (-math.log(10000.0) / dim)
     )  # (ceil(dim/2),)
     pe = torch.zeros(length, dim, device=device)
     pe[:, 0::2] = torch.sin(position * div_term)
@@ -212,16 +215,26 @@ class SlidingWindowAttention(nn.Module):
         padding and must never be attended TO (it can still safely be a query --
         its output is simply never read by the caller)."""
         B, T, D = x.shape
-        qkv = self.qkv(x).view(B, T, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        qkv = (
+            self.qkv(x)
+            .view(B, T, 3, self.num_heads, self.head_dim)
+            .permute(2, 0, 3, 1, 4)
+        )
         q, k, v = qkv[0], qkv[1], qkv[2]  # each (B, num_heads, T, head_dim)
 
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (B, H, T, T)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(
+            self.head_dim
+        )  # (B, H, T, T)
 
         idx = torch.arange(T, device=x.device)
         # allowed[i, j] = True iff j is within `window` positions of i, in EITHER
         # direction -- the "bidirectional local-window" part of the design.
-        outside_band = (idx.unsqueeze(0) - idx.unsqueeze(1)).abs() > self.window  # (T, T)
-        disallow = outside_band.unsqueeze(0).unsqueeze(0)  # (1, 1, T, T), broadcasts over B, H
+        outside_band = (
+            idx.unsqueeze(0) - idx.unsqueeze(1)
+        ).abs() > self.window  # (T, T)
+        disallow = outside_band.unsqueeze(0).unsqueeze(
+            0
+        )  # (1, 1, T, T), broadcasts over B, H
         if key_padding_mask is not None:
             disallow = disallow | key_padding_mask.view(B, 1, 1, T)
         scores = scores.masked_fill(disallow, float("-inf"))
@@ -247,7 +260,9 @@ class FrontierLayer(nn.Module):
         self.norm1 = nn.LayerNorm(dim)
         self.attn = SlidingWindowAttention(dim, num_heads, window)
         self.norm2 = nn.LayerNorm(dim)
-        self.ffn = nn.Sequential(nn.Linear(dim, dim * ffn_mult), nn.GELU(), nn.Linear(dim * ffn_mult, dim))
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, dim * ffn_mult), nn.GELU(), nn.Linear(dim * ffn_mult, dim)
+        )
 
     def forward(self, x, key_padding_mask=None):
         x = x + self.attn(self.norm1(x), key_padding_mask)
@@ -264,7 +279,9 @@ class FrontierPredictor(nn.Module):
 
     def __init__(self, dim, num_heads, window, num_layers):
         super().__init__()
-        self.layers = nn.ModuleList([FrontierLayer(dim, num_heads, window) for _ in range(num_layers)])
+        self.layers = nn.ModuleList(
+            [FrontierLayer(dim, num_heads, window) for _ in range(num_layers)]
+        )
         self.head = nn.Linear(dim, 1)
 
     def forward(self, x, key_padding_mask=None):
@@ -317,12 +334,18 @@ class MantaModel(nn.Module):
         self.max_extra_sigma = max_extra_sigma
 
         self.byte_embed = nn.Embedding(256, dim)
-        self.frontier = FrontierPredictor(dim, num_frontier_heads, window, num_frontier_layers)
+        self.frontier = FrontierPredictor(
+            dim, num_frontier_heads, window, num_frontier_layers
+        )
         # bidirectional: block b's representation can depend on blocks after it
         # too, matching the paper's non-causal, encoder-style block-level layers
         # (see module docstring, point 5, for why GRU rather than transformer here).
         self.block_rnn = nn.GRU(
-            dim, block_hidden_size, num_layers=num_block_layers, batch_first=True, bidirectional=True
+            dim,
+            block_hidden_size,
+            num_layers=num_block_layers,
+            batch_first=True,
+            bidirectional=True,
         )
         # Bidirectional GRU output is 2*block_hidden_size wide; project back down
         # to `dim` so the upsampled byte-level hidden state has the same width the
@@ -344,15 +367,21 @@ class MantaModel(nn.Module):
         """
         B, T = byte_ids.shape
         device = byte_ids.device
-        byte_emb = self.byte_embed(byte_ids)  # (B, T, dim) -- pooled on directly, no positional info
+        byte_emb = self.byte_embed(
+            byte_ids
+        )  # (B, T, dim) -- pooled on directly, no positional info
 
         position_idx = torch.arange(T, device=device)
-        padding_mask = position_idx.unsqueeze(0) >= lengths.unsqueeze(1)  # (B, T), True = pad
+        padding_mask = position_idx.unsqueeze(0) >= lengths.unsqueeze(
+            1
+        )  # (B, T), True = pad
 
         # Positional encoding is added ONLY for the frontier predictor's input --
         # the raw byte_emb used for pooling below stays position-free (see
         # sinusoidal_positional_encoding's docstring for why).
-        frontier_input = byte_emb + sinusoidal_positional_encoding(T, self.dim, device).unsqueeze(0)
+        frontier_input = byte_emb + sinusoidal_positional_encoding(
+            T, self.dim, device
+        ).unsqueeze(0)
         frontier_logit = self.frontier(frontier_input, padding_mask)  # (B, T)
         p = torch.sigmoid(frontier_logit)
         # Padded positions never contribute frontier "events": zeroing them out
@@ -381,17 +410,23 @@ class MantaModel(nn.Module):
         last_idx = (lengths - 1).clamp_min(0)
         mu_L = mu.gather(1, last_idx.unsqueeze(1)).squeeze(1)  # (B,)
         sigma_L = sigma.gather(1, last_idx.unsqueeze(1)).squeeze(1)  # (B,)
-        num_blocks_per_seq = torch.ceil(mu_L + self.max_extra_sigma * sigma_L).long() + 1
+        num_blocks_per_seq = (
+            torch.ceil(mu_L + self.max_extra_sigma * sigma_L).long() + 1
+        )
         num_blocks = int(num_blocks_per_seq.max().clamp_min(1).item())
 
-        block_idx = torch.arange(num_blocks, device=device).view(1, 1, num_blocks).float()  # (1,1,nb)
+        block_idx = (
+            torch.arange(num_blocks, device=device).view(1, 1, num_blocks).float()
+        )  # (1,1,nb)
         mu_exp = mu.unsqueeze(-1)  # (B, T, 1)
         sigma_exp = sigma.unsqueeze(-1)  # (B, T, 1)
         # Gaussian log-density up to the (per-i, constant-over-b) normalizer,
         # which softmax over b cancels out anyway -- exactly the "up to a
         # normalizing constant" the task spec calls for.
-        log_density = -((block_idx - mu_exp) ** 2) / (2 * sigma_exp ** 2)
-        assignment = torch.softmax(log_density, dim=-1)  # (B, T, num_blocks), soft P(byte i in block b)
+        log_density = -((block_idx - mu_exp) ** 2) / (2 * sigma_exp**2)
+        assignment = torch.softmax(
+            log_density, dim=-1
+        )  # (B, T, num_blocks), soft P(byte i in block b)
         # Zero out padded byte ROWS so they can't contribute weight to any
         # block's pooled embedding below (softmax alone can't do this -- it only
         # guarantees each ROW sums to 1, not that pad rows are all-zero).
@@ -399,8 +434,12 @@ class MantaModel(nn.Module):
 
         # --- Pooling: weighted average of RAW byte embeddings (module docstring,
         # point 4) via one batched matmul, not a Python loop over blocks. ---
-        weighted_sum = torch.bmm(assignment.transpose(1, 2), byte_emb)  # (B, num_blocks, dim)
-        block_weight = assignment.sum(dim=1, keepdim=True).transpose(1, 2)  # (B, num_blocks, 1)
+        weighted_sum = torch.bmm(
+            assignment.transpose(1, 2), byte_emb
+        )  # (B, num_blocks, dim)
+        block_weight = assignment.sum(dim=1, keepdim=True).transpose(
+            1, 2
+        )  # (B, num_blocks, 1)
         # A block column with ~0 total weight (the "extra" truncation columns
         # some sequences never really use, see num_blocks above) would divide
         # ~0/~0 -> NaN without this epsilon; the numerator is equally tiny there,
@@ -420,7 +459,9 @@ class MantaModel(nn.Module):
         byte_hidden = torch.bmm(assignment, block_hidden)  # (B, T, dim)
 
         logits = self.output_head(byte_hidden)  # (B, T, 256)
-        return MantaOutput(logits=logits, assignment=assignment, frontier_prob=p, mu=mu, sigma=sigma)
+        return MantaOutput(
+            logits=logits, assignment=assignment, frontier_prob=p, mu=mu, sigma=sigma
+        )
 
     def num_parameters(self):
         return sum(p.numel() for p in self.parameters())
@@ -444,7 +485,9 @@ def next_byte_loss(byte_ids, lengths, logits):
     position_idx = torch.arange(T, device=device)
     valid_mask = position_idx.unsqueeze(0) < (lengths - 1).unsqueeze(1)  # (B, T)
 
-    per_position_loss = F.cross_entropy(logits.transpose(1, 2), targets, reduction="none")  # (B, T)
+    per_position_loss = F.cross_entropy(
+        logits.transpose(1, 2), targets, reduction="none"
+    )  # (B, T)
     num_valid = valid_mask.sum().clamp_min(1)
     loss = (per_position_loss * valid_mask).sum() / num_valid
 

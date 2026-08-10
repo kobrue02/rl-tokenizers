@@ -14,7 +14,9 @@ import torch
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
-from .model import FlexiTokensModel  # noqa: F401  (re-exported for convenience / type hints)
+from .model import (
+    FlexiTokensModel,
+)  # noqa: F401  (re-exported for convenience / type hints)
 
 
 @torch.no_grad()
@@ -43,6 +45,10 @@ def induce_spans(model, byte_seq, device="cpu"):
     """Convenience wrapper: induce_boundaries + common.bytes_utils.spans_from_boundaries
     -- the same two-step pipeline fairtok.policy.segment_bytes does internally for
     BytePolicy checkpoints, just with this module's model/boundary source instead."""
-    byte_seq_t = byte_seq if isinstance(byte_seq, torch.Tensor) else bytes_to_tensor(byte_seq, device)
+    byte_seq_t = (
+        byte_seq
+        if isinstance(byte_seq, torch.Tensor)
+        else bytes_to_tensor(byte_seq, device)
+    )
     boundaries = induce_boundaries(model, byte_seq_t, device)
     return spans_from_boundaries(byte_seq_t, boundaries)

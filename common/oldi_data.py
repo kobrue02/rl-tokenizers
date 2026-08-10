@@ -41,17 +41,34 @@ from tqdm.auto import tqdm
 LANGS = ["arz", "bam", "ben", "eng", "kas", "lij", "mni", "nqo", "spa"]
 
 LANG_SCRIPT = {
-    "arz": "arz_Arab", "bam": "bam_Latn", "ben": "ben_Beng", "eng": "eng_Latn",
-    "kas": "kas_Arab", "lij": "lij_Latn", "mni": "mni_Beng", "nqo": "nqo_Nkoo", "spa": "spa_Latn",
+    "arz": "arz_Arab",
+    "bam": "bam_Latn",
+    "ben": "ben_Beng",
+    "eng": "eng_Latn",
+    "kas": "kas_Arab",
+    "lij": "lij_Latn",
+    "mni": "mni_Beng",
+    "nqo": "nqo_Nkoo",
+    "spa": "spa_Latn",
 }
 
 SMOL_CODE = {  # smolsent's own bare-code naming, only for the 8 non-English languages
-    "arz": "arz", "bam": "bm", "ben": "bn", "kas": "ks", "lij": "lij", "mni": "mni-Mtei",
-    "nqo": "nqo", "spa": "es",
+    "arz": "arz",
+    "bam": "bm",
+    "ben": "bn",
+    "kas": "ks",
+    "lij": "lij",
+    "mni": "mni-Mtei",
+    "nqo": "nqo",
+    "spa": "es",
 }
 
 BOUQUET_LANGS = ["arz", "bam", "ben", "eng", "lij", "spa"]
-FLORES_FALLBACK_LANGS = ["kas", "mni", "nqo"]  # not in BOUQuET -- eval via FLORES+ devtest
+FLORES_FALLBACK_LANGS = [
+    "kas",
+    "mni",
+    "nqo",
+]  # not in BOUQuET -- eval via FLORES+ devtest
 
 
 def _download(repo_id, filename):
@@ -72,7 +89,9 @@ def _list_all_stems(repo_id, dir_prefix):
     prefix = dir_prefix + "/"
     files = list_repo_files(repo_id, repo_type="dataset")
     return sorted(
-        f[len(prefix):-len(".jsonl")] for f in files if f.startswith(prefix) and f.endswith(".jsonl")
+        f[len(prefix) : -len(".jsonl")]
+        for f in files
+        if f.startswith(prefix) and f.endswith(".jsonl")
     )
 
 
@@ -95,7 +114,9 @@ def _load_ngram_parallel(repo_id, dir_prefix, langs):
         lang_to_stem = {lang: LANG_SCRIPT[lang] for lang in langs}
 
     per_lang = {}
-    for lang, stem in tqdm(lang_to_stem.items(), desc=f"loading {repo_id}/{dir_prefix}", unit="lang"):
+    for lang, stem in tqdm(
+        lang_to_stem.items(), desc=f"loading {repo_id}/{dir_prefix}", unit="lang"
+    ):
         path = _download(repo_id, f"{dir_prefix}/{stem}.jsonl")
         rows = _load_jsonl(path)
         per_lang[lang] = {r["id"]: r["text"] for r in rows}
@@ -127,7 +148,9 @@ def load_smol_groups(langs=None):
     groups = []
     for i in common_ids:
         group = {lang: per_lang_text[lang][i] for lang in langs}
-        group["eng"] = per_lang_eng[langs[0]][i]  # same shared English source for every lang
+        group["eng"] = per_lang_eng[langs[0]][
+            i
+        ]  # same shared English source for every lang
         groups.append(group)
     return groups
 
@@ -142,7 +165,9 @@ def load_bouquet_dev(langs=BOUQUET_LANGS):
 
     per_lang = {}
     for lang in langs:
-        path = _download("facebook/bouquet", f"data/paragraph_level/dev/{LANG_SCRIPT[lang]}.parquet")
+        path = _download(
+            "facebook/bouquet", f"data/paragraph_level/dev/{LANG_SCRIPT[lang]}.parquet"
+        )
         table = pq.read_table(path).to_pylist()
         per_lang[lang] = {r["par_id"]: r["src_text"] for r in table}
     common_ids = sorted(set.intersection(*(set(d) for d in per_lang.values())))
@@ -167,6 +192,10 @@ def load_all_training_groups(langs=LANGS):
     groups = []
     groups.extend(load_oldi_seed(langs))
     groups.extend(load_flores_plus("dev", langs))
-    smol_langs = [l for l in LANGS if l != "eng"] if langs == "all" else [l for l in langs if l != "eng"]
+    smol_langs = (
+        [l for l in LANGS if l != "eng"]
+        if langs == "all"
+        else [l for l in langs if l != "eng"]
+    )
     groups.extend(load_smol_groups(smol_langs))
     return groups

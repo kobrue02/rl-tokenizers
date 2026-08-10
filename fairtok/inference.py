@@ -23,20 +23,28 @@ def save_checkpoint(policy, path):
     # Read hidden_dim/num_layers off the policy itself rather than requiring the
     # caller to track and pass them separately -- BytePolicy already stores both.
     torch.save(
-        {"hidden_dim": policy.hidden_dim, "num_layers": policy.num_layers, "state_dict": policy.state_dict()},
+        {
+            "hidden_dim": policy.hidden_dim,
+            "num_layers": policy.num_layers,
+            "state_dict": policy.state_dict(),
+        },
         path,
     )
 
 
 def load_checkpoint(path):
     ckpt = torch.load(path, map_location="cpu", weights_only=True)
-    policy = BytePolicy(hidden_dim=ckpt["hidden_dim"], num_layers=ckpt.get("num_layers", 1))
+    policy = BytePolicy(
+        hidden_dim=ckpt["hidden_dim"], num_layers=ckpt.get("num_layers", 1)
+    )
     policy.load_state_dict(ckpt["state_dict"])
     policy.eval()
     return policy
 
 
-def build_vocab_from_corpus(policy, texts, vocab_size, deterministic=True, progress=None):
+def build_vocab_from_corpus(
+    policy, texts, vocab_size, deterministic=True, progress=None
+):
     """texts: either a flat iterable of str/bytes documents (a single unlabeled
     corpus), or a dict {label: iterable_of_documents} if the corpus has
     language/source labels worth keeping in the per-entry breakdown. This
@@ -62,8 +70,12 @@ def build_vocab_from_corpus(policy, texts, vocab_size, deterministic=True, progr
     return token_freq, entries
 
 
-def build_and_save_vocab(policy, texts, vocab_size, out_json, out_stats, deterministic=True, progress=None):
-    token_freq, entries = build_vocab_from_corpus(policy, texts, vocab_size, deterministic, progress)
+def build_and_save_vocab(
+    policy, texts, vocab_size, out_json, out_stats, deterministic=True, progress=None
+):
+    token_freq, entries = build_vocab_from_corpus(
+        policy, texts, vocab_size, deterministic, progress
+    )
     if out_json:
         save_vocab_json(entries, out_json)
     if out_stats:

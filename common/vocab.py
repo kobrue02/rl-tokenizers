@@ -23,8 +23,10 @@ def _bytes_to_unicode():
     that isn't valid UTF-8 on its own -- a boundary policy can place a cut in the
     middle of a multi-byte character) becomes a safe, reversible, JSON-writable
     string. Same scheme `vocab.json` uses in a real HF byte-level tokenizer."""
-    bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("\xa1"), ord("\xac") + 1)) + list(
-        range(ord("\xae"), ord("\xff") + 1)
+    bs = (
+        list(range(ord("!"), ord("~") + 1))
+        + list(range(ord("\xa1"), ord("\xac") + 1))
+        + list(range(ord("\xae"), ord("\xff") + 1))
     )
     cs = bs[:]
     n = 0
@@ -56,7 +58,11 @@ def vocab_with_stats(token_freq_by_lang, k):
         merged.update(counter)
     top = merged.most_common(k)
     return [
-        (span, total, {lang: c[span] for lang, c in token_freq_by_lang.items() if c[span] > 0})
+        (
+            span,
+            total,
+            {lang: c[span] for lang, c in token_freq_by_lang.items() if c[span] > 0},
+        )
         for span, total in top
     ]
 
@@ -137,7 +143,11 @@ def save_vocab_stats(entries, path):
     frequency and per-language usage breakdown, for actually inspecting fairness
     (is this token shared across languages, or a single language's artifact?)."""
     records = [
-        {"token": span_to_token_string(span), "total_count": total, "per_lang": per_lang}
+        {
+            "token": span_to_token_string(span),
+            "total_count": total,
+            "per_lang": per_lang,
+        }
         for span, total, per_lang in entries
     ]
     with open(path, "w", encoding="utf-8") as f:

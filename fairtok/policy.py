@@ -18,9 +18,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from common.bytes_utils import bytes_to_tensor, spans_from_boundaries  # noqa: F401 -- re-exported
-# for backward-compat call sites (`from fairtok.policy import bytes_to_tensor, ...`); this
-# module also uses spans_from_boundaries itself (segment_bytes, below).
+from common.bytes_utils import spans_from_boundaries  # used by segment_bytes, below
 
 
 class BytePolicy(nn.Module):
@@ -70,22 +68,32 @@ class BytePolicy(nn.Module):
         # num_layers * hidden_dim^2, so widening and deepening together (e.g.
         # the default 32->64, 1->2 bump) costs roughly an order of magnitude
         # more than the original single-cell, hidden_dim=32 policy.
-        self.cells = nn.ModuleList([
-            nn.GRUCell(hidden_dim * 2 if i == 0 else hidden_dim, hidden_dim)
-            for i in range(num_layers)
-        ])
+        self.cells = nn.ModuleList(
+            [
+                nn.GRUCell(hidden_dim * 2 if i == 0 else hidden_dim, hidden_dim)
+                for i in range(num_layers)
+            ]
+        )
         self.boundary_head = nn.Linear(hidden_dim, 1)
         self.byte_head = nn.Linear(hidden_dim, 256)
 
-        self.early_cells = nn.ModuleList([nn.GRUCell(hidden_dim, hidden_dim) for _ in range(num_layers)])
+        self.early_cells = nn.ModuleList(
+            [nn.GRUCell(hidden_dim, hidden_dim) for _ in range(num_layers)]
+        )
         self.early_byte_head = nn.Linear(hidden_dim, 256)
         with torch.no_grad():
             self.early_byte_head.weight.copy_(self.byte_head.weight)
             self.early_byte_head.bias.copy_(self.byte_head.bias)
 
     def init_state(self, device, batch_size=1):
-        hidden = [torch.zeros(batch_size, self.hidden_dim, device=device) for _ in range(self.num_layers)]
-        early_hidden = [torch.zeros(batch_size, self.hidden_dim, device=device) for _ in range(self.num_layers)]
+        hidden = [
+            torch.zeros(batch_size, self.hidden_dim, device=device)
+            for _ in range(self.num_layers)
+        ]
+        early_hidden = [
+            torch.zeros(batch_size, self.hidden_dim, device=device)
+            for _ in range(self.num_layers)
+        ]
         return hidden, early_hidden
 
     def step(self, byte_id, prev_boundary, hidden, early_hidden):
@@ -111,7 +119,13 @@ class BytePolicy(nn.Module):
         boundary_logit = self.boundary_head(new_hidden[-1]).squeeze(-1)
         byte_logit = self.byte_head(new_hidden[-1])
         early_byte_logit = self.early_byte_head(new_early_hidden[-1])
-        return boundary_logit, byte_logit, early_byte_logit, new_hidden, new_early_hidden
+        return (
+            boundary_logit,
+            byte_logit,
+            early_byte_logit,
+            new_hidden,
+            new_early_hidden,
+        )
 
 
 @dataclass
@@ -120,11 +134,17 @@ class StepRecord:
     boundary_logit: torch.Tensor  # differentiable, raw (pre-sigmoid) -- used by the
     # direct rate-consistency loss in train.py, not just the sampled action's logprob
     boundary_logprob: torch.Tensor  # differentiable -- score-function weight target
-    next_byte_logprob: torch.Tensor  # differentiable -- main head, trained as an aux ML loss
-    early_byte_logprob: torch.Tensor  # differentiable -- early-exit head, ALSO trained as
+    next_byte_logprob: (
+        torch.Tensor
+    )  # differentiable -- main head, trained as an aux ML loss
+    early_byte_logprob: (
+        torch.Tensor
+    )  # differentiable -- early-exit head, ALSO trained as
     # its own aux ML loss; (next_byte_logprob - early_byte_logprob) is R_predict (see reward.py)
     byte_correct: bool  # None at the last position (no next byte to predict)
-    predict_reward: float  # = next_byte_logprob - early_byte_logprob, already a plain host
+    predict_reward: (
+        float  # = next_byte_logprob - early_byte_logprob, already a plain host
+    )
     # float -- precomputed and pulled off the device ONCE for the whole batch in
     # batched_sample_rollout (see actions_np/correct_np there), so reward.py's
     # build_rewards no longer needs its own per-(group, language) .cpu() sync
@@ -158,7 +178,7 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False)
 
     padded = torch.zeros(B, T, dtype=torch.long, device=device)
     for b, seq in enumerate(byte_seqs):
-        padded[b, :lengths[b]] = seq
+        padded[b, : lengths[b]] = seq
 
     hidden, early_hidden = policy.init_state(device, batch_size=B)
     prev_boundary = torch.zeros(B, dtype=torch.long, device=device)
@@ -167,12 +187,14 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False)
     per_step = []  # per_step[t] = dict of (B,)-shaped tensors for time step t
     for t in range(T):
         byte_ids = padded[:, t]
-        boundary_logit, byte_logit, early_byte_logit, hidden, early_hidden = policy.step(
-            byte_ids, prev_boundary, hidden, early_hidden
+        boundary_logit, byte_logit, early_byte_logit, hidden, early_hidden = (
+            policy.step(byte_ids, prev_boundary, hidden, early_hidden)
         )
         prob = torch.sigmoid(boundary_logit)
         action = (prob > 0.5).long() if deterministic else torch.bernoulli(prob).long()
-        boundary_logprob = torch.where(action.bool(), torch.log(prob + 1e-8), torch.log(1 - prob + 1e-8))
+        boundary_logprob = torch.where(
+            action.bool(), torch.log(prob + 1e-8), torch.log(1 - prob + 1e-8)
+        )
 
         # target byte for t+1, clamped in-bounds; per-sequence validity (has a real
         # next byte) is checked per-sequence below via `lengths`, not here -- this
@@ -190,11 +212,17 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False)
         # same two logprobs are what train.py's nll_loss/early_nll_loss train on
         predict_reward = (next_byte_logprob - early_byte_logprob).detach()
 
-        per_step.append({
-            "action": action, "boundary_logit": boundary_logit, "boundary_logprob": boundary_logprob,
-            "next_byte_logprob": next_byte_logprob, "early_byte_logprob": early_byte_logprob,
-            "byte_correct": byte_correct, "predict_reward": predict_reward,
-        })
+        per_step.append(
+            {
+                "action": action,
+                "boundary_logit": boundary_logit,
+                "boundary_logprob": boundary_logprob,
+                "next_byte_logprob": next_byte_logprob,
+                "early_byte_logprob": early_byte_logprob,
+                "byte_correct": byte_correct,
+                "predict_reward": predict_reward,
+            }
+        )
         prev_boundary = action
 
     # Pull `action`/`byte_correct`/`predict_reward` off the device ONCE each (three
@@ -205,8 +233,12 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False)
     # compute did. Everything still needed as a differentiable tensor (boundary_logit,
     # boundary_logprob, next/early_byte_logprob) stays on-device, untouched.
     actions_np = torch.stack([s["action"] for s in per_step]).cpu().numpy()  # (T, B)
-    correct_np = torch.stack([s["byte_correct"] for s in per_step]).cpu().numpy()  # (T, B)
-    reward_np = torch.stack([s["predict_reward"] for s in per_step]).cpu().numpy()  # (T, B)
+    correct_np = (
+        torch.stack([s["byte_correct"] for s in per_step]).cpu().numpy()
+    )  # (T, B)
+    reward_np = (
+        torch.stack([s["predict_reward"] for s in per_step]).cpu().numpy()
+    )  # (T, B)
 
     results = []
     for b in range(B):
@@ -215,15 +247,25 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False)
         for t in range(L):
             has_next = t + 1 < L
             step = per_step[t]
-            records.append(StepRecord(
-                int(actions_np[t, b]),
-                step["boundary_logit"][b],
-                step["boundary_logprob"][b],
-                step["next_byte_logprob"][b] if has_next else torch.zeros((), device=device),
-                step["early_byte_logprob"][b] if has_next else torch.zeros((), device=device),
-                bool(correct_np[t, b]) if has_next else None,
-                float(reward_np[t, b]) if has_next else 0.0,
-            ))
+            records.append(
+                StepRecord(
+                    int(actions_np[t, b]),
+                    step["boundary_logit"][b],
+                    step["boundary_logprob"][b],
+                    (
+                        step["next_byte_logprob"][b]
+                        if has_next
+                        else torch.zeros((), device=device)
+                    ),
+                    (
+                        step["early_byte_logprob"][b]
+                        if has_next
+                        else torch.zeros((), device=device)
+                    ),
+                    bool(correct_np[t, b]) if has_next else None,
+                    float(reward_np[t, b]) if has_next else 0.0,
+                )
+            )
         results.append(records)
     return results
 

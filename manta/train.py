@@ -56,7 +56,9 @@ class MantaConfig:
     # of the same name.
     learning_rate: float = 3e-3
     seed: int = 0
-    vocab_size: int = 384  # final vocab budget passed to common.vocab.top_k_by_frequency,
+    vocab_size: int = (
+        384  # final vocab budget passed to common.vocab.top_k_by_frequency,
+    )
     # applied once after training -- matches fairtok's own two-stage
     # "never enforce the budget during training, only harvest it after" design
     # (see fairtok/vocab.py's module docstring), even though MANTa has no in-loop
@@ -70,7 +72,9 @@ class MantaConfig:
     num_frontier_heads: int = 4
     block_hidden_size: int = 64
     num_block_layers: int = 1
-    max_extra_sigma: float = 3.0  # candidate block range truncation, mu_L + this*sigma_L
+    max_extra_sigma: float = (
+        3.0  # candidate block range truncation, mu_L + this*sigma_L
+    )
     max_grad_norm: float = 1.0  # gradient clipping -- MANTa's forward pass chains a
     # Gaussian log-density through a softmax through two more matmuls before the
     # loss even starts, more numerically fragile than fairtok's plain GRU cells, so
@@ -92,7 +96,9 @@ def _avg_span_length(token_freq):
 
 
 def _pad_batch(tensors, device):
-    lengths = torch.tensor([t.shape[0] for t in tensors], dtype=torch.long, device=device)
+    lengths = torch.tensor(
+        [t.shape[0] for t in tensors], dtype=torch.long, device=device
+    )
     T = int(lengths.max().item())
     padded = torch.zeros(len(tensors), T, dtype=torch.long, device=device)
     for i, t in enumerate(tensors):
@@ -125,8 +131,12 @@ class MantaTrainer:
         # Flatten every group into a flat list of (lang, text) pairs ONCE, up
         # front -- see module docstring for why there's no group structure at
         # batch time here (unlike GRPOTrainer's GroupLanguageCollator).
-        flat_items = [(lang, text) for group in self.train_dataset for lang, text in group.items()]
-        print(f"corpus={len(self.train_dataset)} groups -> {len(flat_items)} flattened (lang, text) sequences")
+        flat_items = [
+            (lang, text) for group in self.train_dataset for lang, text in group.items()
+        ]
+        print(
+            f"corpus={len(self.train_dataset)} groups -> {len(flat_items)} flattened (lang, text) sequences"
+        )
 
         model = MantaModel(
             dim=cfg.dim,
@@ -166,7 +176,9 @@ class MantaTrainer:
             padded, lengths = _pad_batch(tensors, device)
 
             output = model(padded, lengths)
-            loss, num_valid, num_correct = next_byte_loss(padded, lengths, output.logits)
+            loss, num_valid, num_correct = next_byte_loss(
+                padded, lengths, output.logits
+            )
 
             optimizer.zero_grad()
             loss.backward()
@@ -188,8 +200,19 @@ class MantaTrainer:
             postfix["acc"] = f"{byte_accuracy:.3f}"
             pbar.set_postfix(postfix)
 
-            if cfg.output_dir and cfg.save_steps and step > 0 and step % cfg.save_steps == 0:
-                torch.save({"config": dataclasses.asdict(cfg), "state_dict": model.state_dict()}, cfg.output_dir)
+            if (
+                cfg.output_dir
+                and cfg.save_steps
+                and step > 0
+                and step % cfg.save_steps == 0
+            ):
+                torch.save(
+                    {
+                        "config": dataclasses.asdict(cfg),
+                        "state_dict": model.state_dict(),
+                    },
+                    cfg.output_dir,
+                )
 
             if step % cfg.log_steps == 0:
                 avg_span_len = _avg_span_length(token_freq)
@@ -202,7 +225,11 @@ class MantaTrainer:
                 # training, when the discretized spans themselves can be noisy
                 # or near-degenerate (see manta.segment's module docstring).
                 last_idx = (lengths - 1).clamp_min(0)
-                mean_blocks = (output.mu.detach().gather(1, last_idx.unsqueeze(1)).squeeze(1) + 1).mean().item()
+                mean_blocks = (
+                    (output.mu.detach().gather(1, last_idx.unsqueeze(1)).squeeze(1) + 1)
+                    .mean()
+                    .item()
+                )
                 collapse_warn = ""
                 if avg_span_len and avg_span_len < 1.2:
                     collapse_warn = " <-- CHECK: drifting toward single-byte spans"
@@ -216,7 +243,10 @@ class MantaTrainer:
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         if cfg.output_dir:
-            torch.save({"config": dataclasses.asdict(cfg), "state_dict": model.state_dict()}, cfg.output_dir)
+            torch.save(
+                {"config": dataclasses.asdict(cfg), "state_dict": model.state_dict()},
+                cfg.output_dir,
+            )
             print(f"saved model checkpoint to {cfg.output_dir}")
 
         self.token_freq = token_freq
@@ -248,10 +278,15 @@ def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
     avg_span_len = _avg_span_length(token_freq)
     hist, total_spans = _span_length_histogram(token_freq)
     singleton_frac = hist.get(1, 0) / total_spans if total_spans else 0.0
-    print(f"\nfinal vocab size={len(final_vocab)}  avg span length={avg_span_len:.2f} bytes")
+    print(
+        f"\nfinal vocab size={len(final_vocab)}  avg span length={avg_span_len:.2f} bytes"
+    )
     print(
         f"span length histogram (top 8 lengths, by share of {total_spans} induced spans): "
-        + ", ".join(f"{length}b={count / total_spans:.3f}" for length, count in sorted(hist.items())[:8])
+        + ", ".join(
+            f"{length}b={count / total_spans:.3f}"
+            for length, count in sorted(hist.items())[:8]
+        )
     )
     if singleton_frac > 0.9:
         print(
@@ -266,8 +301,10 @@ def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
         print("WARNING: near full-sentence collapse (spans are almost never cut)")
 
     loss_head = sum(loss_trace[: min(5, len(loss_trace))]) / min(5, len(loss_trace))
-    loss_tail = sum(loss_trace[-min(5, len(loss_trace)):]) / min(5, len(loss_trace))
-    print(f"\nloss: first-5-step avg={loss_head:.4f}  last-5-step avg={loss_tail:.4f}  (loss[0]={loss_trace[0]:.4f}, loss[-1]={loss_trace[-1]:.4f})")
+    loss_tail = sum(loss_trace[-min(5, len(loss_trace)) :]) / min(5, len(loss_trace))
+    print(
+        f"\nloss: first-5-step avg={loss_head:.4f}  last-5-step avg={loss_tail:.4f}  (loss[0]={loss_trace[0]:.4f}, loss[-1]={loss_trace[-1]:.4f})"
+    )
 
     print("\nper-language metrics on the induced (discretized) vocabulary:")
     for lang, counter in sorted(token_freq.items()):
@@ -277,11 +314,18 @@ def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
         eff = renyi_efficiency(list(counter.values()))
         print(f"  {lang:16s} compression_rate={rate:6.3f}  renyi_efficiency={eff:.4f}")
 
-    renyi_by_lang = {lang: renyi_efficiency(list(c.values())) for lang, c in token_freq.items() if c}
+    renyi_by_lang = {
+        lang: renyi_efficiency(list(c.values())) for lang, c in token_freq.items() if c
+    }
     gini = gini_coefficient(list(renyi_by_lang.values())) if renyi_by_lang else 0.0
     print(f"\ngini coefficient across per-language renyi efficiency: {gini:.4f}")
 
-    return {"avg_span_len": avg_span_len, "singleton_frac": singleton_frac, "loss_head": loss_head, "loss_tail": loss_tail}
+    return {
+        "avg_span_len": avg_span_len,
+        "singleton_frac": singleton_frac,
+        "loss_head": loss_head,
+        "loss_tail": loss_tail,
+    }
 
 
 def run_smoke_test():
@@ -306,7 +350,9 @@ def run_smoke_test():
     under a plain causal LM loss; assertion 3 only rules out the LITERAL
     degenerate extremes, not that skew.
     """
-    args = MantaConfig(max_steps=80, per_device_train_batch_size=8, vocab_size=384, log_steps=10)
+    args = MantaConfig(
+        max_steps=80, per_device_train_batch_size=8, vocab_size=384, log_steps=10
+    )
     langs = list(LANG_PROFILES)
     train_groups = make_synthetic_parallel_groups(200, langs=langs, seed=args.seed)
     trainer = MantaTrainer(args, train_groups)
@@ -317,9 +363,15 @@ def run_smoke_test():
         f"loss did not decrease: first-5-step avg={stats['loss_head']:.4f} "
         f"vs last-5-step avg={stats['loss_tail']:.4f}"
     )
-    assert stats["singleton_frac"] < 1.0, "spans collapsed to literally 100% single bytes"
-    assert stats["avg_span_len"] < 40, "spans collapsed toward one giant span per sentence"
-    print("\nsmoke test PASSED: no crash, loss decreased, spans are not totally degenerate.")
+    assert (
+        stats["singleton_frac"] < 1.0
+    ), "spans collapsed to literally 100% single bytes"
+    assert (
+        stats["avg_span_len"] < 40
+    ), "spans collapsed toward one giant span per sentence"
+    print(
+        "\nsmoke test PASSED: no crash, loss decreased, spans are not totally degenerate."
+    )
 
     return model, token_freq, final_vocab
 

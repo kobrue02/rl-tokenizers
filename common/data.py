@@ -20,8 +20,12 @@ import random
 LANG_PROFILES = {
     "high_resource": dict(alphabet=list(range(97, 107)), repeat_bias=0.7),
     "mid_resource": dict(alphabet=list(range(97, 123)), repeat_bias=0.4),
-    "low_resource_a": dict(alphabet=list(range(48, 58)) + list(range(200, 240)), repeat_bias=0.15),
-    "low_resource_b": dict(alphabet=list(range(1, 40)) + list(range(240, 256)), repeat_bias=0.05),
+    "low_resource_a": dict(
+        alphabet=list(range(48, 58)) + list(range(200, 240)), repeat_bias=0.15
+    ),
+    "low_resource_b": dict(
+        alphabet=list(range(1, 40)) + list(range(240, 256)), repeat_bias=0.05
+    ),
 }
 
 
@@ -39,13 +43,18 @@ def _gen_sentence(profile, min_len, max_len, rng):
     return bytes(seq[:length])
 
 
-def make_synthetic_parallel_groups(num_groups, langs=None, min_len=20, max_len=60, seed=0):
+def make_synthetic_parallel_groups(
+    num_groups, langs=None, min_len=20, max_len=60, seed=0
+):
     """Each group is one "parallel sentence": a dict {lang: byte_seq} -- the same
     shape real data (common.oldi_data) produces, and the unit any group-relative
     training signal (e.g. fairtok's GRPO baseline) is computed over."""
     rng = random.Random(seed)
     langs = langs or list(LANG_PROFILES)
     return [
-        {lang: _gen_sentence(LANG_PROFILES[lang], min_len, max_len, rng) for lang in langs}
+        {
+            lang: _gen_sentence(LANG_PROFILES[lang], min_len, max_len, rng)
+            for lang in langs
+        }
         for _ in range(num_groups)
     ]
