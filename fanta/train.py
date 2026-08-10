@@ -1,16 +1,28 @@
 """FANTA training loop: MantaModel's architecture (unchanged, see fanta/model.py),
-trained with next-byte cross-entropy PLUS a differentiable Gini-coefficient penalty
-over each language's mean compression rate within a batch (fanta.model.fairness_loss).
+trained with next-byte cross-entropy PLUS two added terms: a differentiable
+Gini-coefficient penalty over each language's mean compression rate within a batch
+(fanta.model.fairness_loss), and a per-language rate ANCHOR
+(fanta.model.rate_anchor_loss) pulling each language toward its own target rate.
+
+The anchor term exists because the Gini term alone has a degenerate solution:
+every language compressing equally BADLY also scores Gini~=0. Confirmed
+empirically (an early FANTA run with no anchor collapsed mean_compression_rate to
+~1.0 -- pure character-level segmentation -- within 10 steps, "satisfying"
+fairness by refusing to compress at all), not just anticipated as a theoretical
+risk. Per-language targets are derived the same way fairtok.train's own
+target_rate_by_lang is: common.parity.compute_lang_parity_ratios, motivated by
+"Compute Optimal Tokenization" (Limisiewicz et al. 2026) finding that the
+compute-optimal compression rate is language-dependent, not one global constant.
 
 Batching is GROUP-based (one parallel {lang: text} group -> up to group_sample_size
 language sequences per step), NOT manta.train.MantaTrainer's flat individual-sentence
-sampling -- a Gini penalty needs several languages' compression rates in the SAME
-forward pass to compare, and vanilla MANTa's flat sampling gives no guarantee (or even
-likelihood) of that. This mirrors flexitokens.train.FlexiTokensTrainer's own batching
-convention (per_device_train_batch_size counts GROUPS, group_sample_size caps
-languages per group), which already solved the same problem for its own per-language
-hinge loss -- see FantaConfig's docstring for the resulting semantic difference from
-MantaConfig's field of the same name.
+sampling -- both loss terms need several languages' compression rates in the SAME
+forward pass to compare/anchor, and vanilla MANTa's flat sampling gives no guarantee
+(or even likelihood) of that. This mirrors flexitokens.train.FlexiTokensTrainer's own
+batching convention (per_device_train_batch_size counts GROUPS, group_sample_size
+caps languages per group), which already solved the same problem for its own
+per-language hinge loss -- see FantaConfig's docstring for the resulting semantic
+difference from MantaConfig's field of the same name.
 """
 
 import dataclasses
@@ -23,10 +35,11 @@ from tqdm.auto import tqdm
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.data import make_synthetic_parallel_groups
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.parity import compute_lang_parity_ratios
 from common.reporting import avg_span_length, collapse_stats, report_collapse
 from common.vocab import top_k_by_frequency
 
-from .model import MantaModel, fairness_loss, next_byte_loss
+from .model import MantaModel, fairness_loss, next_byte_loss, rate_anchor_loss
 from .segment import boundaries_from_assignment
 
 
@@ -58,6 +71,26 @@ class FantaConfig:
     # own lambda_fair (which shapes a REINFORCE reward, not a direct loss term) --
     # same name because it plays the same conceptual role (fairness-term weight),
     # not because the mechanism is the same.
+
+    anchor_lang: str = "eng"  # pivot language for per-language target-rate scaling
+    # (see common.parity.compute_lang_parity_ratios) -- matches
+    # fairtok.train.GRPOConfig/flexitokens.train.FlexiTokensConfig's own field.
+    target_rate_anchor: float = 4.0  # target compression rate (bytes/token) for the
+    # ANCHOR language specifically; every other language's target is this scaled by
+    # its own byte-length parity ratio vs. the anchor (see rate_anchor_loss). Not
+    # derived from a real BPE baseline the way fairtok.train._plain_bpe_target_rate
+    # is -- 4.0 is a plausible byte-level-BPE-ish compression rate (same judgment
+    # call flexitokens.train.FlexiTokensConfig.alpha_anchor makes, just expressed
+    # directly as a rate rather than a boundary probability).
+    target_rate_floor: float = 1.0  # a target_rate below 1 byte/token is nonsensical
+    # (can't compress below the raw byte stream); guards a degenerate parity ratio.
+    target_rate_ceiling: float = 64.0  # generous upper bound; guards the opposite
+    # degenerate case (e.g. a near-empty sample making a parity ratio blow up).
+    lambda_rate: float = 2.0  # weight on the rate-anchor penalty -- matches
+    # fairtok.train.GRPOConfig.lambda_target's own default (2.0, adapted from
+    # Dauncey & Wattenhofer's consistency_loss_weight): the empirical collapse
+    # this term exists to prevent (see module docstring) happened FAST (within 10
+    # steps) and needs real weight from the start of training, not a token gesture.
 
     dim: int = 64
     window: int = 8
@@ -123,6 +156,26 @@ class FantaTrainer:
         print(f"model parameters: {model.num_parameters():,}")
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
+        # Per-language rate anchor -- see module docstring. Derived ONCE, up front,
+        # from the real training corpus (not re-derived per step: the parity ratio
+        # between two languages' typical byte lengths doesn't change during
+        # training).
+        parity_ratio_by_lang, parity_anchor = compute_lang_parity_ratios(
+            self.train_groups, cfg.anchor_lang
+        )
+        if parity_anchor != cfg.anchor_lang:
+            print(
+                f"[fanta] anchor language {cfg.anchor_lang!r} not present in this corpus; "
+                f"falling back to {parity_anchor!r} for per-language target-rate scaling"
+            )
+        target_rate_by_lang = {
+            lang: max(
+                cfg.target_rate_floor,
+                min(cfg.target_rate_ceiling, cfg.target_rate_anchor * ratio),
+            )
+            for lang, ratio in parity_ratio_by_lang.items()
+        }
+
         run = None
         if cfg.use_wandb:
             import wandb
@@ -132,6 +185,7 @@ class FantaTrainer:
                 name=cfg.run_name or None,
                 config={
                     **dataclasses.asdict(cfg),
+                    "target_rate_by_lang": target_rate_by_lang,
                     "num_train_groups": len(self.train_groups),
                     "model_parameters": model.num_parameters(),
                 },
@@ -167,7 +221,8 @@ class FantaTrainer:
             output = model(padded, lengths)
             ce_loss, num_valid, num_correct = next_byte_loss(padded, lengths, output.logits)
             gini_loss, per_lang_rate = fairness_loss(langs, lengths, output)
-            loss = ce_loss + cfg.lambda_fair * gini_loss
+            anchor_loss = rate_anchor_loss(per_lang_rate, target_rate_by_lang)
+            loss = ce_loss + cfg.lambda_fair * gini_loss + cfg.lambda_rate * anchor_loss
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
             optimizer.step()
@@ -184,6 +239,7 @@ class FantaTrainer:
 
             loss_value = loss.item()
             gini_value = gini_loss.item()
+            anchor_value = anchor_loss.item()
             loss_trace.append(loss_value)
             fairness_loss_trace.append(gini_value)
             byte_accuracy = num_correct / num_valid if num_valid else 0.0
@@ -191,6 +247,7 @@ class FantaTrainer:
             postfix["loss"] = f"{loss_value:.3f}"
             postfix["ce"] = f"{ce_loss.item():.3f}"
             postfix["gini"] = f"{gini_value:.4f}"
+            postfix["anchor"] = f"{anchor_value:.4f}"
             postfix["acc"] = f"{byte_accuracy:.3f}"
             pbar.set_postfix(postfix)
 
@@ -211,6 +268,7 @@ class FantaTrainer:
                         "train/loss": loss_value,
                         "train/ce_loss": ce_loss.item(),
                         "train/fairness_loss_gini": gini_value,
+                        "train/rate_anchor_loss": anchor_value,
                         "train/byte_accuracy": byte_accuracy,
                         "train/mean_compression_rate": float(
                             np.mean([v.item() for v in per_lang_rate.values()])
@@ -229,7 +287,7 @@ class FantaTrainer:
                     collapse_warn = " <-- CHECK: drifting toward whole-sequence spans"
                 pbar.write(
                     f"[step {step:4d}] loss={loss_value:.4f} ce={ce_loss.item():.4f} "
-                    f"gini={gini_value:.4f} acc={byte_accuracy:.3f} "
+                    f"gini={gini_value:.4f} anchor={anchor_value:.4f} acc={byte_accuracy:.3f} "
                     f"avg_span={avg_span_len:.2f} langs_this_step={len(per_lang_rate)}"
                     f"{collapse_warn}"
                 )

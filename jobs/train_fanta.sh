@@ -12,19 +12,23 @@
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
 # FANTA training -- MANTa's architecture (fanta/model.py re-exports MantaModel
-# unchanged), trained with next-byte cross-entropy PLUS a differentiable
-# Gini-coefficient penalty over each language's mean compression rate within a
-# batch (see fanta/model.py's fairness_loss/differentiable_gini). Unlike
-# jobs/train_manta.sh, batching here is GROUP-based, not flat individual-sentence
-# sampling (see fanta/train.py's module docstring for why: the Gini penalty needs
-# several languages' compression rates in the SAME forward pass to compare). Has
-# the same --use-wandb/--wandb-project/--run-name flags every other job here does
-# (see fanta/train.py's FantaConfig).
+# unchanged), trained with next-byte cross-entropy PLUS two added terms: a
+# differentiable Gini-coefficient penalty over each language's mean compression
+# rate within a batch (fairness_loss/differentiable_gini), and a per-language rate
+# ANCHOR (rate_anchor_loss) pulling each language toward its own target rate --
+# see fanta/model.py's module docstring for why the anchor exists (the Gini term
+# alone has a degenerate "equally uncompressed" solution, confirmed empirically on
+# a real run, not just anticipated). Unlike jobs/train_manta.sh, batching here is
+# GROUP-based, not flat individual-sentence sampling (see fanta/train.py's module
+# docstring for why: both loss terms need several languages' compression rates in
+# the SAME forward pass). Has the same --use-wandb/--wandb-project/--run-name
+# flags every other job here does (see fanta/train.py's FantaConfig).
 #
 # Usage:
 #   sbatch jobs/train_fanta.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
 #   sbatch jobs/train_fanta.sh --data-source oldi_seed --max-steps 2000   # quicker, single source
-#   sbatch jobs/train_fanta.sh --lambda-fair 5.0 ...   # weight the fairness term more/less heavily
+#   sbatch jobs/train_fanta.sh --lambda-fair 5.0 --lambda-rate 3.0 ...   # reweight either term
+#   sbatch jobs/train_fanta.sh --target-rate-anchor 6.0 --anchor-lang eng ...   # change the rate target
 #
 # All train.py fanta / fanta.cli flags are forwarded directly -- see
 # `python train.py fanta --help`.

@@ -1,21 +1,38 @@
 """FANTA = "FAir MANTa": MantaModel's architecture, completely unchanged, trained
-with an added cross-lingual fairness term in the loss -- see fanta/train.py.
+with two added terms in the loss -- see fanta/train.py.
 
 MANTa itself has no reward/RL machinery and no rate-consistency loss at all (see
 manta/model.py's own module docstring); its only loss is next-byte cross-entropy.
-FANTA adds exactly one thing: a differentiable Gini-coefficient penalty over each
-language's mean compression rate within a training batch, so cross-lingual
-disparity is penalized directly during backprop -- structurally closer to
-flexitokens/model.py's boundary_hinge_loss (a direct loss term, not RL reward-
-shaping like fairtok's lambda_fair) but comparing languages to EACH OTHER (a Gini
-penalty) rather than each language to a fixed target band.
+FANTA adds:
 
-Nothing about MantaModel itself changes for this: the only new differentiable
-quantity FANTA needs (an expected-compression-rate proxy per sequence) already
-exists in MantaOutput.mu, which manta/train.py's OWN diagnostic already reads --
-just detached there, since it's only used for a console print. FANTA reads the
-exact same tensor without detaching, so gradients flow from the fairness loss back
-through the frontier predictor.
+  1. A differentiable Gini-coefficient penalty over each language's mean
+     compression rate within a training batch (differentiable_gini,
+     per_lang_compression_rate, fairness_loss below), so cross-lingual disparity
+     is penalized directly during backprop.
+  2. A per-language rate ANCHOR (rate_anchor_loss below) -- pulls each language's
+     rate toward its own target, derived the same way fairtok's
+     target_rate_by_lang is (common.parity.compute_lang_parity_ratios), rather
+     than a single global target. This exists because term 1 alone has a
+     degenerate solution: every language compressing equally BADLY (all
+     collapsed toward ~1 byte/token) also has Gini~=0. Confirmed empirically,
+     not just theoretically -- an early FANTA training run (no rate anchor)
+     collapsed mean_compression_rate to ~1.0 within 10 steps, satisfying the
+     Gini term while producing no real compression or fair TREATMENT of
+     anything. The anchor is what makes "fair" mean "similarly well-compressed,"
+     not "similarly uncompressed."
+
+Both terms are direct, differentiable loss terms (not RL reward-shaping like
+fairtok's own lambda_fair/target_rate) -- structurally closer to
+flexitokens/model.py's boundary_hinge_loss, except comparing languages to EACH
+OTHER (the Gini term) in addition to each language having its own target (the
+anchor term, same as flexitokens' alpha_L/beta_L bands).
+
+Nothing about MantaModel itself changes for any of this: the only new
+differentiable quantity FANTA needs (an expected-compression-rate proxy per
+sequence) already exists in MantaOutput.mu, which manta/train.py's OWN diagnostic
+already reads -- just detached there, since it's only used for a console print.
+FANTA reads the exact same tensor without detaching, so gradients flow from both
+loss terms back through the frontier predictor.
 """
 
 from collections import defaultdict
@@ -87,13 +104,55 @@ def per_lang_compression_rate(langs, lengths, output, eps=1e-6):
 
 
 def fairness_loss(langs, lengths, output):
-    """The actual FANTA loss term: differentiable_gini over
+    """The Gini half of FANTA's loss: differentiable_gini over
     per_lang_compression_rate's per-language means. Callers add
-    `cfg.lambda_fair * fairness_loss(...)` to the plain next-byte CE loss (see
-    fanta/train.py) -- mirrors flexitokens.model.boundary_hinge_loss's role
-    (a direct, backprop-through loss term) but with no target-rate concept at
-    all: this term is satisfied purely by languages compressing SIMILARLY to
-    each other, not by any of them hitting a specific rate."""
+    `cfg.lambda_fair * fairness_loss(...)` to the total loss (see
+    fanta/train.py) -- satisfied purely by languages compressing SIMILARLY to
+    each other, not by any of them hitting a specific rate (see
+    rate_anchor_loss below for the term that adds the latter, needed to rule
+    out the degenerate "similarly uncompressed" solution -- see module
+    docstring)."""
     per_lang_rate = per_lang_compression_rate(langs, lengths, output)
     rates_tensor = torch.stack(list(per_lang_rate.values()))
     return differentiable_gini(rates_tensor), per_lang_rate
+
+
+def rate_anchor_loss(per_lang_rate, target_rate_by_lang, eps=1e-6):
+    """The anchor half of FANTA's loss: pulls each language's mean compression
+    rate this batch (per_lang_rate, from fairness_loss/per_lang_compression_rate
+    above -- NOT recomputed here) toward that language's own target
+    (target_rate_by_lang, derived once at the start of training by
+    fanta.train.FantaTrainer.train via common.parity.compute_lang_parity_ratios
+    -- the exact same per-language-target mechanism fairtok.train's
+    target_rate_by_lang uses, motivated by the same finding: "Compute Optimal
+    Tokenization" (Limisiewicz et al. 2026) shows the compute-optimal
+    compression rate is language-dependent, correlating with each language's
+    byte-length parity vs. an anchor language, not one global rate).
+
+    Penalty is a SQUARED LOG-RATIO, `(log(rate) - log(target))**2`, not a plain
+    squared difference: target rates can differ by many-fold across languages
+    (e.g. ~3 bytes/token for English vs. ~8+ for a verbose script, per the real
+    per-language spread fairtok's own target_rate_by_lang produces on this
+    project's 9-language panel) -- a plain squared error would weight
+    high-target-rate languages' errors far more heavily for the SAME relative
+    deviation. The log-ratio form treats "20% off target" the same regardless
+    of the target's absolute scale.
+
+    Languages present in per_lang_rate but missing from target_rate_by_lang
+    (shouldn't happen in practice, since both are derived from the same
+    train_groups, but guarded defensively) are skipped rather than erroring.
+    Returns a scalar that stays connected to the autograd graph even if no
+    language in this batch has a target (an even-more-defensive edge case),
+    the same convention differentiable_gini uses for its own degenerate cases.
+    """
+    sq_log_diffs = []
+    for lang, rate in per_lang_rate.items():
+        target = target_rate_by_lang.get(lang)
+        if target is None:
+            continue
+        target_t = torch.tensor(target, dtype=rate.dtype, device=rate.device)
+        log_diff = torch.log(rate.clamp_min(eps)) - torch.log(target_t.clamp_min(eps))
+        sq_log_diffs.append(log_diff**2)
+    if not sq_log_diffs:
+        return next(iter(per_lang_rate.values())).sum() * 0.0
+    return torch.stack(sq_log_diffs).mean()
