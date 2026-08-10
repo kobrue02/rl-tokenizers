@@ -34,7 +34,7 @@
 # (not just your laptop), or export HF_TOKEN before submitting.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
-PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/fairtok
+PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
 # 2. Modules
 module load devel/python/3.13.3-llvm-19.1

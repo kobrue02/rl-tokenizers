@@ -30,7 +30,7 @@
 # reused here for data loading). Same HF_TOKEN handling as jobs/train.sh -- see below.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
-PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/fairtok
+PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
 # 2. Modules
 module load devel/cuda/12.8
