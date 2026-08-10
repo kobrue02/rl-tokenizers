@@ -44,10 +44,19 @@ class BytePolicy(nn.Module):
     (two GRU cells instead of one).
     """
 
-    def __init__(self, hidden_dim=64, num_layers=2):
+    def __init__(self, hidden_dim=64, num_layers=2, use_prev_boundary=True):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        # Diagnostic-only flag (see conversation: "does removing the prev_boundary
+        # feedback break the early-exit reward signal?"): when False, the main path's
+        # input always looks up boundary_embed(0) -- a constant vector, same shape,
+        # zero information -- instead of the real previous action. This isolates
+        # exactly that one question, without also changing architecture family
+        # (attention/CNN vs recurrence), depth, or receptive field, which a full
+        # parallel-architecture rewrite would confound it with. Not meant to be a
+        # real training config knob -- default True preserves normal behavior.
+        self.use_prev_boundary = use_prev_boundary
         self.byte_embed = nn.Embedding(256, hidden_dim)
         self.boundary_embed = nn.Embedding(2, hidden_dim)
 
@@ -77,6 +86,8 @@ class BytePolicy(nn.Module):
 
     def step(self, byte_id, prev_boundary, hidden, early_hidden):
         byte_x = self.byte_embed(byte_id)
+        if not self.use_prev_boundary:
+            prev_boundary = torch.zeros_like(prev_boundary)
         x = torch.cat([byte_x, self.boundary_embed(prev_boundary)], dim=-1)
 
         new_hidden = []
