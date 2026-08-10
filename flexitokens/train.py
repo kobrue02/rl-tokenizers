@@ -32,6 +32,7 @@ from tqdm.auto import tqdm
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.parity import compute_lang_parity_ratios
+from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from .model import FlexiTokensModel, boundary_hinge_loss, next_byte_loss, pad_byte_batch
@@ -179,6 +180,10 @@ class FlexiTokensConfig:
     # own field.
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     output_dir: str = ""  # "" disables checkpointing.
+    use_wandb: bool = False  # matches fairtok.train.GRPOConfig's field of the same
+    # name/role -- see FlexiTokensTrainer.train for the actual wandb.init/run.log calls.
+    wandb_project: str = "flexitokens"
+    run_name: str = ""
 
 
 class FlexiTokensTrainer:
@@ -224,6 +229,22 @@ class FlexiTokensTrainer:
             )
         default_alpha = float(np.mean(list(alpha_by_lang.values())))
         default_beta = float(np.mean(list(beta_by_lang.values())))
+
+        run = None
+        if cfg.use_wandb:
+            import wandb
+
+            run = wandb.init(
+                project=cfg.wandb_project,
+                name=cfg.run_name or None,
+                config={
+                    **dataclasses.asdict(cfg),
+                    "alpha_by_lang": alpha_by_lang,
+                    "beta_by_lang": beta_by_lang,
+                    "anchor": anchor,
+                    "num_train_groups": len(self.train_groups),
+                },
+            )
 
         model = FlexiTokensModel(
             d_model=cfg.d_model,
@@ -299,9 +320,45 @@ class FlexiTokensTrainer:
                 hinge=f"{hinge_loss.item():.4f}",
             )
 
+            if run is not None:
+                # Deliberately aggregate-only every step (mean rate across whatever
+                # languages this batch happened to include) -- flattening
+                # per_lang_rate into one wandb metric per language, every step,
+                # would mean hundreds of keys/step under --langs all. fairtok's own
+                # per-language breakdown (fairness/renyi/{lang}) only logs every
+                # fairness_refresh_steps for exactly this reason; this trainer has
+                # no equivalent periodic-diagnostics mechanism to hang a similar
+                # lower-frequency per-language log off of, so it's simply omitted
+                # here rather than logged at the wrong (every-step) cadence.
+                run.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/ce_loss": ce_loss.item(),
+                        "train/hinge_loss": hinge_loss.item(),
+                        "train/mean_rate": (
+                            float(np.mean(list(per_lang_rate.values())))
+                            if per_lang_rate
+                            else 0.0
+                        ),
+                    },
+                    step=step,
+                )
+
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         self.token_freq = token_freq
         self.vocab = final_vocab
+
+        if run is not None:
+            avg_span_len, final_vocab_size = collapse_stats(token_freq, final_vocab)
+            run.log(
+                {
+                    "final/vocab_size": final_vocab_size,
+                    "final/avg_span_length_bytes": avg_span_len,
+                    "final/char_collapse": int(avg_span_len < 1.2),
+                    "final/sentence_collapse": int(avg_span_len > 40),
+                }
+            )
+            run.finish()
 
         if cfg.output_dir:
             torch.save(

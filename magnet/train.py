@@ -26,6 +26,7 @@ from tqdm.auto import tqdm
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.oldi_data import LANG_SCRIPT
+from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from .inference import save_checkpoint
@@ -110,6 +111,10 @@ class MagnetConfig:
     output_dir: str = (
         ""  # empty string to skip; else a path model.state_dict() is saved to.
     )
+    use_wandb: bool = False  # matches fairtok.train.GRPOConfig's field of the same
+    # name/role -- see MagnetTrainer.train for the actual wandb.init/run.log calls.
+    wandb_project: str = "magnet"
+    run_name: str = ""
 
 
 class MagnetTrainer:
@@ -169,6 +174,21 @@ class MagnetTrainer:
             for script in scripts
         }
         print(f"boundary priors={priors}")
+
+        run = None
+        if cfg.use_wandb:
+            import wandb
+
+            run = wandb.init(
+                project=cfg.wandb_project,
+                name=cfg.run_name or None,
+                config={
+                    **dataclasses.asdict(cfg),
+                    "scripts": scripts,
+                    "boundary_priors": priors,
+                    "num_train_groups": len(self.train_groups),
+                },
+            )
 
         token_freq = defaultdict(Counter)
         loss_trace = []
@@ -299,9 +319,32 @@ class MagnetTrainer:
                     + " ".join(f"{k}={v}" for k, v in postfix.items())
                 )
 
+            if run is not None:
+                run.log(
+                    {
+                        "train/loss": loss.item(),
+                        "train/lm_loss": lm_loss_avg.item(),
+                        "train/boundary_loss": boundary_loss_avg.item(),
+                        "train/boundary_rate": boundary_rate,
+                    },
+                    step=step,
+                )
+
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         self.token_freq = token_freq
         self.vocab = final_vocab
+
+        if run is not None:
+            avg_span_len, final_vocab_size = collapse_stats(token_freq, final_vocab)
+            run.log(
+                {
+                    "final/vocab_size": final_vocab_size,
+                    "final/avg_span_length_bytes": avg_span_len,
+                    "final/char_collapse": int(avg_span_len < 1.2),
+                    "final/sentence_collapse": int(avg_span_len > 40),
+                }
+            )
+            run.finish()
 
         if cfg.output_dir:
             # config + scripts alongside state_dict, not state_dict alone -- see

@@ -35,6 +35,7 @@ from tqdm.auto import tqdm
 from common.data import LANG_PROFILES, make_synthetic_parallel_groups
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from .model import MantaModel, next_byte_loss
@@ -87,6 +88,10 @@ class MantaConfig:
     output_dir: str = ""  # "" disables checkpoint saving, matching GRPOConfig's
     # output_dir convention (empty string = skip).
     save_steps: int = 0  # 0 disables periodic saving, same convention as GRPOConfig.
+    use_wandb: bool = False  # matches fairtok.train.GRPOConfig's field of the same
+    # name/role -- see MantaTrainer.train for the actual wandb.init/run.log calls.
+    wandb_project: str = "manta"
+    run_name: str = ""
 
 
 def _avg_span_length(token_freq):
@@ -152,6 +157,21 @@ class MantaTrainer:
         print(f"model parameters: {model.num_parameters():,}")
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
+        run = None
+        if cfg.use_wandb:
+            import wandb
+
+            run = wandb.init(
+                project=cfg.wandb_project,
+                name=cfg.run_name or None,
+                config={
+                    **dataclasses.asdict(cfg),
+                    "num_train_groups": len(self.train_dataset),
+                    "num_flattened_sequences": len(flat_items),
+                    "model_parameters": model.num_parameters(),
+                },
+            )
+
         rng = np.random.default_rng(cfg.seed)
         order = rng.permutation(len(flat_items))
         pos = 0
@@ -200,6 +220,12 @@ class MantaTrainer:
             postfix["acc"] = f"{byte_accuracy:.3f}"
             pbar.set_postfix(postfix)
 
+            if run is not None:
+                run.log(
+                    {"train/loss": loss_value, "train/byte_accuracy": byte_accuracy},
+                    step=step,
+                )
+
             if (
                 cfg.output_dir
                 and cfg.save_steps
@@ -240,6 +266,21 @@ class MantaTrainer:
                     f"avg_span={avg_span_len:.2f} mean_blocks/seq={mean_blocks:.2f} "
                     f"distinct_spans={sum(len(c) for c in token_freq.values())}{collapse_warn}"
                 )
+                if run is not None:
+                    run.log(
+                        {
+                            "diagnostics/avg_span_length_running": avg_span_len,
+                            "diagnostics/mean_blocks_per_seq": mean_blocks,
+                            "diagnostics/num_distinct_spans_running": sum(
+                                len(c) for c in token_freq.values()
+                            ),
+                            "diagnostics/char_collapse": int(
+                                bool(avg_span_len) and avg_span_len < 1.2
+                            ),
+                            "diagnostics/sentence_collapse": int(avg_span_len > 40),
+                        },
+                        step=step,
+                    )
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         if cfg.output_dir:
@@ -252,6 +293,18 @@ class MantaTrainer:
         self.token_freq = token_freq
         self.vocab = final_vocab
         self.loss_trace = loss_trace
+
+        if run is not None:
+            avg_span_len, final_vocab_size = collapse_stats(token_freq, final_vocab)
+            run.log(
+                {
+                    "final/vocab_size": final_vocab_size,
+                    "final/avg_span_length_bytes": avg_span_len,
+                    "final/char_collapse": int(avg_span_len < 1.2),
+                    "final/sentence_collapse": int(avg_span_len > 40),
+                }
+            )
+            run.finish()
         return model, token_freq, final_vocab
 
 

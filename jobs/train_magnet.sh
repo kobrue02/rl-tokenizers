@@ -12,10 +12,10 @@
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
 # MAGNET baseline tokenizer training -- see jobs/train.sh for the fairtok RL policy
-# this is a comparison baseline for. Unlike that job, MAGNET has no
-# --use-wandb/--wandb-* flags (its Trainer has no wandb integration -- see
-# magnet/train.py) and its training is plain differentiable backprop (Gumbel-sigmoid
-# straight-through boundaries), not RL -- no reward/fairness-refresh machinery.
+# this is a comparison baseline for. Its training is plain differentiable backprop
+# (Gumbel-sigmoid straight-through boundaries), not RL -- no reward/fairness-refresh
+# machinery -- but it DOES have the same --use-wandb/--wandb-project/--run-name
+# flags fairtok's job does (see magnet/train.py's MagnetConfig).
 #
 # Usage:
 #   sbatch jobs/train_magnet.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
@@ -64,6 +64,9 @@ mkdir -p logs checkpoints vocab_out
 # 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
 echo "Starting MAGNET training with args: $@"
 python3 train.py magnet \
+    --use-wandb \
+    --wandb-project magnet \
+    --run-name "slurm-${SLURM_JOB_ID}" \
     --output-dir "$PROJECT_ROOT/checkpoints/magnet_${SLURM_JOB_ID}.pt" \
     --vocab-out "$PROJECT_ROOT/vocab_out/magnet_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/magnet_vocab_stats_${SLURM_JOB_ID}.json" \

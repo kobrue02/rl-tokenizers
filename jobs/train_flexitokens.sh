@@ -12,10 +12,10 @@
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
 # FlexiTokens baseline tokenizer training -- see jobs/train.sh for the fairtok RL
-# policy this is a comparison baseline for. Unlike that job, FlexiTokens has no
-# --use-wandb/--wandb-* flags (its Trainer has no wandb integration at all -- see
-# flexitokens/train.py) and its training is plain differentiable backprop, not RL,
-# so there's no reward/fairness-refresh machinery to configure either.
+# policy this is a comparison baseline for. Its training is plain differentiable
+# backprop, not RL, so there's no reward/fairness-refresh machinery to configure --
+# but it DOES have the same --use-wandb/--wandb-project/--run-name flags fairtok's
+# job does (see flexitokens/train.py's FlexiTokensConfig).
 #
 # Usage:
 #   sbatch jobs/train_flexitokens.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
@@ -64,6 +64,9 @@ mkdir -p logs checkpoints vocab_out
 # 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
 echo "Starting FlexiTokens training with args: $@"
 python3 train.py flexitokens \
+    --use-wandb \
+    --wandb-project flexitokens \
+    --run-name "slurm-${SLURM_JOB_ID}" \
     --output-dir "$PROJECT_ROOT/checkpoints/flexitokens_${SLURM_JOB_ID}.pt" \
     --vocab-out "$PROJECT_ROOT/vocab_out/flexitokens_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/flexitokens_vocab_stats_${SLURM_JOB_ID}.json" \

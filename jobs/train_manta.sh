@@ -12,12 +12,12 @@
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
 # MANTa baseline tokenizer training -- see jobs/train.sh for the fairtok RL policy
-# this is a comparison baseline for. Unlike that job, MANTa has no
-# --use-wandb/--wandb-* flags (its Trainer has no wandb integration -- see
-# manta/train.py) and its training is plain next-byte cross-entropy backprop through
-# a Gaussian-relaxed soft byte-to-block assignment -- no reward, no boundary-rate
-# loss, no fairness-refresh machinery at all (see manta/model.py's module docstring
-# for why MANTa genuinely has none of that, not just a simplified version of it).
+# this is a comparison baseline for. Its training is plain next-byte cross-entropy
+# backprop through a Gaussian-relaxed soft byte-to-block assignment -- no reward, no
+# boundary-rate loss, no fairness-refresh machinery at all (see manta/model.py's
+# module docstring for why MANTa genuinely has none of that, not just a simplified
+# version of it) -- but it DOES have the same --use-wandb/--wandb-project/--run-name
+# flags fairtok's job does (see manta/train.py's MantaConfig).
 #
 # Usage:
 #   sbatch jobs/train_manta.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
@@ -67,6 +67,9 @@ mkdir -p logs checkpoints vocab_out
 # 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
 echo "Starting MANTa training with args: $@"
 python3 train.py manta \
+    --use-wandb \
+    --wandb-project manta \
+    --run-name "slurm-${SLURM_JOB_ID}" \
     --output-dir "$PROJECT_ROOT/checkpoints/manta_${SLURM_JOB_ID}.pt" \
     --vocab-out "$PROJECT_ROOT/vocab_out/manta_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/manta_vocab_stats_${SLURM_JOB_ID}.json" \
