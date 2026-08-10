@@ -227,10 +227,22 @@ def run_training(cfg: Config, train_groups, target_rate=None):
             # scale of returns and sequence length, not "how good the policy is" -- it
             # has no reason to trend toward zero. Summing them into one number (as the
             # original version did) hides which one is actually driving any change.
-            reinforce_loss = torch.zeros(())
-            nll_loss = torch.zeros(())
-            early_nll_loss = torch.zeros(())
             step_boundary_logits = []  # for the rate-consistency loss, below
+            # Collected as plain Python lists and only turned into tensors ONCE, after
+            # the loop below -- the previous version did `reinforce_loss = reinforce_loss
+            # - float(adv[t]) * rec.boundary_logprob` (etc.) INSIDE the per-position loop,
+            # which is a sequential chain of small CUDA kernel launches (subtract, then
+            # multiply, up to B*T times per step -- tens of thousands on a real batch).
+            # list.append() launches nothing; a single torch.stack + one vectorized
+            # multiply-and-sum after the loop does the same math in O(1) kernel launches
+            # instead of O(B*T). This was the second bottleneck after the .item()-sync
+            # fixes in batched_sample_rollout/build_rewards -- those removed host-device
+            # *synchronization* stalls, this removes the (much larger, since B*T can be
+            # in the tens of thousands) *kernel-launch* overhead of the loss accumulation.
+            step_boundary_logprobs = []
+            step_next_byte_logprobs = []
+            step_early_byte_logprobs = []
+            step_advantages = []  # plain floats, index-aligned with the three lists above
             step_compressions_by_lang = defaultdict(list)
             byte_correct, byte_total = 0, 0
 
@@ -295,10 +307,21 @@ def run_training(cfg: Config, train_groups, target_rate=None):
                 for lang, (byte_seq, records) in group_records.items():
                     adv = advantages[lang]
                     for t, rec in enumerate(records):
-                        reinforce_loss = reinforce_loss - float(adv[t]) * rec.boundary_logprob  # score-function term
-                        nll_loss = nll_loss - rec.next_byte_logprob  # main head, differentiable
-                        early_nll_loss = early_nll_loss - rec.early_byte_logprob  # early-exit head, differentiable
                         step_boundary_logits.append(rec.boundary_logit)
+                        step_boundary_logprobs.append(rec.boundary_logprob)  # score-function term
+                        step_next_byte_logprobs.append(rec.next_byte_logprob)  # main head, differentiable
+                        step_early_byte_logprobs.append(rec.early_byte_logprob)  # early-exit head, differentiable
+                        step_advantages.append(float(adv[t]))
+
+            # One vectorized pass instead of the B*T sequential kernel launches the loop
+            # above used to do -- see the comment where these lists were declared.
+            boundary_logprob_t = torch.stack(step_boundary_logprobs)
+            next_byte_logprob_t = torch.stack(step_next_byte_logprobs)
+            early_byte_logprob_t = torch.stack(step_early_byte_logprobs)
+            advantage_t = torch.tensor(step_advantages, dtype=boundary_logprob_t.dtype, device=device)
+            reinforce_loss = -(advantage_t * boundary_logprob_t).sum()
+            nll_loss = -next_byte_logprob_t.sum()
+            early_nll_loss = -early_byte_logprob_t.sum()
 
             # bits-per-byte: the standard metric in the byte-level LM literature (ByT5,
             # MambaByte, D&W's own paper) -- smoother and non-saturating unlike raw

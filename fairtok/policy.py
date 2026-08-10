@@ -109,6 +109,10 @@ class StepRecord:
     early_byte_logprob: torch.Tensor  # differentiable -- early-exit head, ALSO trained as
     # its own aux ML loss; (next_byte_logprob - early_byte_logprob) is R_predict (see reward.py)
     byte_correct: bool  # None at the last position (no next byte to predict)
+    predict_reward: float  # = next_byte_logprob - early_byte_logprob, already a plain host
+    # float -- precomputed and pulled off the device ONCE for the whole batch in
+    # batched_sample_rollout (see actions_np/correct_np there), so reward.py's
+    # build_rewards no longer needs its own per-(group, language) .cpu() sync
 
 
 def bytes_to_tensor(b, device="cpu"):
@@ -165,22 +169,28 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu"):
         early_logp_byte = torch.log_softmax(early_byte_logit, dim=-1)
         early_byte_logprob = early_logp_byte[batch_idx, target]
         byte_correct = byte_logit.argmax(dim=-1) == target
+        # detached: this is R_predict (see reward.py), consumed as a plain reward
+        # number, never backpropagated through -- the differentiable copies of these
+        # same two logprobs are what train.py's nll_loss/early_nll_loss train on
+        predict_reward = (next_byte_logprob - early_byte_logprob).detach()
 
         per_step.append({
             "action": action, "boundary_logit": boundary_logit, "boundary_logprob": boundary_logprob,
             "next_byte_logprob": next_byte_logprob, "early_byte_logprob": early_byte_logprob,
-            "byte_correct": byte_correct,
+            "byte_correct": byte_correct, "predict_reward": predict_reward,
         })
         prev_boundary = action
 
-    # Pull `action`/`byte_correct` off the device ONCE each (two syncs total), not once
-    # per (sequence, position) pair -- on GPU, every individual .item() call is a full
-    # host-device synchronization, and B*T of those (potentially tens of thousands per
-    # training step) previously dominated wall-clock time far more than the actual GRU
+    # Pull `action`/`byte_correct`/`predict_reward` off the device ONCE each (three
+    # syncs total), not once per (sequence, position) pair -- on GPU, every individual
+    # .item()/.tolist() call is a full host-device synchronization, and B*T (or, for
+    # predict_reward before this fix, one per (group, language) in train.py's reward
+    # loop) of those previously dominated wall-clock time far more than the actual GRU
     # compute did. Everything still needed as a differentiable tensor (boundary_logit,
     # boundary_logprob, next/early_byte_logprob) stays on-device, untouched.
     actions_np = torch.stack([s["action"] for s in per_step]).cpu().numpy()  # (T, B)
     correct_np = torch.stack([s["byte_correct"] for s in per_step]).cpu().numpy()  # (T, B)
+    reward_np = torch.stack([s["predict_reward"] for s in per_step]).cpu().numpy()  # (T, B)
 
     results = []
     for b in range(B):
@@ -196,6 +206,7 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu"):
                 step["next_byte_logprob"][b] if has_next else torch.zeros((), device=device),
                 step["early_byte_logprob"][b] if has_next else torch.zeros((), device=device),
                 bool(correct_np[t, b]) if has_next else None,
+                float(reward_np[t, b]) if has_next else 0.0,
             ))
         results.append(records)
     return results
@@ -212,15 +223,20 @@ def segment_bytes(policy, byte_seq, deterministic=True, device="cpu"):
     reward during training), so its state is threaded through but ignored."""
     hidden, early_hidden = policy.init_state(device)
     prev_boundary = torch.zeros(1, dtype=torch.long, device=device)
-    actions = []
+    action_tensors = []  # kept on-device; pulled off in ONE sync after the loop below,
+    # not via a per-position int(action.item()) -- same fix as batched_sample_rollout's
+    # actions_np, applied here since this is still a per-byte sequential loop (the
+    # boundary decision at t genuinely depends on the sampled action at t-1) even
+    # though it's inference-only and batch-size-1.
     for t in range(byte_seq.shape[0]):
         boundary_logit, _, _, hidden, early_hidden = policy.step(
             byte_seq[t].view(1), prev_boundary, hidden, early_hidden
         )
         prob = torch.sigmoid(boundary_logit)
         action = (prob > 0.5).long() if deterministic else torch.bernoulli(prob).long()
-        actions.append(int(action.item()))
+        action_tensors.append(action)
         prev_boundary = action
+    actions = torch.cat(action_tensors).tolist() if action_tensors else []
     return spans_from_boundaries(byte_seq, actions)
 
 
@@ -230,11 +246,20 @@ def spans_from_boundaries(byte_seq, actions):
     segment_bytes during inference). Content-keyed by construction (a span IS
     its bytes) -- there is no separate id to dedupe by, which is what makes
     this representation immune to Duplication-BPE-style gaming."""
+    if isinstance(byte_seq, torch.Tensor):
+        # ONE sync for the whole sequence (a no-op if byte_seq is already CPU, as it
+        # is at inference time), not one per span -- the previous version called
+        # `.tolist()` on a fresh tensor slice INSIDE the loop below, so on a CUDA
+        # byte_seq (as it is during training, see train.py's Phase 3) every span
+        # forced its own host-device sync. Average span length is ~2-3 bytes, so a
+        # ~150-byte sentence produced ~50-75 syncs, times ~150-200 sequences/step --
+        # tens of thousands of syncs/step, the single largest bottleneck found so far.
+        byte_seq = byte_seq.detach().tolist()
     spans = []
     start = 0
     last = len(actions) - 1
     for t, action in enumerate(actions):
         if action == 1 or t == last:
-            spans.append(bytes(byte_seq[start:t + 1].tolist()))
+            spans.append(bytes(byte_seq[start:t + 1]))
             start = t + 1
     return spans

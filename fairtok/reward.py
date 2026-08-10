@@ -11,7 +11,6 @@ doesn't need this reward-shaping workaround because it's differentiable.)
 """
 
 import numpy as np
-import torch
 
 
 def discounted_returns(rewards, gamma):
@@ -35,13 +34,14 @@ def build_rewards(records, fairness_scalar, lambda_fair):
     in the tens of thousands, dominated by raw byte-predictability, not by
     which boundary decisions were actually good).
 
-    Stacks the whole sequence's reward into one tensor and pulls it off the device
-    with a single .cpu() call, instead of calling float() (== .item(), a host-device
-    sync) once per record -- on GPU that per-record sync, done once per byte position
-    per sequence, was a major bottleneck (same issue as the one fixed in
-    batched_sample_rollout, same fix: one sync instead of many)."""
-    predict_reward = torch.stack([rec.next_byte_logprob - rec.early_byte_logprob for rec in records])
-    rewards = predict_reward.detach().cpu().tolist()
+    rec.predict_reward is already a plain host float -- batched_sample_rollout
+    computes it on-device for the WHOLE batch and pulls it off with a single
+    .cpu() call (same fix as actions_np/correct_np there), so this function does
+    zero device syncs of its own. It used to do its own torch.stack(...).cpu()
+    per call (i.e. once per (group, language) per step) -- on GPU that was still
+    ~batch_groups * group_sample_size syncs/step, on top of the much larger
+    B*T ones already fixed in batched_sample_rollout."""
+    rewards = [rec.predict_reward for rec in records]
     fairness_penalty = lambda_fair * fairness_scalar
     rewards[-1] -= fairness_penalty
     return rewards
