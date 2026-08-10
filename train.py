@@ -29,6 +29,7 @@ TOKENIZERS = {
     "magnet": "magnet.cli",
     "flexitokens": "flexitokens.cli",
     "manta": "manta.cli",
+    "fanta": "fanta.cli",
 }
 
 

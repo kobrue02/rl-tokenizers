@@ -20,6 +20,7 @@ TOKENIZERS = {
     "magnet": "magnet.evaluate",
     "flexitokens": "flexitokens.evaluate",
     "manta": "manta.evaluate",
+    "fanta": "fanta.evaluate",
 }
 
 
