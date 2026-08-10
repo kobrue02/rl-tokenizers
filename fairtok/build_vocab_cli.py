@@ -33,9 +33,9 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Apply a trained policy checkpoint to a corpus to build the final tokenizer vocabulary."
     )
-    parser.add_argument("--checkpoint", required=True, help="policy checkpoint saved by fairtok.train (Config.checkpoint_out)")
+    parser.add_argument("--checkpoint", required=True, help="policy checkpoint saved by fairtok.train (GRPOConfig.output_dir)")
     parser.add_argument("--corpus", required=True, help="a text file, or a directory of .txt files, one document per line")
-    parser.add_argument("--vocab-budget", type=int, default=50000)
+    parser.add_argument("--vocab-size", type=int, default=50000)
     parser.add_argument(
         "--deterministic", action=argparse.BooleanOptionalAction, default=True,
         help="threshold boundary probability at 0.5 (default) instead of sampling -- reproducible given the same corpus",
@@ -52,7 +52,7 @@ def main(argv=None):
     texts = _iter_corpus(args.corpus)
 
     token_freq, entries = build_and_save_vocab(
-        policy, texts, args.vocab_budget, args.vocab_out, args.vocab_stats_out,
+        policy, texts, args.vocab_size, args.vocab_out, args.vocab_stats_out,
         deterministic=args.deterministic,
         progress=lambda it, desc: tqdm(it, desc=desc, unit="doc"),
     )

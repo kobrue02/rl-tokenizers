@@ -34,7 +34,7 @@ def load_checkpoint(path):
     return policy
 
 
-def build_vocab_from_corpus(policy, texts, vocab_budget, deterministic=True, progress=None):
+def build_vocab_from_corpus(policy, texts, vocab_size, deterministic=True, progress=None):
     """texts: either a flat iterable of str/bytes documents (a single unlabeled
     corpus), or a dict {label: iterable_of_documents} if the corpus has
     language/source labels worth keeping in the per-entry breakdown. This
@@ -56,12 +56,12 @@ def build_vocab_from_corpus(policy, texts, vocab_budget, deterministic=True, pro
             spans = segment_bytes(policy, byte_seq, deterministic=deterministic)
             token_freq[label].update(spans)
 
-    entries = vocab_with_stats(token_freq, vocab_budget)
+    entries = vocab_with_stats(token_freq, vocab_size)
     return token_freq, entries
 
 
-def build_and_save_vocab(policy, texts, vocab_budget, out_json, out_stats, deterministic=True, progress=None):
-    token_freq, entries = build_vocab_from_corpus(policy, texts, vocab_budget, deterministic, progress)
+def build_and_save_vocab(policy, texts, vocab_size, out_json, out_stats, deterministic=True, progress=None):
+    token_freq, entries = build_vocab_from_corpus(policy, texts, vocab_size, deterministic, progress)
     if out_json:
         save_vocab_json(entries, out_json)
     if out_stats:

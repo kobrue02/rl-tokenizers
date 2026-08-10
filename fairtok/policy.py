@@ -121,7 +121,7 @@ def bytes_to_tensor(b, device="cpu"):
     return torch.tensor(list(b), dtype=torch.long, device=device)
 
 
-def batched_sample_rollout(policy, byte_seqs, device="cpu"):
+def batched_sample_rollout(policy, byte_seqs, device="cpu", deterministic=False):
     """byte_seqs: list of 1-D LongTensors (variable length, one per sequence in the
     batch). Replaces the old one-sequence-at-a-time sample_rollout: that version had
     terrible GPU utilization (a Python loop calling the GRU with batch size 1, once
@@ -131,6 +131,13 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu"):
     part can't be removed) but processes ALL sequences in the batch TOGETHER at each
     time step via padding + masking, turning sum(len(s) for s in byte_seqs)
     individual small forward passes into max(len(s) for s in byte_seqs) batched ones.
+
+    deterministic: threshold the boundary probability at 0.5 instead of sampling from
+    it -- same distinction as segment_bytes's own `deterministic` flag, for the same
+    reason (train.py's GRPOTrainer.evaluate wants a reproducible boundary policy when
+    scoring a held-out eval set, not stochastic exploration). Everything else about
+    the rollout (logprobs, byte predictions) is computed identically either way; eval
+    callers just don't read those fields.
 
     Returns: list of per-sequence lists of StepRecord, same order/length as byte_seqs
     -- downstream code (reward.py, spans_from_boundaries, compression_rate, ...)
@@ -155,7 +162,7 @@ def batched_sample_rollout(policy, byte_seqs, device="cpu"):
             byte_ids, prev_boundary, hidden, early_hidden
         )
         prob = torch.sigmoid(boundary_logit)
-        action = torch.bernoulli(prob).long()
+        action = (prob > 0.5).long() if deterministic else torch.bernoulli(prob).long()
         boundary_logprob = torch.where(action.bool(), torch.log(prob + 1e-8), torch.log(1 - prob + 1e-8))
 
         # target byte for t+1, clamped in-bounds; per-sequence validity (has a real

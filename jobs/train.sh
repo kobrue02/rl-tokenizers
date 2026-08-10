@@ -14,8 +14,8 @@
 # Fairness-aware byte-boundary policy training.
 #
 # Usage:
-#   sbatch jobs/train.sh --data-source all --langs all --num-epochs 3 --lambda-target 20.0 --vocab-budget 50000
-#   sbatch jobs/train.sh --data-source oldi_seed --num-epochs 1   # quicker, single source
+#   sbatch jobs/train.sh --data-source all --langs all --num-train-epochs 3 --lambda-target 20.0 --vocab-size 50000
+#   sbatch jobs/train.sh --data-source oldi_seed --num-train-epochs 1   # quicker, single source
 #
 # All main.py / fairtok.cli flags are forwarded directly -- see `python main.py --help`.
 #

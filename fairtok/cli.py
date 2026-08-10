@@ -1,32 +1,41 @@
-"""Command-line entry point. Every Config field becomes a `--flag`, generated from
-the dataclass itself so this can't drift out of sync with fairtok.train.Config."""
+"""Command-line entry point. Every GRPOConfig field becomes a `--flag`, generated
+from the dataclass itself so this can't drift out of sync with fairtok.train.GRPOConfig."""
 
 import argparse
 import dataclasses
 
 from .data import LANG_PROFILES, make_synthetic_parallel_groups
-from .oldi_data import LANGS, load_all_training_groups, load_flores_plus, load_oldi_seed, load_smol_groups
-from .train import Config, _report_collapse, run_training
+from .oldi_data import (
+    LANGS,
+    load_all_training_groups,
+    load_bouquet_dev,
+    load_flores_plus,
+    load_oldi_seed,
+    load_smol_groups,
+)
+from .train import GRPOConfig, GRPOTrainer, _report_collapse
 from .vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
 
 DATA_SOURCES = ["synthetic", "oldi_seed", "flores_dev", "smol", "all"]
 
 # Extra clarifying text for fields whose semantics aren't obvious from
-# "(Config.field, default: X)" alone -- merged into the auto-generated help.
+# "(GRPOConfig.field, default: X)" alone -- merged into the auto-generated help.
 _HELP_OVERRIDES = {
-    "num_steps": "0 derives the step count from num_epochs; set explicitly to override "
+    "max_steps": "0 derives the step count from num_train_epochs; set explicitly to override "
                  "with a raw step count instead (bypasses epoch semantics entirely)",
-    "num_epochs": "1 epoch = 1 full shuffled traversal of every loaded group, however many "
-                  "steps that takes given batch_groups -- not a fixed step count",
+    "num_train_epochs": "1 epoch = 1 full shuffled traversal of every loaded group, however many "
+                         "steps that takes given per_device_train_batch_size -- not a fixed step count",
+    "eval_steps": "0 disables; > 0 automatically loads BOUQuET dev as held-out eval data "
+                  "(skipped with a warning for --data-source synthetic, which has none)",
 }
 
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Train the fairness-aware byte-boundary policy.")
 
-    for field in dataclasses.fields(Config):
+    for field in dataclasses.fields(GRPOConfig):
         flag = "--" + field.name.replace("_", "-")
-        help_text = f"(Config.{field.name}, default: {field.default})"
+        help_text = f"(GRPOConfig.{field.name}, default: {field.default})"
         if field.name in _HELP_OVERRIDES:
             help_text = f"{_HELP_OVERRIDES[field.name]} {help_text}"
         if field.type is bool:
@@ -66,9 +75,9 @@ def build_arg_parser():
 
 
 def _config_from_args(args):
-    field_names = {f.name for f in dataclasses.fields(Config)}
+    field_names = {f.name for f in dataclasses.fields(GRPOConfig)}
     kwargs = {k: v for k, v in vars(args).items() if k in field_names}
-    return Config(**kwargs)
+    return GRPOConfig(**kwargs)
 
 
 def _load_groups(args):
@@ -103,16 +112,36 @@ def _load_groups(args):
     return groups
 
 
+def _load_eval_groups(cfg, args):
+    """BOUQuET dev (see fairtok.oldi_data) -- disjoint from every training source
+    (oldi_seed/flores_plus/smol), so this is genuine held-out data for
+    fairtok.train.GRPOTrainer.evaluate, not a slice of what the policy trains on.
+    Only 6 of the 9-language panel (BOUQUET_LANGS); kas/mni/nqo aren't in BOUQuET
+    at all -- see oldi_data.load_flores_devtest_fallback for a fallback covering
+    those, not wired in here since the user asked specifically for BOUQuET."""
+    if cfg.eval_steps <= 0:
+        return None
+    if args.data_source == "synthetic":
+        print("warning: --eval-steps > 0 but --data-source synthetic has no real "
+              "BOUQuET counterpart -- skipping periodic evaluation")
+        return None
+    eval_groups = load_bouquet_dev()
+    print(f"loaded {len(eval_groups)} BOUQuET dev groups for periodic evaluation (every {cfg.eval_steps} steps)")
+    return eval_groups
+
+
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     cfg = _config_from_args(args)
     train_groups = _load_groups(args)
+    eval_groups = _load_eval_groups(cfg, args)
 
     print(f"data_source={args.data_source} groups={len(train_groups)}\n{cfg}\n")
-    policy, token_freq, final_vocab, target_rate = run_training(cfg, train_groups)
+    trainer = GRPOTrainer(cfg, train_groups, eval_dataset=eval_groups)
+    policy, token_freq, final_vocab, target_rate = trainer.train()
     _report_collapse(token_freq, final_vocab)
 
-    entries = vocab_with_stats(token_freq, cfg.vocab_budget)
+    entries = vocab_with_stats(token_freq, cfg.vocab_size)
 
     if args.vocab_preview:
         print(f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:")

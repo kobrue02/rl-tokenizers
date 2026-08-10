@@ -81,7 +81,7 @@ def _load_ngram_parallel(repo_id, dir_prefix, langs):
     (e.g. kas_Arab and kas_Deva) become distinct entries rather than one
     curated choice, which is more information, not less. Compute cost is kept
     bounded by randomly subsampling each group at training time
-    (Config.group_sample_size), not by restricting what's loaded.
+    (GRPOConfig.group_sample_size), not by restricting what's loaded.
     """
     if langs == "all":
         stems = _list_all_stems(repo_id, dir_prefix)

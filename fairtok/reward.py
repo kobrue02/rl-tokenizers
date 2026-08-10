@@ -39,7 +39,7 @@ def build_rewards(records, fairness_scalar, lambda_fair):
     .cpu() call (same fix as actions_np/correct_np there), so this function does
     zero device syncs of its own. It used to do its own torch.stack(...).cpu()
     per call (i.e. once per (group, language) per step) -- on GPU that was still
-    ~batch_groups * group_sample_size syncs/step, on top of the much larger
+    ~per_device_train_batch_size * group_sample_size syncs/step, on top of the much larger
     B*T ones already fixed in batched_sample_rollout."""
     rewards = [rec.predict_reward for rec in records]
     fairness_penalty = lambda_fair * fairness_scalar
