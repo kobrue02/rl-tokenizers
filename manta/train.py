@@ -40,6 +40,7 @@ from common.eval_common import (
     report_eval,
     sample_eval_groups,
 )
+from common.lr_schedule import build_lr_scheduler
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.reporting import collapse_stats
@@ -111,6 +112,12 @@ class MantaConfig:
     # each epoch-boundary evaluation (see MantaTrainer.train) -- 0 scores every
     # loaded dev group. Kept small since this runs periodically DURING training,
     # not once at the end (see evaluate.py, which always scores everything).
+
+    warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
+    # common.lr_schedule.build_lr_scheduler.
+    lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
+    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # Trainer's own default.
 
 
 def _avg_span_length(token_freq):
@@ -192,6 +199,9 @@ class MantaTrainer:
             f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval) "
             f"-> total_steps={total_steps} ({total_steps / steps_per_epoch:.2f} epochs)"
         )
+        scheduler = build_lr_scheduler(
+            optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
+        )
 
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
@@ -255,6 +265,7 @@ class MantaTrainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
             optimizer.step()
+            scheduler.step()
 
             # Track induced spans as training progresses, reusing the assignment
             # matrix this step's forward pass ALREADY computed -- no second
@@ -273,7 +284,11 @@ class MantaTrainer:
 
             if run is not None:
                 run.log(
-                    {"train/loss": loss_value, "train/byte_accuracy": byte_accuracy},
+                    {
+                        "train/loss": loss_value,
+                        "train/byte_accuracy": byte_accuracy,
+                        "train/learning_rate": scheduler.get_last_lr()[0],
+                    },
                     step=step,
                 )
 

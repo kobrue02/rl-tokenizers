@@ -41,6 +41,7 @@ from common.eval_common import (
     report_eval,
     sample_eval_groups,
 )
+from common.lr_schedule import build_lr_scheduler
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.parity import compute_lang_parity_ratios
 from common.reporting import avg_span_length, collapse_stats, report_collapse
@@ -130,6 +131,16 @@ class FantaConfig:
     # loaded dev group. Kept small since this runs periodically DURING training,
     # not once at the end (see evaluate.py, which always scores everything).
 
+    warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
+    # common.lr_schedule.build_lr_scheduler. Added specifically because an earlier
+    # 5-epoch FANTA run with a flat learning rate never reached a stable
+    # equilibrium (mean_compression_rate oscillating between ~1x and ~12x its
+    # target for the entire run) -- decay is a standard fix for exactly this kind
+    # of late-training overshoot.
+    lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
+    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # Trainer's own default.
+
 
 def _pad_batch(tensors, device):
     lengths = torch.tensor(
@@ -214,6 +225,9 @@ class FantaTrainer:
             f"steps_per_epoch={steps_per_epoch} (periodic dev-eval interval) "
             f"-> total_steps={total_steps} ({total_steps / steps_per_epoch:.2f} epochs)"
         )
+        scheduler = build_lr_scheduler(
+            optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
+        )
 
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
@@ -280,6 +294,7 @@ class FantaTrainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.max_grad_norm)
             optimizer.step()
+            scheduler.step()
 
             # Harvest vocabulary from this step's REALIZED (hardened) boundaries --
             # same "count whatever the model actually produced along the way, apply
@@ -328,6 +343,7 @@ class FantaTrainer:
                             np.mean([v.item() for v in per_lang_rate.values()])
                         ),
                         "train/num_langs_this_step": len(per_lang_rate),
+                        "train/learning_rate": scheduler.get_last_lr()[0],
                     },
                     step=step,
                 )

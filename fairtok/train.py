@@ -49,6 +49,7 @@ from tqdm.auto import tqdm
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.data import LANG_PROFILES, make_synthetic_parallel_groups
+from common.lr_schedule import build_lr_scheduler
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.parity import compute_lang_parity_ratios
 from common.reporting import avg_span_length, collapse_stats, report_collapse
@@ -108,6 +109,11 @@ class GRPOConfig:
     fairness_refresh_steps: int = 20
     vocab_size: int = 512
     learning_rate: float = 3e-3
+    warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
+    # common.lr_schedule.build_lr_scheduler.
+    lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
+    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # Trainer's own default.
     seed: int = 0
     bpe_sample_groups: int = 300  # groups sampled for the plain-BPE target-rate anchor
     bpe_baseline_vocab_size: int = (
@@ -545,6 +551,9 @@ class GRPOTrainer:
             f"-> steps_per_epoch={steps_per_epoch}, total_steps={total_steps} "
             f"({total_steps / steps_per_epoch:.2f} epochs)"
         )
+        scheduler = build_lr_scheduler(
+            optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
+        )
 
         # Accumulated across the WHOLE fairness_refresh_steps window, not reset every
         # step -- with langs="all" (up to 212 languages) and only
@@ -749,6 +758,7 @@ class GRPOTrainer:
                 )
                 loss.backward()
                 optimizer.step()
+                scheduler.step()
 
                 byte_accuracy = byte_correct / byte_total if byte_total else 0.0
                 postfix["loss"] = f"{loss.item():+.3f}"
@@ -770,6 +780,7 @@ class GRPOTrainer:
                             "train/byte_accuracy": byte_accuracy,
                             "train/bits_per_byte": bits_per_byte,
                             "train/early_bits_per_byte": early_bits_per_byte,
+                            "train/learning_rate": scheduler.get_last_lr()[0],
                         },
                         step=step,
                     )

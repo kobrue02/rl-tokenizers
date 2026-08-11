@@ -36,6 +36,7 @@ from common.eval_common import (
     report_eval,
     sample_eval_groups,
 )
+from common.lr_schedule import build_lr_scheduler
 from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.parity import compute_lang_parity_ratios
@@ -208,6 +209,12 @@ class FlexiTokensConfig:
     # training, not once at the end (see evaluate.py, which always scores
     # everything).
 
+    warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
+    # common.lr_schedule.build_lr_scheduler.
+    lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
+    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # Trainer's own default.
+
 
 class FlexiTokensTrainer:
     """Shaped after fairtok.train.GRPOTrainer: construct with args + train_groups
@@ -303,6 +310,9 @@ class FlexiTokensTrainer:
             model  # set now so anything inspecting mid-training sees the live model
         )
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+        scheduler = build_lr_scheduler(
+            optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
+        )
 
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
@@ -355,6 +365,7 @@ class FlexiTokensTrainer:
             if cfg.grad_clip_norm:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip_norm)
             optimizer.step()
+            scheduler.step()
 
             self.loss_history.append(float(loss.item()))
             for lang, rate in per_lang_rate.items():
@@ -398,6 +409,7 @@ class FlexiTokensTrainer:
                             if per_lang_rate
                             else 0.0
                         ),
+                        "train/learning_rate": scheduler.get_last_lr()[0],
                     },
                     step=step,
                 )
