@@ -147,6 +147,21 @@ class FantaConfig:
     num_block_layers: int = 1
     max_extra_sigma: float = 3.0
     max_grad_norm: float = 1.0
+    max_seq_length: int = 0  # 0 disables truncation (no length cap). Every
+    # sequence entering the model is truncated to at most this many BYTES
+    # (not characters -- see _truncate_to_max_bytes) before tensorizing.
+    #
+    # Exists because manta.model.SlidingWindowAttention computes a DENSE
+    # (B, H, T, T) score matrix and only masks it down to the local band
+    # afterward (a documented simplification, not a true banded kernel) --
+    # memory scales O(T^2), so group_concat_size (which multiplies T by
+    # however many groups get concatenated) is a much more dangerous memory
+    # knob than it looks. Confirmed empirically: --group-sample-size 24
+    # --per-device-train-batch-size 5 --group-concat-size 8 OOM'd a real
+    # cluster run's first training step (79GB A100) on exactly this tensor.
+    # This cap is a safety net independent of any specific config combination
+    # -- a single unusually long real sentence/paragraph could trigger the
+    # same failure even with group_concat_size=1.
 
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     log_steps: int = 10
@@ -196,6 +211,28 @@ def _concat_texts(pieces):
         return pieces[0]
     sep = b" " if isinstance(pieces[0], bytes) else " "
     return sep.join(pieces)
+
+
+def _truncate_to_max_bytes(text, max_bytes):
+    """Returns (text, truncated: bool). Truncates on BYTE length -- what
+    actually drives the model's sequence length T and
+    manta.model.SlidingWindowAttention's O(T^2) memory cost (see
+    FantaConfig.max_seq_length) -- not character/codepoint count, since those
+    diverge for any multi-byte UTF-8 script (the exact languages this project
+    cares most about not shortchanging). For str input, the truncated byte
+    slice is decoded back leniently (errors="ignore") so a multi-byte
+    character split mid-sequence is dropped cleanly rather than left as a
+    malformed trailing byte."""
+    if not max_bytes:
+        return text, False
+    if isinstance(text, str):
+        encoded = text.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return text, False
+        return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
+    if len(text) <= max_bytes:
+        return text, False
+    return text[:max_bytes], True
 
 
 def _pad_batch(tensors, device):
@@ -331,6 +368,13 @@ class FantaTrainer:
         loss_trace = []
         fairness_loss_trace = []
         n_groups = len(self.train_groups)
+        num_truncated = 0  # running total of sequences shortened by
+        # max_seq_length -- see FantaConfig.max_seq_length's docstring.
+        # Reported periodically/at the end so a silently-truncated-heavy run
+        # (cap set too low for this corpus) is visible rather than invisible.
+        num_sequences_total = 0  # exact denominator for the truncation-rate
+        # summary below (group_sample_size only CAPS languages/group, so the
+        # real per-step sequence count varies with actual corpus coverage).
 
         pbar = tqdm(range(total_steps), desc="training", unit="step")
         postfix = {}
@@ -363,6 +407,10 @@ class FantaTrainer:
 
                 for lang in langs_in_group:
                     text = _concat_texts([g[lang] for g in concat_groups])
+                    text, was_truncated = _truncate_to_max_bytes(text, cfg.max_seq_length)
+                    num_sequences_total += 1
+                    if was_truncated:
+                        num_truncated += 1
                     batch_items.append((lang, bytes_to_tensor(text, device)))
 
             langs = [lang for lang, _ in batch_items]
@@ -428,6 +476,7 @@ class FantaTrainer:
                         ),
                         "train/num_langs_this_step": len(per_lang_rate),
                         "train/learning_rate": scheduler.get_last_lr()[0],
+                        "train/num_truncated_total": num_truncated,
                     },
                     step=step,
                 )
@@ -439,11 +488,14 @@ class FantaTrainer:
                     collapse_warn = " <-- CHECK: drifting toward single-byte spans"
                 elif avg_span_len > 40:
                     collapse_warn = " <-- CHECK: drifting toward whole-sequence spans"
+                truncated_note = (
+                    f" truncated_total={num_truncated}" if cfg.max_seq_length else ""
+                )
                 pbar.write(
                     f"[step {step:4d}] loss={loss_value:.4f} ce={ce_loss.item():.4f} "
                     f"gini={gini_value:.4f} anchor={anchor_value:.4f} acc={byte_accuracy:.3f} "
                     f"avg_span={avg_span_len:.2f} langs_this_step={len(per_lang_rate)}"
-                    f"{collapse_warn}"
+                    f"{truncated_note}{collapse_warn}"
                 )
                 if run is not None:
                     run.log(
@@ -465,6 +517,13 @@ class FantaTrainer:
                 report_eval(eval_results, label=f"fanta step {step} dev")
                 if run is not None:
                     run.log(eval_wandb_log_dict(eval_results), step=step)
+
+        if cfg.max_seq_length:
+            pct = 100 * num_truncated / num_sequences_total if num_sequences_total else 0.0
+            print(
+                f"[fanta] max_seq_length={cfg.max_seq_length}: truncated "
+                f"{num_truncated}/{num_sequences_total} sequences ({pct:.2f}%) over the full run"
+            )
 
         final_vocab = top_k_by_frequency(token_freq, cfg.vocab_size)
         if cfg.output_dir:
