@@ -20,6 +20,33 @@ def _byte_len(text):
     return len(text.encode("utf-8")) if isinstance(text, str) else len(text)
 
 
+def _short_code(lang):
+    """'eng_Latn' -> 'eng', 'apc_Arab_nort3139' -> 'apc', 'eng' -> 'eng'. Language
+    keys in this project come in two conventions depending on data source (see
+    common.oldi_data._load_ngram_parallel's docstring): a bare ISO code (smol,
+    and every curated fixed-langs load) or a full lang_Script[_variant] stem
+    (oldi_seed/flores_plus under langs="all"). Splitting on the first
+    underscore recovers the ISO code either way, since stems always start with
+    it."""
+    return lang.split("_", 1)[0]
+
+
+def _find_anchor_key(group, anchor_lang):
+    """Returns whichever key in `group` represents `anchor_lang`, checking an
+    exact match first, then a short-code match (see _short_code) -- needed
+    because a single pooled train_groups list (common.oldi_data.
+    load_all_training_groups under langs="all") mixes groups keyed by bare
+    code with groups keyed by full stem, and a single group only ever uses
+    ONE of the two conventions. Returns None if `anchor_lang` isn't present
+    in this group under either convention."""
+    if anchor_lang in group:
+        return anchor_lang
+    for lang in group:
+        if _short_code(lang) == anchor_lang:
+            return lang
+    return None
+
+
 def compute_lang_parity_ratios(train_groups, anchor_lang="eng"):
     """Returns (ratio_by_lang: dict[str, float], anchor: str).
 
@@ -31,35 +58,46 @@ def compute_lang_parity_ratios(train_groups, anchor_lang="eng"):
     never paired with the anchor in any group (no evidence of a disparity, so it's
     treated like the anchor rather than penalized/boosted on no evidence).
 
+    The anchor is located PER GROUP via _find_anchor_key, not by a single fixed
+    key -- confirmed (via a real wandb run's logged target_rate_by_lang) that
+    without this, pooling langs="all" oldi_seed/flores_plus groups (keyed by
+    full lang_Script stem, e.g. "eng_Latn") together with smol groups (keyed by
+    bare code, "eng") silently discarded EVERY stem-keyed group from pairing --
+    anchor_lang="eng" never matched "eng_Latn" -- leaving ~95% of trained
+    languages defaulted to the uninformative ratio=1.0 while a handful of
+    bare-coded languages got real, very different ratios. That mismatch (most
+    languages anchored to a flat target, a few anchored to genuinely disparate
+    targets) directly fights the Gini fairness term, which wants all languages
+    present in a batch to compress SIMILARLY to each other.
+
     Falls back to the first language present if anchor_lang isn't in train_groups at
-    all (prints nothing -- callers that care about the fallback, like
-    flexitokens.train.derive_alpha_beta, print their own notice using the returned
-    `anchor`). Raises ValueError on empty train_groups.
+    all, under either key convention (prints nothing -- callers that care about the
+    fallback, like flexitokens.train.derive_alpha_beta, print their own notice using
+    the returned `anchor`). Raises ValueError on empty train_groups.
     """
     lengths_by_lang = defaultdict(list)
     for group in train_groups:
         for lang, text in group.items():
             lengths_by_lang[lang].append(_byte_len(text))
-
-    anchor = (
-        anchor_lang
-        if anchor_lang in lengths_by_lang
-        else next(iter(lengths_by_lang), None)
-    )
-    if anchor is None:
+    if not lengths_by_lang:
         raise ValueError(
             "train_groups is empty -- cannot derive parity ratios from no data"
         )
 
     paired_anchor_lengths = defaultdict(list)
     paired_lang_lengths = defaultdict(list)
+    anchor_found = False
     for group in train_groups:
-        if anchor not in group:
+        anchor_key = _find_anchor_key(group, anchor_lang)
+        if anchor_key is None:
             continue
-        anchor_len = _byte_len(group[anchor])
+        anchor_found = True
+        anchor_len = _byte_len(group[anchor_key])
         for lang, text in group.items():
             paired_anchor_lengths[lang].append(anchor_len)
             paired_lang_lengths[lang].append(_byte_len(text))
+
+    anchor = anchor_lang if anchor_found else next(iter(lengths_by_lang))
 
     ratio_by_lang = {}
     for lang in lengths_by_lang:
