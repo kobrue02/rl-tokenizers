@@ -78,6 +78,37 @@ class FantaConfig:
     group_sample_size: int = 24  # cap languages rolled out per group per step,
     # regardless of how many a group actually offers -- same meaning as
     # fairtok.train.GRPOConfig/flexitokens.train.FlexiTokensConfig's own field.
+    group_concat_size: int = 1  # how many groups' worth of text to concatenate
+    # (per language, with a separator byte) into ONE training sequence -- see
+    # FantaTrainer.train's _build_concat_index/batch-construction for the full
+    # mechanism. 1 disables concatenation (today's per-sentence behavior).
+    #
+    # Exists because both fairness_loss's per-language mean and
+    # rate_anchor_loss compare languages using a compression-rate PROXY
+    # (output.mu) read off a single sentence most steps -- one sentence is a
+    # noisy, small-sample estimate of a language's typical compression rate,
+    # and the differentiable Gini coefficient over a handful of such noisy
+    # per-language estimates is a well-documented UPWARD-BIASED estimator of
+    # the true cross-lingual disparity at small n (it partly measures real
+    # disparity and partly measures ordinary sentence-to-sentence length/
+    # complexity variance, which looks like unfairness to the loss but isn't).
+    # Concatenating several sentences per language before reading the rate
+    # proxy off the end of the sequence averages that noise down, the same
+    # way "pack documents into one training sequence" already does for
+    # ordinary LM pretraining -- safe here specifically because FANTA has no
+    # long-range semantic objective for concatenation to violate (the frontier
+    # predictor is local, see manta.model.SlidingWindowAttention's `window`).
+    #
+    # Concatenated pieces are drawn from OTHER groups sharing the exact same
+    # language-key set as the group being expanded (see _build_concat_index),
+    # not arbitrary groups -- e.g. every oldi_seed row shares its source's
+    # fixed ~41-language schema, so "another row from the same schema" is a
+    # cheap, reliable way to find more genuine, independently-sampled text in
+    # the SAME set of languages. This also keeps every language's
+    # concatenated sequence built from the SAME underlying rows as every
+    # other language sampled from that group, so the cross-lingual comparison
+    # stays apples-to-apples rather than comparing languages A and B on
+    # incidentally different (differently easy/verbose) content.
     learning_rate: float = 3e-3
     seed: int = 0
     vocab_size: int = 384  # final vocab budget, same role as MantaConfig's field.
@@ -140,6 +171,31 @@ class FantaConfig:
     lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
     # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
     # Trainer's own default.
+
+
+def _build_concat_index(train_groups):
+    """dict[frozenset[str], list[int]] -- group indices bucketed by their exact
+    set of language keys. Groups from the same underlying source share the
+    same key set (every oldi_seed row has that source's full ~41-language
+    schema, every flores_plus row its own ~212-language schema, every smol
+    row {anchor_lang} + that pair's language -- see common.oldi_data), so this
+    cheaply finds "other rows I can pull more per-language text from" without
+    needing to know which source a group came from. Built once per training
+    run (O(num_groups)), not per step."""
+    index = defaultdict(list)
+    for i, group in enumerate(train_groups):
+        index[frozenset(group.keys())].append(i)
+    return index
+
+
+def _concat_texts(pieces):
+    """Joins several same-language texts with a single separator byte/char --
+    bytes if this corpus's raw text is bytes (common.data's synthetic
+    placeholder groups), str otherwise (every real oldi_data source)."""
+    if len(pieces) == 1:
+        return pieces[0]
+    sep = b" " if isinstance(pieces[0], bytes) else " "
+    return sep.join(pieces)
 
 
 def _pad_batch(tensors, device):
@@ -229,6 +285,18 @@ class FantaTrainer:
             optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
         )
 
+        # See FantaConfig.group_concat_size's docstring for why this exists.
+        # Built once even when group_concat_size == 1 (cheap, O(num_groups)) so
+        # the per-step loop below has one code path regardless of config.
+        concat_index = _build_concat_index(self.train_groups)
+        if cfg.group_concat_size > 1:
+            sig_sizes = sorted((len(v) for v in concat_index.values()), reverse=True)
+            print(
+                f"[fanta] group_concat_size={cfg.group_concat_size}: "
+                f"{len(concat_index)} distinct language-set signatures across "
+                f"{len(self.train_groups)} groups (largest signatures: {sig_sizes[:5]})"
+            )
+
         # Built ONCE against the live `model` object -- a closure over `model`
         # keeps seeing its CURRENT weights on every call (Python closures capture
         # the object reference, not a snapshot). FANTA's induce_spans is
@@ -278,8 +346,24 @@ class FantaTrainer:
                     langs_in_group = list(
                         rng.choice(langs_in_group, size=cfg.group_sample_size, replace=False)
                     )
+
+                # See FantaConfig.group_concat_size's docstring. concat_groups is
+                # the SAME set of rows for every language sampled from this group,
+                # so every language's sequence this step is built from identical
+                # underlying content -- keeps the cross-lingual rate comparison
+                # apples-to-apples rather than confounding it with which rows
+                # happened to get concatenated for which language.
+                if cfg.group_concat_size > 1:
+                    candidates = concat_index[frozenset(group.keys())]
+                    k = min(cfg.group_concat_size, len(candidates))
+                    concat_idx = rng.choice(candidates, size=k, replace=False)
+                    concat_groups = [self.train_groups[i] for i in concat_idx]
+                else:
+                    concat_groups = [group]
+
                 for lang in langs_in_group:
-                    batch_items.append((lang, bytes_to_tensor(group[lang], device)))
+                    text = _concat_texts([g[lang] for g in concat_groups])
+                    batch_items.append((lang, bytes_to_tensor(text, device)))
 
             langs = [lang for lang, _ in batch_items]
             tensors = [seq for _, seq in batch_items]
