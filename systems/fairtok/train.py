@@ -57,15 +57,21 @@ from common.vocab import top_k_by_frequency, vocab_churn, vocab_snapshot_stats
 
 from .baseline_bpe import encode_with_merges, train_byte_bpe
 from .inference import save_checkpoint
+from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
 from .policy import BytePolicy, batched_sample_rollout
 from .reward import build_rewards, discounted_returns, group_relative_advantage
 
 
 @dataclasses.dataclass
-class GRPOConfig:
-    """Named after Hugging Face/TRL's Trainer + Config pairing (e.g. trl.GRPOTrainer +
-    trl.GRPOConfig) -- field names below mirror transformers.TrainingArguments /
-    tokenizers-library conventions wherever a clean equivalent exists (max_steps,
+class GRPOConfig(BaseTokenizerConfig):
+    """use_wandb/run_name inherited from BaseTokenizerConfig unchanged;
+    vocab_size/output_dir/wandb_project are inherited in name/type but
+    OVERRIDDEN below with fairtok-specific defaults (512, "policy.pt", and
+    "fairtok" respectively -- all three genuinely differ from the base's
+    generic defaults, not just restated). Named after Hugging Face/TRL's
+    Trainer + Config pairing (e.g. trl.GRPOTrainer + trl.GRPOConfig) -- field
+    names below mirror transformers.TrainingArguments / tokenizers-library
+    conventions wherever a clean equivalent exists (max_steps,
     num_train_epochs, learning_rate, save_steps, per_device_*_batch_size,
     vocab_size, hidden_size, num_hidden_layers, run_name, output_dir), so anyone
     coming from HF tooling recognizes the shape immediately. Fields with no HF
@@ -139,9 +145,8 @@ class GRPOConfig:
     target_rate_ceiling: float = 64.0  # generous upper bound, well past any realistic
     # compression rate at this project's vocab_size scale -- guards the opposite
     # degenerate case (e.g. a near-empty sample making ratio_L blow up).
-    use_wandb: bool = False
+    # use_wandb/run_name inherited unchanged (default False / "").
     wandb_project: str = "fairtok"
-    run_name: str = ""
     output_dir: str = (
         "policy.pt"  # empty string to skip; see fairtok.inference to reuse it.
     )
@@ -312,7 +317,7 @@ class GroupLanguageCollator:
         return batch_items, group_indices
 
 
-class GRPOTrainer:
+class GRPOTrainer(BaseTokenizerTrainer):
     """GRPO-style trainer for the byte-boundary policy (see reward.py's
     group_relative_advantage for what "group" and "GRPO-style" mean here -- one
     parallel sentence's translations across languages, not TRL's repeated-rollout
@@ -337,7 +342,14 @@ class GRPOTrainer:
     def __init__(
         self, args: GRPOConfig, train_dataset, eval_dataset=None, target_rate=None
     ):
-        self.args = args
+        # Passes the pre-wrap train_dataset/eval_dataset straight through as
+        # BaseTokenizerTrainer's own train_groups/eval_groups -- this class
+        # keeps its OWN train_dataset/eval_dataset names below (used
+        # throughout this file's own, much longer, DataLoader-based train())
+        # rather than renaming those pervasive references; self.train_groups
+        # ends up holding the same raw list every other system's Trainer
+        # calls it, for whatever external code wants that name specifically.
+        super().__init__(args, train_dataset, eval_dataset)
         self.train_dataset = (
             train_dataset
             if isinstance(train_dataset, Dataset)
@@ -346,9 +358,6 @@ class GRPOTrainer:
         self.eval_dataset = eval_dataset
         self.target_rate = target_rate
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.token_freq = None
-        self.vocab = None
 
     def get_train_dataloader(self):
         """Matches HF Trainer.get_train_dataloader's name/role. shuffle=True with a

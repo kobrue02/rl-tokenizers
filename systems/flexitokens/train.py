@@ -43,6 +43,7 @@ from common.parity import compute_lang_parity_ratios
 from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
+from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
 from .model import FlexiTokensModel, boundary_hinge_loss, next_byte_loss, pad_byte_batch
 from .segment import induce_spans
 
@@ -147,8 +148,10 @@ def derive_alpha_beta(
 
 
 @dataclasses.dataclass
-class FlexiTokensConfig:
-    """Mirrors fairtok.train.GRPOConfig's naming/style (HF-TrainingArguments-esque
+class FlexiTokensConfig(BaseTokenizerConfig):
+    """vocab_size/output_dir/use_wandb/wandb_project/run_name inherited from
+    BaseTokenizerConfig unchanged except wandb_project's default. Otherwise
+    mirrors fairtok.train.GRPOConfig's naming/style (HF-TrainingArguments-esque
     field names) wherever a clean equivalent exists; FlexiTokens-specific knobs with
     no GRPOConfig analogue keep their own domain-specific names, the same convention
     GRPOConfig itself uses for gamma/lambda_target/lambda_fair."""
@@ -192,16 +195,16 @@ class FlexiTokensConfig:
     alpha_floor: float = 0.05
     alpha_ceiling: float = 0.9
 
-    vocab_size: int = 384
+    # vocab_size (inherited, default 384).
     group_sample_size: int = 24  # cap languages rolled out per group per step,
     # regardless of how many a group actually offers -- same meaning as GRPOConfig's
     # own field.
     device: str = ""  # "" auto-detects cuda if available, else cpu.
-    output_dir: str = ""  # "" disables checkpointing.
-    use_wandb: bool = False  # matches fairtok.train.GRPOConfig's field of the same
-    # name/role -- see FlexiTokensTrainer.train for the actual wandb.init/run.log calls.
+    # output_dir (inherited, default ""): disables checkpointing.
+    # use_wandb (inherited, default False) -- see FlexiTokensTrainer.train for
+    # the actual wandb.init/run.log calls.
     wandb_project: str = "flexitokens"
-    run_name: str = ""
+    # run_name (inherited, default "").
 
     max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
     # each epoch-boundary evaluation (see FlexiTokensTrainer.train) -- 0 scores
@@ -216,7 +219,7 @@ class FlexiTokensConfig:
     # Trainer's own default.
 
 
-class FlexiTokensTrainer:
+class FlexiTokensTrainer(BaseTokenizerTrainer):
     """Shaped after fairtok.train.GRPOTrainer: construct with args + train_groups
     (a plain list of {lang: text} dicts, see common.oldi_data /
     common.data.make_synthetic_parallel_groups), call .train(), then read
@@ -225,14 +228,8 @@ class FlexiTokensTrainer:
     (model, token_freq, final_vocab, info) as a tuple for convenience."""
 
     def __init__(self, args: FlexiTokensConfig, train_groups, eval_groups=None):
-        self.args = args
-        self.train_groups = train_groups
-        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
-        # epoch-boundary evaluation (see common.cli_data.load_bouquet_dev_for_training)
+        super().__init__(args, train_groups, eval_groups)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.token_freq = None
-        self.vocab = None
         self.alpha_by_lang = None
         self.beta_by_lang = None
         self.loss_history = []

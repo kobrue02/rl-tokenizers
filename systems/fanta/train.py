@@ -47,13 +47,16 @@ from common.parity import compute_lang_parity_ratios
 from common.reporting import avg_span_length, collapse_stats, report_collapse
 from common.vocab import top_k_by_frequency
 
+from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
 from .model import MantaModel, fairness_loss, next_byte_loss, rate_anchor_loss
 from .segment import boundaries_from_assignment, induce_spans
 
 
 @dataclasses.dataclass
-class FantaConfig:
-    """Mirrors manta.train.MantaConfig's naming wherever a field means the SAME
+class FantaConfig(BaseTokenizerConfig):
+    """vocab_size/output_dir/use_wandb/wandb_project/run_name inherited from
+    BaseTokenizerConfig unchanged except wandb_project's default. Otherwise
+    mirrors manta.train.MantaConfig's naming wherever a field means the SAME
     thing; see the module docstring for the one field whose MEANING deliberately
     changed (per_device_train_batch_size), and lambda_fair/group_sample_size below
     for FANTA's own additions.
@@ -111,7 +114,8 @@ class FantaConfig:
     # incidentally different (differently easy/verbose) content.
     learning_rate: float = 3e-3
     seed: int = 0
-    vocab_size: int = 384  # final vocab budget, same role as MantaConfig's field.
+    # vocab_size (inherited, default 384): final vocab budget, same role as
+    # MantaConfig's field.
 
     lambda_fair: float = 1.0  # weight on the Gini fairness penalty relative to the
     # next-byte CE loss -- see fanta.model.fairness_loss. Distinct from fairtok's
@@ -165,12 +169,12 @@ class FantaConfig:
 
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     log_steps: int = 10
-    output_dir: str = ""  # "" disables checkpoint saving.
+    # output_dir (inherited, default ""): disables checkpoint saving.
     save_steps: int = 0  # 0 disables periodic saving.
 
-    use_wandb: bool = False
+    # use_wandb (inherited, default False).
     wandb_project: str = "fanta"
-    run_name: str = ""
+    # run_name (inherited, default "").
 
     max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
     # each epoch-boundary evaluation (see FantaTrainer.train) -- 0 scores every
@@ -246,21 +250,15 @@ def _pad_batch(tensors, device):
     return padded, lengths
 
 
-class FantaTrainer:
+class FantaTrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (a plain list of dicts {lang: text}, the
     same shape every other tokenizer's trainer in this repo takes), call .train(),
     then read .model / .token_freq / .vocab off the instance (train() also returns
     them, plus loss/fairness-loss traces, as a tuple for convenience)."""
 
     def __init__(self, args: FantaConfig, train_groups, eval_groups=None):
-        self.args = args
-        self.train_groups = train_groups
-        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
-        # epoch-boundary evaluation (see common.cli_data.load_bouquet_dev_for_training)
+        super().__init__(args, train_groups, eval_groups)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.token_freq = None
-        self.vocab = None
 
     def train(self):
         cfg = self.args

@@ -6,4 +6,4 @@ exported here so fanta.evaluate can import from `.inference` like every other
 tokenizer package does.
 """
 
-from manta.inference import load_checkpoint  # noqa: F401
+from systems.manta.inference import load_checkpoint  # noqa: F401

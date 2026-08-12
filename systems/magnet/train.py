@@ -38,6 +38,7 @@ from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from .inference import save_checkpoint
+from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
 from .model import MagnetModel
 from .segment import induce_spans
 
@@ -95,8 +96,10 @@ def eval_lang_to_script(lang):
 
 
 @dataclasses.dataclass
-class MagnetConfig:
-    """See module docstring for the naming-convention rationale."""
+class MagnetConfig(BaseTokenizerConfig):
+    """vocab_size/output_dir/use_wandb/wandb_project/run_name inherited from
+    BaseTokenizerConfig unchanged except wandb_project's default. See module
+    docstring for the naming-convention rationale on everything else."""
 
     max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
     # (see MagnetTrainer.train) -- matches fairtok.train.GRPOConfig's own
@@ -154,18 +157,18 @@ class MagnetConfig:
     # a reasonable default; raise it if boundary rate isn't tracking the prior
     # closely enough, lower it if it's dominating and hurting the LM loss.
 
-    vocab_size: int = 384  # final harvested-vocabulary budget, same role as
-    # GRPOConfig.vocab_size -- applied once, after training, by keeping the
-    # vocab_size most frequent distinct byte spans (see common.vocab.top_k_by_frequency).
+    # vocab_size (inherited, default 384): final harvested-vocabulary budget,
+    # same role as GRPOConfig.vocab_size -- applied once, after training, by
+    # keeping the vocab_size most frequent distinct byte spans (see
+    # common.vocab.top_k_by_frequency).
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     log_every: int = 10
-    output_dir: str = (
-        ""  # empty string to skip; else a path model.state_dict() is saved to.
-    )
-    use_wandb: bool = False  # matches fairtok.train.GRPOConfig's field of the same
-    # name/role -- see MagnetTrainer.train for the actual wandb.init/run.log calls.
+    # output_dir (inherited, default ""): empty string to skip; else a path
+    # model.state_dict() is saved to.
+    # use_wandb (inherited, default False) -- see MagnetTrainer.train for the
+    # actual wandb.init/run.log calls.
     wandb_project: str = "magnet"
-    run_name: str = ""
+    # run_name (inherited, default "").
 
     max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
     # each epoch-boundary evaluation (see MagnetTrainer.train) -- 0 scores every
@@ -180,7 +183,7 @@ class MagnetConfig:
     # Trainer's own default.
 
 
-class MagnetTrainer:
+class MagnetTrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (a plain list of dicts {lang: text},
     the same shape common.oldi_data.load_all_training_groups /
     common.data.make_synthetic_parallel_groups both return), call .train(),
@@ -189,14 +192,8 @@ class MagnetTrainer:
     tuple for convenience -- see run_smoke_test below for the shape)."""
 
     def __init__(self, args: MagnetConfig, train_groups, eval_groups=None):
-        self.args = args
-        self.train_groups = train_groups
-        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
-        # epoch-boundary evaluation entirely (see common.cli_data.load_bouquet_dev_for_training)
+        super().__init__(args, train_groups, eval_groups)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.token_freq = None
-        self.vocab = None
 
     def train(self):
         cfg = self.args

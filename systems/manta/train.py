@@ -46,16 +46,19 @@ from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 from common.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
+from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
 from .model import MantaModel, next_byte_loss
 from .segment import boundaries_from_assignment, induce_spans
 
 
 @dataclasses.dataclass
-class MantaConfig:
-    """See this module's docstring for the naming-convention note vs.
-    fairtok.train.GRPOConfig (same spirit, adapted where MANTa's training
-    loop is structurally simpler -- no group/fairness/rate-consistency
-    machinery to name fields for)."""
+class MantaConfig(BaseTokenizerConfig):
+    """vocab_size/output_dir/use_wandb/wandb_project/run_name inherited from
+    BaseTokenizerConfig unchanged except wandb_project's default and
+    vocab_size's docstring (see below). See this module's own docstring for
+    the naming-convention note vs. fairtok.train.GRPOConfig (same spirit,
+    adapted where MANTa's training loop is structurally simpler -- no
+    group/fairness/rate-consistency machinery to name fields for)."""
 
     max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
     # (see MantaTrainer.train) -- matches fairtok.train.GRPOConfig's own
@@ -72,14 +75,13 @@ class MantaConfig:
     # of the same name.
     learning_rate: float = 3e-3
     seed: int = 0
-    vocab_size: int = (
-        384  # final vocab budget passed to common.vocab.top_k_by_frequency,
-    )
-    # applied once after training -- matches fairtok's own two-stage
-    # "never enforce the budget during training, only harvest it after" design
-    # (see fairtok/vocab.py's module docstring), even though MANTa has no in-loop
-    # reward that a hard budget could distort in the first place; keeping the same
-    # two-stage shape just makes the two baselines' vocab outputs directly comparable.
+    # vocab_size (inherited, default 384): final vocab budget passed to
+    # common.vocab.top_k_by_frequency, applied once after training -- matches
+    # fairtok's own two-stage "never enforce the budget during training, only
+    # harvest it after" design (see fairtok/vocab.py's module docstring),
+    # even though MANTa has no in-loop reward that a hard budget could
+    # distort in the first place; keeping the same two-stage shape just makes
+    # every system's vocab output directly comparable.
     dim: int = 64  # byte embedding / model width -- see manta.model's module
     # docstring point 8 for why this is sized to match fairtok.policy.BytePolicy's
     # own scale (hidden_dim 64-128), not the original paper's ~200M-param model.
@@ -100,13 +102,13 @@ class MantaConfig:
     log_steps: int = 10  # progress-printing interval; plays the same role
     # GRPOConfig.fairness_refresh_steps does for periodic console output, but
     # there's no fairness scalar to refresh here, just a print cadence.
-    output_dir: str = ""  # "" disables checkpoint saving, matching GRPOConfig's
-    # output_dir convention (empty string = skip).
+    # output_dir (inherited, default ""): disables checkpoint saving,
+    # matching GRPOConfig's output_dir convention (empty string = skip).
     save_steps: int = 0  # 0 disables periodic saving, same convention as GRPOConfig.
-    use_wandb: bool = False  # matches fairtok.train.GRPOConfig's field of the same
-    # name/role -- see MantaTrainer.train for the actual wandb.init/run.log calls.
+    # use_wandb (inherited, default False) -- see MantaTrainer.train for the
+    # actual wandb.init/run.log calls.
     wandb_project: str = "manta"
-    run_name: str = ""
+    # run_name (inherited, default "").
 
     max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
     # each epoch-boundary evaluation (see MantaTrainer.train) -- 0 scores every
@@ -137,23 +139,17 @@ def _pad_batch(tensors, device):
     return padded, lengths
 
 
-class MantaTrainer:
-    """Construct with args + train_dataset (a list of dicts {lang: text}, the
+class MantaTrainer(BaseTokenizerTrainer):
+    """Construct with args + train_groups (a list of dicts {lang: text}, the
     same shape common.oldi_data.load_all_training_groups / common.data's
     make_synthetic_parallel_groups produce -- reused unmodified), call
     .train(), then read .model / .token_freq / .vocab off the instance
     (train() also returns them as a tuple, mirroring GRPOTrainer's
     return-and-store-on-self convention)."""
 
-    def __init__(self, args: MantaConfig, train_dataset, eval_groups=None):
-        self.args = args
-        self.train_dataset = train_dataset
-        self.eval_groups = eval_groups  # BOUQuET dev, or None to skip periodic
-        # epoch-boundary evaluation (see common.cli_data.load_bouquet_dev_for_training)
+    def __init__(self, args: MantaConfig, train_groups, eval_groups=None):
+        super().__init__(args, train_groups, eval_groups)
         self.device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.token_freq = None
-        self.vocab = None
 
     def train(self):
         cfg = self.args
@@ -165,10 +161,10 @@ class MantaTrainer:
         # front -- see module docstring for why there's no group structure at
         # batch time here (unlike GRPOTrainer's GroupLanguageCollator).
         flat_items = [
-            (lang, text) for group in self.train_dataset for lang, text in group.items()
+            (lang, text) for group in self.train_groups for lang, text in group.items()
         ]
         print(
-            f"corpus={len(self.train_dataset)} groups -> {len(flat_items)} flattened (lang, text) sequences"
+            f"corpus={len(self.train_groups)} groups -> {len(flat_items)} flattened (lang, text) sequences"
         )
 
         model = MantaModel(
@@ -224,7 +220,7 @@ class MantaTrainer:
                 name=cfg.run_name or None,
                 config={
                     **dataclasses.asdict(cfg),
-                    "num_train_groups": len(self.train_dataset),
+                    "num_train_groups": len(self.train_groups),
                     "num_flattened_sequences": len(flat_items),
                     "model_parameters": model.num_parameters(),
                     "num_eval_groups": len(self.eval_groups) if self.eval_groups else 0,

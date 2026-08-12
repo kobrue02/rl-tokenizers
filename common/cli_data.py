@@ -1,28 +1,49 @@
 """Shared --data-source/--langs/--num-groups CLI data-loading logic, used
 identically by every tokenizer's CLI in this repo (fairtok.cli, magnet.cli,
-flexitokens.cli, manta.cli, fanta.cli) -- extracted here so it's implemented
-exactly once instead of copy-pasted per tokenizer, which is exactly the kind of
-drift risk ("did I update all five when the data sources changed?") a shared
-module exists to remove.
+flexitokens.cli, manta.cli, fanta.cli, superbpe.cli, bpe.cli) -- extracted
+here so it's implemented exactly once instead of copy-pasted per tokenizer.
+
+Every named source except "all" now goes through common.corpora.stream_groups
+-- the SAME registry pretraining.data_prep draws on for LLM pretraining, not
+a separate tokenizer-training-only list. See that module's own docstring for
+which sources are genuinely cross-lingual PARALLEL (oldi_seed/flores_dev/smol)
+vs. single-language MONOLINGUAL (glot500/fineweb_edu/olmo_mix) -- the latter
+now trains a tokenizer just fine through the plain next-byte CE loss every
+trainer has, it just contributes nothing to any fairness loss term that needs
+genuinely parallel content within a group. "all" stays its own case here
+(common.oldi_data.load_all_training_groups, pooling only the three parallel
+sources) rather than folding the monolingual sources into it -- that keeps
+"all"'s existing meaning (and every past run's reproducibility) unchanged.
 """
 
-from .data import LANG_PROFILES, make_synthetic_parallel_groups
-from .oldi_data import (
-    LANGS,
-    load_all_training_groups,
-    load_flores_plus,
-    load_oldi_seed,
-    load_smol_groups,
-)
+import itertools
 
-DATA_SOURCES = ["synthetic", "oldi_seed", "flores_dev", "smol", "all"]
+from .corpora import ALL_SOURCES, MONOLINGUAL_SOURCES, stream_groups
+from .oldi_data import LANGS, load_all_training_groups
+
+# Derived from common.corpora.ALL_SOURCES (+ "all", this module's own pooling
+# special-case -- see module docstring) rather than a second hardcoded list:
+# a new source registered in corpora.py becomes selectable here automatically,
+# with no separate list to remember to update in sync.
+DATA_SOURCES = ALL_SOURCES + ["all"]
+
+# A monolingual source's own stream is lazy/effectively unbounded (a live
+# HF Hub stream, not a small fixed file the way oldi_seed/flores_dev/smol
+# are) -- materializing one without SOME bound would try to download an
+# unbounded amount of data. Used only when --num-groups isn't given.
+_DEFAULT_MONOLINGUAL_GROUPS_PER_LANG = 2000
 
 
 def load_groups(args):
     """args: an argparse.Namespace (or anything with the same attributes) with
     `.langs`, `.data_source`, `.seed`, and `.num_groups` -- every tokenizer's CLI
     in this repo adds these same four flags (see e.g. fairtok/cli.py's
-    build_arg_parser), so this function works unmodified against any of them."""
+    build_arg_parser), so this function works unmodified against any of them.
+    An optional `.dataset_config` attribute (HF config name) is read too, for
+    --data-source fineweb_edu/olmo_mix specifically -- see common.corpora.
+    stream_groups; every tokenizer's cli.py that wants to expose those two
+    sources adds that flag, the others simply never read it.
+    """
     if args.langs is None:
         langs = None
     elif args.langs == "all":
@@ -30,26 +51,32 @@ def load_groups(args):
     else:
         langs = args.langs.split(",")
 
-    if langs == "all" and args.data_source in ("synthetic", "smol"):
+    if langs == "all" and args.data_source in ("synthetic", "smol", "fineweb_edu", "olmo_mix"):
         raise ValueError(
             f"--langs all isn't supported for --data-source {args.data_source} "
-            "(synthetic has a fixed toy panel; smol needs a per-language-file rescan -- see oldi_data.py)"
+            "(synthetic has a fixed toy panel; smol needs a per-language-file rescan; "
+            "fineweb_edu/olmo_mix are single-language sources selected via --dataset-config, "
+            "not --langs -- see common.corpora)"
         )
 
-    if args.data_source == "synthetic":
-        groups = make_synthetic_parallel_groups(
-            400, langs=langs or list(LANG_PROFILES), seed=args.seed
-        )
-    elif args.data_source == "oldi_seed":
-        groups = load_oldi_seed(langs=langs or LANGS)
-    elif args.data_source == "flores_dev":
-        groups = load_flores_plus(split="dev", langs=langs or LANGS)
-    elif args.data_source == "smol":
-        groups = load_smol_groups(langs=langs or [l for l in LANGS if l != "eng"])
-    elif args.data_source == "all":
+    if args.data_source == "all":
         groups = load_all_training_groups(langs=langs or LANGS)
     else:
-        raise ValueError(f"unknown data source: {args.data_source}")
+        stream = stream_groups(
+            args.data_source,
+            langs=langs,
+            config=getattr(args, "dataset_config", None),
+            seed=args.seed,
+        )
+        if args.data_source in MONOLINGUAL_SOURCES:
+            # Lazy/effectively-unbounded source -- bound materialization
+            # explicitly rather than draining a live stream to exhaustion.
+            limit = args.num_groups or _DEFAULT_MONOLINGUAL_GROUPS_PER_LANG * max(
+                1, len(langs) if isinstance(langs, list) else 1
+            )
+            groups = list(itertools.islice(stream, limit))
+        else:
+            groups = list(stream)
 
     if args.num_groups is not None:
         groups = groups[: args.num_groups]

@@ -6,7 +6,7 @@ import from `.segment` like every other tokenizer package does, without either o
 them needing to know FANTA and MANTa share one induction implementation.
 """
 
-from manta.segment import (  # noqa: F401
+from systems.manta.segment import (  # noqa: F401
     boundaries_from_assignment,
     induce_boundaries,
     induce_boundaries_batch,

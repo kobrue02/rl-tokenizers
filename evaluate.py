@@ -16,11 +16,13 @@ import importlib
 import sys
 
 TOKENIZERS = {
-    "fairtok": "fairtok.evaluate",
-    "magnet": "magnet.evaluate",
-    "flexitokens": "flexitokens.evaluate",
-    "manta": "manta.evaluate",
-    "fanta": "fanta.evaluate",
+    "fairtok": "systems.fairtok.evaluate",
+    "magnet": "systems.magnet.evaluate",
+    "flexitokens": "systems.flexitokens.evaluate",
+    "manta": "systems.manta.evaluate",
+    "fanta": "systems.fanta.evaluate",
+    "superbpe": "systems.superbpe.evaluate",
+    "bpe": "systems.bpe.evaluate",
 }
 
 

@@ -39,7 +39,7 @@ from collections import defaultdict
 
 import torch
 
-from manta.model import MantaModel, next_byte_loss  # noqa: F401 -- re-exported so
+from systems.manta.model import MantaModel, next_byte_loss  # noqa: F401 -- re-exported so
 # fanta.train can `from .model import MantaModel, next_byte_loss, ...` like every
 # other tokenizer package does, without every caller needing to know FANTA and
 # MANTa share one (unmodified) model implementation.
