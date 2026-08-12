@@ -170,11 +170,29 @@ def _load_bouquet_split(split, langs):
     (e.g. "P001"), sentence_level rows use a finer `uniq_id` per sentence within
     that paragraph (e.g. "P001-S1", "P001-S2", ...) -- disjoint value spaces (no
     collision risk), so paragraph- and sentence-level rows can be combined into
-    ONE dict per language and intersected across languages exactly like any other
-    parallel source in this module. Each row (whether a whole paragraph or a
-    single sentence) becomes its own independent group -- this is a
-    concatenation of the two levels' rows, not a merge of a sentence into its
-    parent paragraph's entry.
+    ONE dict per language. Each row (whether a whole paragraph or a single
+    sentence) becomes its own independent group -- this is a concatenation of
+    the two levels' rows, not a merge of a sentence into its parent paragraph's
+    entry.
+
+    UNION across languages, not intersection: a group is built for every
+    uniq_id that AT LEAST ONE requested language has, containing whichever
+    subset of those languages actually covers that id -- NOT the full
+    N-way-intersection join _load_ngram_parallel uses for TRAINING data. That
+    distinction matters and is deliberate: training's fairness loss terms
+    (fanta.model.fairness_loss, rate_anchor_loss, flexitokens' boundary_hinge_loss)
+    compare languages' compression rates WITHIN one forward pass, which needs a
+    group's languages to be genuinely aligned parallel content. common.eval_common.
+    evaluate_on_groups has no such requirement -- it accumulates each language's
+    stats independently across every group containing that language, the same
+    way macro-averaged metrics don't require every class to appear in every
+    sample. Full-intersection across all 259 BOUQuET languages was confirmed
+    (via a real FANTA test-set run) to throw away the vast majority of each
+    language's own rows just because some UNRELATED language happened to be
+    missing that particular id -- e.g. 1052 surviving groups for
+    --eval-data-source bouquet_test langs="all", versus ~272k rows summed
+    across languages per the dataset card. The union join uses every row every
+    language actually has.
 
     Each {lang}.parquet has src_lang == lang and tgt_lang == eng_Latn fixed as a
     reference pivot -- so `src_text` is this file's actual per-language content,
@@ -212,8 +230,14 @@ def _load_bouquet_split(split, langs):
             )
             rows.extend(pq.read_table(path).to_pylist())
         per_lang[lang] = {r["uniq_id"]: r["src_text"] for r in rows}
-    common_ids = sorted(set.intersection(*(set(d) for d in per_lang.values())))
-    return [{lang: per_lang[lang][i] for lang in lang_to_stem} for i in common_ids]
+
+    all_ids = set()
+    for id_to_text in per_lang.values():
+        all_ids.update(id_to_text)
+    return [
+        {lang: per_lang[lang][i] for lang in lang_to_stem if i in per_lang[lang]}
+        for i in sorted(all_ids)
+    ]
 
 
 def load_bouquet_dev(langs=BOUQUET_LANGS):
