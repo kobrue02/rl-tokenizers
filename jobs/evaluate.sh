@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --time=00:30:00
+#SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
@@ -13,11 +13,21 @@
 # Held-out BOUQuET evaluation for any trained checkpoint in this repo (fairtok/
 # magnet/flexitokens/manta) -- see evaluate.py's module docstring for the dispatch
 # pattern and common/eval_common.py for the shared scoring logic every tokenizer's
-# own evaluate.py uses. This is a handful of forward passes over BOUQuET dev, not a
-# training loop, so no GPU is requested -- cpu_il is this cluster's CPU-only
+# own evaluate.py uses. No GPU is requested -- cpu_il is this cluster's CPU-only
 # counterpart to jobs/train*.sh's gpu_a100_il partition (same "_il" allocation,
 # confirmed via `sinfo`). evaluate.py's own --device flag defaults to "cpu"
 # already, matching this partition.
+#
+# --time=08:00:00 (was 00:30:00): the ORIGINAL 30-minute budget assumed BOUQuET
+# meant the initial curated 6-language subset -- with --eval-data-source
+# bouquet_test and no --num-groups cap, this now scores the FULL test split (259
+# languages, paragraph+sentence level combined, ~272k rows), via
+# common.eval_common.evaluate_on_groups's plain per-sequence loop (no batching,
+# unlike training) -- confirmed to time out at 30 minutes on a real FANTA run. 8
+# hours is a generous first estimate, not a benchmarked number. If it's still not
+# enough, the real fix is batching evaluate_on_groups itself (mirror how training
+# already batches sequences through the model) rather than widening this budget
+# further -- that loop is the actual bottleneck, not the time limit.
 #
 # Usage:
 #   sbatch jobs/evaluate.sh fairtok --checkpoint checkpoints/policy_12345.pt
