@@ -122,28 +122,60 @@ def _xcopa_template(lang, premise, choice1, choice2, question):
     return stem, [" " + _lowered(choice1), " " + _lowered(choice2)]
 
 
+def _round_robin(iterables):
+    """Cycles through `iterables` one item at a time, dropping any that
+    exhaust, until all are exhausted -- the SAME fix common.corpora.
+    _round_robin applies for Glot500 (see that module's docstring for the
+    original incident): every loader below feeds one dataset/language PER
+    ITEM lazily, in sequence, so a caller that applies a global cap (like
+    pretraining.cli_eval's --max-examples, via itertools.islice) on a
+    NAIVELY-CONCATENATED multi-language stream would silently only ever
+    draw from the first language/pair before the cap is hit -- confirmed to
+    actually happen this way in a real run (a --langs en,de,fr,ar,zh
+    --max-examples 1000 XNLI eval came back with only "en" in
+    per_language). Round-robining here, not by asking every caller to
+    remember to cap per-language itself, is what makes any global
+    --max-examples value actually sample every requested language/pair."""
+    iterators = [iter(it) for it in iterables]
+    active = list(iterators)
+    while active:
+        for it in list(active):
+            try:
+                yield next(it)
+            except StopIteration:
+                active.remove(it)
+
+
 def load_xnli(langs=None, split="test"):
     """langs: list of XNLI_LANGS codes, defaults to all 15. Yields
     MultipleChoiceExample, per-language configs loaded one at a time (not
     the differently-shaped "all_languages" pooled config -- see module
-    docstring)."""
-    for lang in langs or XNLI_LANGS:
+    docstring), interleaved round-robin across languages (see
+    _round_robin's own docstring for why that matters under a global cap)."""
+
+    def _one_lang(lang):
         ds = hf_datasets.load_dataset("facebook/xnli", name=lang, split=split, streaming=True)
         for row in ds:
             context, choices = _xnli_template(lang, row["premise"], row["hypothesis"])
             yield MultipleChoiceExample(lang=lang, context=context, choices=choices, label=row["label"])
 
+    yield from _round_robin(_one_lang(lang) for lang in (langs or XNLI_LANGS))
+
 
 def load_xcopa(langs=None, split="test"):
     """langs: list of XCOPA_LANGS codes, defaults to all 11. Yields
-    MultipleChoiceExample."""
-    for lang in langs or XCOPA_LANGS:
+    MultipleChoiceExample, interleaved round-robin across languages (see
+    _round_robin)."""
+
+    def _one_lang(lang):
         ds = hf_datasets.load_dataset("cambridgeltl/xcopa", name=lang, split=split, streaming=True)
         for row in ds:
             context, choices = _xcopa_template(
                 lang, row["premise"], row["choice1"], row["choice2"], row["question"]
             )
             yield MultipleChoiceExample(lang=lang, context=context, choices=choices, label=row["label"])
+
+    yield from _round_robin(_one_lang(lang) for lang in (langs or XCOPA_LANGS))
 
 
 def load_flores_mt(lang_pairs, split="devtest"):
@@ -155,8 +187,10 @@ def load_flores_mt(lang_pairs, split="devtest"):
     language involved) so this stays correct and simple even when different
     pairs share a language; flores_plus's own per-language files are cached
     locally after the first download (see common.oldi_data._download), so
-    repeated pairs sharing a language don't re-download it. Yields
-    TranslationExample."""
+    repeated pairs sharing a language don't re-download it. Pairs are
+    interleaved round-robin (see _round_robin) for the same reason
+    load_xnli/load_xcopa are -- a global --max-examples cap should sample
+    every requested pair, not just the first. Yields TranslationExample."""
     for src, tgt in lang_pairs:
         for code in (src, tgt):
             if code not in FLORES_MT_LANGS:
@@ -164,11 +198,15 @@ def load_flores_mt(lang_pairs, split="devtest"):
                     f"{code!r} is not in this project's FLORES language panel "
                     f"{FLORES_MT_LANGS} -- see module docstring"
                 )
+
+    def _one_pair(src, tgt):
         groups = load_flores_plus(split=split, langs=[src, tgt])
         for group in groups:
             yield TranslationExample(
                 source_lang=src, target_lang=tgt, source_text=group[src], reference_text=group[tgt]
             )
+
+    yield from _round_robin(_one_pair(src, tgt) for src, tgt in lang_pairs)
 
 
 BENCHMARKS = {
