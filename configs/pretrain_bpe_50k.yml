@@ -1,0 +1,8 @@
+# pretraining/cli.py -- sbatch jobs/train_pretraining.sh -c configs/pretrain_bpe_50k.yml
+shard_dir: pretrain_data/glot500_bpe
+model_size: small
+total_steps: 250000
+seq_len: 1024
+per_device_batch_size: 16
+use_wandb: true
+run_name: bpe_50k_250k_steps

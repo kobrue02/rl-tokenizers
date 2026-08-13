@@ -1,0 +1,8 @@
+# pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data_gpu.sh -c configs/prep_fanta_50k.yml
+dataset: glot500
+langs: all
+system: fanta
+checkpoint: checkpoints/fanta_50k.pt
+vocab_json: vocab_out/fanta_50k_vocab.json
+output_dir: pretrain_data/glot500_fanta
+max_tokens: 5000000000

@@ -25,6 +25,8 @@ Two usages:
 import argparse
 import json
 
+from common.config_file import parse_args_with_config
+
 from .cli_eval import load_pretrained_model
 from .tokenizer_adapter import ALL_SYSTEMS, TokenizerAdapter
 
@@ -73,7 +75,7 @@ def build_arg_parser():
 
 
 def main(argv=None):
-    args = build_arg_parser().parse_args(argv)
+    args = parse_args_with_config(build_arg_parser(), argv)
     model = load_pretrained_model(args.checkpoint, device=args.device)
     adapter = TokenizerAdapter.load(
         args.system, args.tokenizer_checkpoint, vocab_json_path=args.vocab_json, device=args.device

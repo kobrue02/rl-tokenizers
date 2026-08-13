@@ -10,6 +10,7 @@ import argparse
 import dataclasses
 
 from common.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
+from common.config_file import parse_args_with_config
 from common.reporting import (
     fertility_by_lang,
     report_collapse,
@@ -77,7 +78,7 @@ def _config_from_args(args):
 
 
 def main(argv=None):
-    args = build_arg_parser().parse_args(argv)
+    args = parse_args_with_config(build_arg_parser(), argv)
     cfg = _config_from_args(args)
     train_groups = load_groups(args)
     eval_groups = load_bouquet_dev_for_training(args)

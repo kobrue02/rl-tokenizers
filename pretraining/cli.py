@@ -13,6 +13,8 @@ which builds the packed token shards --shard-dir here points at.)
 import argparse
 import dataclasses
 
+from common.config_file import parse_args_with_config
+
 from .train import TrainConfig, train
 
 
@@ -33,7 +35,7 @@ def build_arg_parser():
 
 
 def main(argv=None):
-    args = build_arg_parser().parse_args(argv)
+    args = parse_args_with_config(build_arg_parser(), argv)
     cfg = TrainConfig(**vars(args))
     if not cfg.shard_dir:
         raise SystemExit("--shard-dir is required (output of a prior data_prep.py run)")

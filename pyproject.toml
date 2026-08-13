@@ -11,6 +11,7 @@ dependencies = [
     "morfessor>=2.0.6",
     "numpy>=2.5.1",
     "pyarrow>=25.0.0",
+    "pyyaml>=6.0.3",
     "sacrebleu>=2.6.0",
     "tokenizers>=0.22.2",
     "torch>=2.13.0",

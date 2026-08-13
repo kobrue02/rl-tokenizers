@@ -1,0 +1,11 @@
+# pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_bpe_50k.yml
+checkpoint: checkpoints/pretrain/final.pt
+system: bpe
+tokenizer_checkpoint: checkpoints/bpe_50k.json
+benchmark: "xnli,xcopa,flores_mt"
+langs: "en,de,fr,ar,zh"
+lang_pairs: "eng:spa,eng:arz,eng:ben"
+max_examples: 1000
+output: results/all_bpe.json
+use_wandb: true
+run_name: bpe_50k_250k_steps

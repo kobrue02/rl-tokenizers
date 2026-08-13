@@ -1,0 +1,7 @@
+# pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data.sh -c configs/prep_bpe_50k.yml
+dataset: glot500
+langs: all
+system: bpe
+checkpoint: checkpoints/bpe_50k.json
+output_dir: pretrain_data/glot500_bpe
+max_tokens: 5000000000

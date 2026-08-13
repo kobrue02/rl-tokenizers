@@ -1,0 +1,12 @@
+# pretraining/cli.py -- sbatch jobs/train_pretraining.sh -c configs/pretrain_fanta_50k.yml
+shard_dir: pretrain_data/glot500_fanta
+model_size: small
+total_steps: 250000
+seq_len: 1024
+per_device_batch_size: 16
+# output_dir MUST differ from the default "checkpoints/pretrain" -- that's
+# where the currently-running bpe_50k_250k_steps job saves its own
+# checkpoints; reusing it here would collide with that in-progress run.
+output_dir: checkpoints/pretrain_fanta
+use_wandb: true
+run_name: fanta_50k_250k_steps

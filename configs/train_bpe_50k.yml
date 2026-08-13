@@ -1,0 +1,6 @@
+# systems/bpe/cli.py -- sbatch jobs/train_bpe.sh -c configs/train_bpe_50k.yml
+data_source: all
+langs: all
+vocab_size: 50000
+output_dir: checkpoints/bpe_50k.json
+vocab_out: vocab_out/bpe_50k_vocab.json

@@ -39,6 +39,8 @@ import json
 
 import torch
 
+from common.config_file import parse_args_with_config
+
 from . import benchmarks
 from .eval_harness import evaluate_multiple_choice, evaluate_translation
 from .model import TransformerLM
@@ -242,7 +244,7 @@ def build_arg_parser():
 
 
 def main(argv=None):
-    args = build_arg_parser().parse_args(argv)
+    args = parse_args_with_config(build_arg_parser(), argv)
     langs = args.langs.split(",") if args.langs else None
     lang_pairs = _parse_lang_pairs(args.lang_pairs) if args.lang_pairs else None
     benchmark_names = [b.strip() for b in args.benchmark.split(",")]

@@ -52,6 +52,7 @@ import os
 import numpy as np
 from tqdm.auto import tqdm
 
+from common.config_file import parse_args_with_config
 from common.corpora import ALL_SOURCES, FINEWEB_EDU_CONFIGS, MONOLINGUAL_SOURCES, OLMO_MIX_CONFIGS, stream_groups
 
 from .tokenizer_adapter import ALL_SYSTEMS, TokenizerAdapter
@@ -208,7 +209,7 @@ def build_arg_parser():
 
 
 def main(argv=None):
-    args = build_arg_parser().parse_args(argv)
+    args = parse_args_with_config(build_arg_parser(), argv)
     if args.dataset in MONOLINGUAL_SOURCES - {"glot500"} and args.langs:
         print(
             f"warning: --langs is ignored for --dataset {args.dataset} "
