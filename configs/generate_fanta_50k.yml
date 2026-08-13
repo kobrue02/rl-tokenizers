@@ -1,8 +1,11 @@
 # pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_fanta_50k.yml
 checkpoint: checkpoints/pretrain_fanta/final.pt
 system: fanta
-tokenizer_checkpoint: checkpoints/fanta_50k.pt
-vocab_json: vocab_out/fanta_50k_vocab.json
+# see configs/prep_fanta_50k.yml's own comment -- these are the REAL paths
+# the pre-config-system fanta training run actually produced (job 6284655,
+# the one with the max_seq_length=1024 fix).
+tokenizer_checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
 prompt:
   - "The quick brown fox"
   - "Once upon a time"

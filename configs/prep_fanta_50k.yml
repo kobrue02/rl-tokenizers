@@ -2,8 +2,15 @@
 dataset: glot500
 langs: all
 system: fanta
-checkpoint: checkpoints/fanta_50k.pt
-vocab_json: vocab_out/fanta_50k_vocab.json
+# The fanta tokenizer used here was trained BEFORE the -c/--config system
+# existed, via a manual sbatch invocation that named outputs after the
+# SLURM job id rather than "fanta_50k" -- these are the REAL paths that
+# actually got produced (confirmed via `ls checkpoints/ vocab_out/` on the
+# cluster), not what configs/train_fanta_50k.yml itself would name a fresh
+# run of it. job 6284655 is the run that used the max_seq_length=1024 fix
+# (job 6257621, from 2026-08-11, predates that fix -- do not use it).
+checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
 output_dir: pretrain_data/glot500_fanta
 max_tokens: 5000000000
 use_wandb: true

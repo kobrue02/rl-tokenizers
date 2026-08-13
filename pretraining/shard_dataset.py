@@ -38,11 +38,22 @@ class ShardedTokenDataset(Dataset):
     same sample for the same idx regardless of which worker serves it,
     reproducible given the same seed."""
 
-    def __init__(self, shard_dir, seq_len, num_samples, seed=0):
+    def __init__(self, shard_dir, seq_len, num_samples, seed=0, index_offset=0):
+        """index_offset: shifts every __getitem__(idx) to actually draw
+        (seed, idx + index_offset) -- lets pretraining.train.train's own
+        --resume-from path continue the SAME deterministic (seed, idx)
+        sequence from where a previous run left off (idx=0..index_offset-1
+        already consumed), instead of a fresh dataset instance restarting
+        at idx=0 and silently replaying exactly the samples the original
+        run already trained on early -- confirmed to actually happen this
+        way before this parameter existed (train() built a brand new
+        sequential-order DataLoader on every process launch, with no
+        memory of how many samples a resumed run had already drawn)."""
         self.meta = load_shard_meta(shard_dir)
         self.seq_len = seq_len
         self.num_samples = num_samples
         self.seed = seed
+        self.index_offset = index_offset
         dtype = np.uint16 if self.meta["dtype"] == "uint16" else np.uint32
         shards = [
             np.memmap(os.path.join(shard_dir, name), dtype=dtype, mode="r")
@@ -61,7 +72,7 @@ class ShardedTokenDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        rng = np.random.default_rng((self.seed, idx))
+        rng = np.random.default_rng((self.seed, idx + self.index_offset))
         shard = self.shards[rng.integers(len(self.shards))]
         start = int(rng.integers(0, len(shard) - self.seq_len - 1))
         window = shard[start : start + self.seq_len + 1].astype(np.int64)

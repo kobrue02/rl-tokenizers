@@ -72,6 +72,18 @@ class TrainConfig:
     # e.g. GPT-3/LLaMA/Chinchilla).
     log_steps: int = 10
     save_steps: int = 1000
+    keep_last_n_checkpoints: int = 3  # rotating step_{step}.pt checkpoints
+    # are DELETED beyond this many most-recent ones (see save_checkpoint's
+    # own caller in train() below) -- a real incident, not a hypothetical:
+    # a "small" preset (~123M params) checkpoint (model + AdamW's 2 fp32
+    # moment buffers) is ~1.5GB, and at the old unrotated behavior a
+    # 250,000-step run saving every save_steps=1000 accumulates ~150GB of
+    # step_*.pt files that are NEVER deleted -- confirmed to be exactly
+    # what crashed a real cluster run (torch.save failing mid-write with
+    # "unexpected pos ... vs ...", a disk-quota-exhaustion signature) at
+    # step 103,000/250,000. final.pt (saved once, at the end) is NEVER
+    # rotated away regardless of this setting -- only the periodic
+    # step_{step}.pt snapshots are.
     output_dir: str = "checkpoints/pretrain"
     resume_from: str = ""  # "" starts fresh; else a path to a checkpoint
     # saved by this same script (see save_checkpoint/load_checkpoint below).
@@ -191,11 +203,28 @@ def train(cfg: TrainConfig):
         optimizer, cfg.total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
     )
 
+    # Resumed BEFORE the dataset is built -- start_step feeds directly into
+    # ShardedTokenDataset's own index_offset below, so a resumed run
+    # continues the SAME (seed, idx) sample sequence a fresh run would have
+    # used at this point, rather than a new dataset instance restarting at
+    # idx=0 and silently replaying the samples the original run already
+    # trained on early (a real bug, caught and fixed here -- see
+    # ShardedTokenDataset.__init__'s own docstring for the full story).
+    start_step = 0
+    if cfg.resume_from:
+        start_step = load_checkpoint(cfg.resume_from, model, optimizer, scheduler, device)
+        if is_main:
+            print(f"resumed from {cfg.resume_from} at step {start_step}")
+
+    samples_per_step = cfg.grad_accum_steps * cfg.per_device_batch_size
+    total_samples = cfg.total_steps * samples_per_step
+    samples_already_consumed = start_step * samples_per_step
     dataset = ShardedTokenDataset(
         cfg.shard_dir,
         cfg.seq_len,
-        num_samples=cfg.total_steps * cfg.grad_accum_steps * cfg.per_device_batch_size,
+        num_samples=total_samples - samples_already_consumed,
         seed=cfg.seed + rank,
+        index_offset=samples_already_consumed,
     )
     loader = DataLoader(
         dataset,
@@ -203,12 +232,6 @@ def train(cfg: TrainConfig):
         num_workers=cfg.num_workers,
         pin_memory=device.type == "cuda",
     )
-
-    start_step = 0
-    if cfg.resume_from:
-        start_step = load_checkpoint(cfg.resume_from, model, optimizer, scheduler, device)
-        if is_main:
-            print(f"resumed from {cfg.resume_from} at step {start_step}")
 
     run = None
     if cfg.use_wandb and is_main:
@@ -242,6 +265,14 @@ def train(cfg: TrainConfig):
     step = start_step
     t_last_log = time.time()
     tokens_since_log = 0
+    saved_checkpoint_paths = []  # step_{step}.pt paths saved BY THIS PROCESS,
+    # oldest first -- rotated per TrainConfig.keep_last_n_checkpoints below.
+    # Deliberately NOT pre-populated by scanning cfg.output_dir for
+    # pre-existing step_*.pt files on a --resume-from run -- this only
+    # rotates checkpoints saved in the CURRENT process's own lifetime,
+    # never touching whatever a previous run already left behind, so
+    # resuming never risks deleting a checkpoint you might still want from
+    # before the resume.
 
     while step < cfg.total_steps:
         optimizer.zero_grad(set_to_none=True)
@@ -289,6 +320,12 @@ def train(cfg: TrainConfig):
             path = os.path.join(cfg.output_dir, f"step_{step}.pt")
             save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size)
             print(f"saved checkpoint to {path}")
+            saved_checkpoint_paths.append(path)
+            if cfg.keep_last_n_checkpoints > 0:
+                while len(saved_checkpoint_paths) > cfg.keep_last_n_checkpoints:
+                    stale_path = saved_checkpoint_paths.pop(0)
+                    os.remove(stale_path)
+                    print(f"removed older checkpoint {stale_path} (keeping last {cfg.keep_last_n_checkpoints})")
 
     if is_main:
         final_path = os.path.join(cfg.output_dir, "final.pt")
