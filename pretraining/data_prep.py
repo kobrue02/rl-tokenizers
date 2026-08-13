@@ -66,6 +66,24 @@ exact mechanism, its real memory-scaling cost, and why near-dup mostly
 matters for the longer fineweb_edu/olmo_mix documents rather than short
 individual parallel-corpus sentences.
 
+MAX_DOC_BYTES (--max-doc-bytes, default MAX_DOC_BYTES=4096): every document
+is truncated to at most this many UTF-8 bytes BEFORE encode() -- a real,
+CONFIRMED incident this guards against, not a hypothetical: FantaConfig.
+max_seq_length already guarded manta.model's dense (B,H,T,T) attention
+during TRAINING, but this module calls a system's encode()/induce_spans
+directly on whatever raw document text a source yields, with no cap of its
+own -- an unusually long real Glot500 document reached that exact same
+dense attention during TOKENIZATION and OOM'd a real cluster GPU
+(confirmed via the job's own error log). truncate_to_max_bytes now lives
+in common/bytes_utils.py (moved there from systems/fanta/train.py once
+this module hit the identical failure mode from the identical underlying
+cause) and is applied here to EVERY document regardless of system --
+harmless for bpe/superbpe (no length-driven memory cost at all), essential
+for the five neural systems. Truncated-document counts are tracked per
+language (shards_meta.json's "num_truncated_docs"/"num_truncated_by_lang")
+and printed/logged the same way dedup's own drop counts are -- never
+silently absent from the run's own report.
+
 PERFORMANCE, stated plainly rather than discovered the hard way later (this
 project has already hit this exact class of problem once -- see
 systems/fanta's max_seq_length field and jobs/evaluate.sh's time-limit fix,
@@ -91,6 +109,7 @@ from collections import defaultdict
 import numpy as np
 from tqdm.auto import tqdm
 
+from common.bytes_utils import truncate_to_max_bytes
 from common.config_file import parse_args_with_config
 from common.corpora import ALL_SOURCES, FINEWEB_EDU_CONFIGS, MONOLINGUAL_SOURCES, OLMO_MIX_CONFIGS, stream_groups
 from common.dedup import Deduplicator
@@ -103,6 +122,18 @@ SHARD_SIZE = 100_000_000  # tokens per shard file -- ~200MB at uint16,
 # small enough that one shard is a reasonable unit of both disk I/O and
 # resumability (a partially-written run's already-flushed shards are still
 # individually valid).
+
+MAX_DOC_BYTES = 4096  # default --max-doc-bytes -- see prep_dataset's own
+# docstring MAX_DOC_BYTES section for the real incident this guards
+# against. Deliberately NOT 0/None-disabled-by-default (unlike
+# FantaConfig.max_seq_length's own convention, which IS "0 disables"):
+# that exact "unbounded by default" pattern has now caused two separate
+# real OOM crashes in this project (FANTA's training loop, then this
+# module's own tokenization loop) from the SAME underlying cause -- an
+# unusually long document reaching a neural system's dense (B,H,T,T)
+# attention uncapped. A conservative non-zero default here is a judgment
+# call informed directly by that history, not a mechanical copy of the
+# training-side field's own default.
 
 
 def _dtype_for_vocab(vocab_size):
@@ -126,6 +157,7 @@ def prep_dataset(
     dedup_num_perm=128,
     dedup_shingle_size=13,
     dedup_min_words_for_near_dup=50,
+    max_doc_bytes=MAX_DOC_BYTES,
 ):
     """dataset_name: one of common.corpora.ALL_SOURCES. langs: language
     codes for the language-selectable sources (synthetic/oldi_seed/
@@ -140,7 +172,13 @@ def prep_dataset(
     module's own DEDUPLICATION docstring section -- max_tokens/max_docs are
     checked against KEPT (post-dedup) counts, so a capped run always ends
     up with that many genuinely distinct tokens/documents, not that many
-    attempts before dropping duplicates.
+    attempts before dropping duplicates. max_doc_bytes: see this module's
+    own MAX_DOC_BYTES docstring section and MAX_DOC_BYTES's own comment --
+    a REAL, confirmed OOM (a long glot500 document reaching a neural
+    system's dense attention uncapped) this guards against, applied to
+    every document BEFORE encode() regardless of system (harmless for
+    bpe/superbpe, which have no length-driven memory cost at all). 0 or
+    None disables entirely (truncate_to_max_bytes treats both as "off").
 
     Returns the shards_meta.json dict this also writes to output_dir.
     """
@@ -186,6 +224,8 @@ def prep_dataset(
     dropped_dup_docs = 0
     dropped_dup_bytes = 0
     dropped_dup_by_lang = defaultdict(lambda: {"docs": 0, "bytes": 0})
+    num_truncated_docs = 0
+    num_truncated_by_lang = defaultdict(int)
 
     def flush():
         nonlocal buffer_pos, shard_idx
@@ -221,7 +261,20 @@ def prep_dataset(
             # this doubles as the exact byte count "bytes" below needs,
             # rather than encoding the same text to UTF-8 twice per document.
             raw_bytes = text.encode("utf-8") if isinstance(text, str) else bytes(text)
-            ids = adapter.encode(raw_bytes, lang=lang)
+            # Truncated for ENCODING only -- dedup above already compared
+            # the ORIGINAL untruncated text, and lang_counts["bytes"]
+            # below still counts the FULL raw_bytes length (a truncated
+            # document's own compression_rate is therefore slightly
+            # inflated: more bytes counted than were actually tokenized --
+            # accepted since truncation is meant to be rare, a safety net
+            # not a routine operation; see MAX_DOC_BYTES's own docstring
+            # for the real OOM this guards against, confirmed on a real
+            # cluster run).
+            encode_bytes, was_truncated = truncate_to_max_bytes(raw_bytes, max_doc_bytes)
+            if was_truncated:
+                num_truncated_docs += 1
+                num_truncated_by_lang[lang] += 1
+            ids = adapter.encode(encode_bytes, lang=lang)
             ids.append(adapter.eos_id)
             num_docs += 1
             lang_counts[lang]["docs"] += 1
@@ -274,6 +327,15 @@ def prep_dataset(
         for lang, counts in sorted(dropped_dup_by_lang.items(), key=lambda kv: -kv[1]["docs"]):
             print(f"    {lang:12s} dropped_docs={counts['docs']:8,d}  dropped_bytes={counts['bytes']:12,d}")
 
+    if max_doc_bytes:
+        trunc_rate = num_truncated_docs / num_docs if num_docs else 0.0
+        print(
+            f"\nmax_doc_bytes={max_doc_bytes}: truncated {num_truncated_docs:,}/{num_docs:,} "
+            f"kept documents ({trunc_rate:.2%}) before encoding"
+        )
+        for lang, count in sorted(num_truncated_by_lang.items(), key=lambda kv: -kv[1]):
+            print(f"    {lang:12s} truncated_docs={count:,}")
+
     print(f"\n{len(lang_counts)} language(s) encountered (token-share gini={lang_token_gini:.4f}):")
     for lang, counts in sorted(lang_counts.items(), key=lambda kv: -kv[1]["tokens"]):
         frac = counts["tokens"] / total_tokens if total_tokens else 0.0
@@ -310,6 +372,9 @@ def prep_dataset(
         "dropped_duplicate_docs": dropped_dup_docs,
         "dropped_duplicate_bytes": dropped_dup_bytes,
         "dropped_duplicates_by_lang": dict(dropped_dup_by_lang),
+        "max_doc_bytes": max_doc_bytes,
+        "num_truncated_docs": num_truncated_docs,
+        "num_truncated_by_lang": dict(num_truncated_by_lang),
     }
     with open(os.path.join(output_dir, "shards_meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
@@ -362,6 +427,12 @@ def build_arg_parser():
     parser.add_argument("--dedup-num-perm", type=int, default=128, help="MinHash permutation count -- higher is a more accurate Jaccard estimate at more memory/CPU per document")
     parser.add_argument("--dedup-shingle-size", type=int, default=13, help="word n-gram shingle length for near-dup comparison")
     parser.add_argument("--dedup-min-words-for-near-dup", type=int, default=50, help="documents shorter than this only get exact-dup checked, not MinHash near-dup (see common/dedup.py's own docstring for why)")
+    parser.add_argument(
+        "--max-doc-bytes", type=int, default=MAX_DOC_BYTES,
+        help="truncate each document to at most this many UTF-8 bytes before encoding -- guards "
+        "against a real, confirmed OOM (a long document reaching a neural system's dense "
+        "attention uncapped, see this module's own MAX_DOC_BYTES docstring section); pass 0 to disable",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -400,6 +471,7 @@ def main(argv=None):
         dedup_num_perm=args.dedup_num_perm,
         dedup_shingle_size=args.dedup_shingle_size,
         dedup_min_words_for_near_dup=args.dedup_min_words_for_near_dup,
+        max_doc_bytes=args.max_doc_bytes,
     )
 
     if args.use_wandb:
@@ -423,6 +495,7 @@ def main(argv=None):
                 "dedup_num_perm": args.dedup_num_perm,
                 "dedup_shingle_size": args.dedup_shingle_size,
                 "dedup_min_words_for_near_dup": args.dedup_min_words_for_near_dup,
+                "max_doc_bytes": args.max_doc_bytes,
             },
         )
         lang_rows = [
@@ -460,6 +533,10 @@ def main(argv=None):
                 ),
                 "dropped_duplicates_by_lang": wandb.Table(
                     columns=["lang", "dropped_docs", "dropped_bytes"], data=dedup_rows
+                ),
+                "num_truncated_docs": meta["num_truncated_docs"],
+                "truncated_rate": (
+                    meta["num_truncated_docs"] / meta["num_docs"] if meta["num_docs"] else 0.0
                 ),
             }
         )

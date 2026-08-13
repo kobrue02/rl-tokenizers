@@ -14,6 +14,39 @@ def bytes_to_tensor(b, device="cpu"):
     return torch.tensor(list(b), dtype=torch.long, device=device)
 
 
+def truncate_to_max_bytes(text, max_bytes):
+    """Returns (text, truncated: bool). Truncates on BYTE length, not
+    character/codepoint count, since those diverge for any multi-byte
+    UTF-8 script (the exact languages this project cares most about not
+    shortchanging) -- what actually drives sequence length T through any
+    of the neural (span-family) systems here. For str input, the truncated
+    byte slice is decoded back leniently (errors="ignore") so a multi-byte
+    character split mid-sequence is dropped cleanly rather than left as a
+    malformed trailing byte.
+
+    Originally lived only in systems.fanta.train (added there for
+    FantaConfig.max_seq_length, guarding manta.model.SlidingWindowAttention's
+    dense (B,H,T,T) score matrix during TRAINING) -- moved here once
+    pretraining.data_prep hit the exact same O(T^2) memory blowup from the
+    exact same attention mechanism, but at TOKENIZATION time: data_prep
+    calls a system's encode()/induce_spans directly on whatever raw corpus
+    document text comes through, with no length cap of its own, so any
+    unusually long document hits this regardless of what a system's own
+    training-time config capped sequences to. One shared truncation
+    primitive, used at both call sites, rather than two copies that could
+    drift apart."""
+    if not max_bytes:
+        return text, False
+    if isinstance(text, str):
+        encoded = text.encode("utf-8")
+        if len(encoded) <= max_bytes:
+            return text, False
+        return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
+    if len(text) <= max_bytes:
+        return text, False
+    return text[:max_bytes], True
+
+
 def spans_from_boundaries(byte_seq, actions):
     """Byte spans induced by boundary decisions (a list of 0/1 ints -- pulled from
     whatever per-position record type a given tokenizer produces, or from a

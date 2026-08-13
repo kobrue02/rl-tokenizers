@@ -33,7 +33,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
+from common.bytes_utils import bytes_to_tensor, spans_from_boundaries, truncate_to_max_bytes as _truncate_to_max_bytes
 from common.data import make_synthetic_parallel_groups
 from common.eval_common import (
     eval_wandb_log_dict,
@@ -215,28 +215,6 @@ def _concat_texts(pieces):
         return pieces[0]
     sep = b" " if isinstance(pieces[0], bytes) else " "
     return sep.join(pieces)
-
-
-def _truncate_to_max_bytes(text, max_bytes):
-    """Returns (text, truncated: bool). Truncates on BYTE length -- what
-    actually drives the model's sequence length T and
-    manta.model.SlidingWindowAttention's O(T^2) memory cost (see
-    FantaConfig.max_seq_length) -- not character/codepoint count, since those
-    diverge for any multi-byte UTF-8 script (the exact languages this project
-    cares most about not shortchanging). For str input, the truncated byte
-    slice is decoded back leniently (errors="ignore") so a multi-byte
-    character split mid-sequence is dropped cleanly rather than left as a
-    malformed trailing byte."""
-    if not max_bytes:
-        return text, False
-    if isinstance(text, str):
-        encoded = text.encode("utf-8")
-        if len(encoded) <= max_bytes:
-            return text, False
-        return encoded[:max_bytes].decode("utf-8", errors="ignore"), True
-    if len(text) <= max_bytes:
-        return text, False
-    return text[:max_bytes], True
 
 
 def _pad_batch(tensors, device):
