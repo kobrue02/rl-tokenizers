@@ -1,7 +1,7 @@
 """Command-line entry point for downstream benchmark evaluation (see
 pretraining.benchmarks/pretraining.eval_harness): load a pretraining.train
-checkpoint + its matching tokenizer_adapter, load one benchmark's examples,
-score, write a JSON results file.
+checkpoint + its matching tokenizer_adapter, load one or more benchmarks'
+examples, score each, write one combined JSON results file.
 
 Usage:
     python3 -m pretraining.cli_eval --checkpoint checkpoints/pretrain/final.pt \\
@@ -16,6 +16,17 @@ Usage:
         --max-examples 200 --output results/flores_fanta.json
         # (flores_mt lang codes are restricted to this project's own 9-language
         # panel -- arz/bam/ben/eng/kas/lij/mni/nqo/spa, see benchmarks.py)
+
+    python3 -m pretraining.cli_eval --checkpoint checkpoints/pretrain/final.pt \\
+        --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \\
+        --benchmark xnli,xcopa,flores_mt \\
+        --langs en,de,fr --lang-pairs eng:spa,eng:arz --max-examples 500 \\
+        --output results/all_bpe.json
+        # --benchmark takes a COMMA-SEPARATED list -- one job, one combined
+        # results file keyed by benchmark name, instead of one sbatch call
+        # per benchmark. --langs only applies to xnli/xcopa in the list,
+        # --lang-pairs only to flores_mt -- each benchmark just ignores the
+        # flag it has no use for (see run_evaluation).
 
 Infrastructure only (see eval_harness.py's own docstring) -- this module is
 verified via run_smoke_test below, against a tiny freshly-initialized model,
@@ -57,6 +68,43 @@ def load_pretrained_model(checkpoint_path, device="cpu"):
     return model
 
 
+def _wandb_log_dict(results, wandb):
+    """Flattens run_evaluation's {benchmark_name: results} into a single
+    dict wandb.log can take in one call -- scalar metrics for every
+    benchmark (top-level + per-language for xnli/xcopa, top-level +
+    per-pair for flores_mt), PLUS a wandb.Table of raw generated samples per
+    flores_mt pair (eval_harness.evaluate_translation already caps these at
+    max_samples_per_pair -- see that module's docstring for why the full set
+    isn't kept) so the actual generated text is something you can browse in
+    the wandb UI, not just a chrF number."""
+    log_dict = {}
+    for name, result in results.items():
+        if "accuracy" in result:  # xnli/xcopa shape
+            log_dict[f"{name}/accuracy"] = result["accuracy"]
+            log_dict[f"{name}/n"] = result["n"]
+            for lang, stats in result["per_language"].items():
+                log_dict[f"{name}/{lang}/accuracy"] = stats["accuracy"]
+                log_dict[f"{name}/{lang}/n"] = stats["n"]
+        elif "bleu" in result:  # flores_mt shape
+            log_dict[f"{name}/bleu"] = result["bleu"]
+            log_dict[f"{name}/chrf"] = result["chrf"]
+            log_dict[f"{name}/n"] = result["n"]
+            sample_rows = []
+            for pair_key, stats in result["per_pair"].items():
+                log_dict[f"{name}/{pair_key}/bleu"] = stats["bleu"]
+                log_dict[f"{name}/{pair_key}/chrf"] = stats["chrf"]
+                log_dict[f"{name}/{pair_key}/n"] = stats["n"]
+                for sample in stats["samples"]:
+                    sample_rows.append([pair_key, sample["source"], sample["hypothesis"], sample["reference"]])
+            if sample_rows:
+                log_dict[f"{name}/samples"] = wandb.Table(
+                    columns=["pair", "source", "hypothesis", "reference"], data=sample_rows
+                )
+        else:
+            raise AssertionError(f"benchmark {name!r}'s results have neither 'accuracy' nor 'bleu' -- unknown shape")
+    return log_dict
+
+
 def _parse_lang_pairs(raw):
     pairs = []
     for pair in raw.split(","):
@@ -65,7 +113,7 @@ def _parse_lang_pairs(raw):
     return pairs
 
 
-def run_evaluation(
+def _run_single_benchmark(
     model,
     adapter,
     benchmark,
@@ -107,6 +155,55 @@ def run_evaluation(
     raise AssertionError(f"benchmark {benchmark!r} in BENCHMARKS but not in either evaluator set")
 
 
+def run_evaluation(
+    model,
+    adapter,
+    benchmark,
+    langs=None,
+    lang_pairs=None,
+    split=None,
+    max_examples=None,
+    device="cpu",
+    length_normalize=False,
+    max_new_tokens=128,
+    temperature=1.0,
+):
+    """benchmark: a single name (str) or a list of names -- e.g. "xnli" or
+    ["xnli", "xcopa", "flores_mt"]. Every requested benchmark is scored
+    against the SAME model/adapter/max_examples/etc (langs feeds
+    xnli/xcopa, lang_pairs feeds flores_mt -- a benchmark that has no use
+    for one of those two just ignores it, so passing both --langs and
+    --lang-pairs for a mixed --benchmark list is normal, not redundant).
+
+    Returns {benchmark_name: <that benchmark's own results dict>} -- ALWAYS
+    this shape, even for a single benchmark, rather than returning that one
+    benchmark's dict unwrapped: one consistent return shape regardless of
+    how many benchmarks were requested, so callers never need to branch on
+    "was this a single name or a list" to find their results.
+    """
+    names = [benchmark] if isinstance(benchmark, str) else list(benchmark)
+    unknown = [b for b in names if b not in benchmarks.BENCHMARKS]
+    if unknown:
+        raise ValueError(f"unknown benchmark(s) {unknown} -- expected some of {list(benchmarks.BENCHMARKS)}")
+
+    return {
+        name: _run_single_benchmark(
+            model,
+            adapter,
+            name,
+            langs=langs,
+            lang_pairs=lang_pairs,
+            split=split,
+            max_examples=max_examples,
+            device=device,
+            length_normalize=length_normalize,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+        for name in names
+    }
+
+
 def build_arg_parser():
     parser = argparse.ArgumentParser(description="Evaluate a pretraining.train checkpoint on a benchmark.")
     parser.add_argument("--checkpoint", type=str, required=True, help="pretraining.train checkpoint (.pt)")
@@ -116,7 +213,10 @@ def build_arg_parser():
         "--vocab-json", type=str, default=None,
         help="required for the five span-family systems (fairtok/magnet/flexitokens/manta/fanta)",
     )
-    parser.add_argument("--benchmark", choices=sorted(benchmarks.BENCHMARKS), required=True)
+    parser.add_argument(
+        "--benchmark", type=str, required=True,
+        help=f"comma-separated list of benchmarks to run in one job (choices: {sorted(benchmarks.BENCHMARKS)})",
+    )
     parser.add_argument("--langs", type=str, default=None, help="comma-separated, for xnli/xcopa")
     parser.add_argument(
         "--lang-pairs", type=str, default=None,
@@ -130,6 +230,14 @@ def build_arg_parser():
     parser.add_argument("--temperature", type=float, default=1.0, help="flores_mt only")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--output", type=str, default=None, help="write JSON results here (default: print to stdout)")
+    parser.add_argument("--use-wandb", action="store_true")
+    parser.add_argument(
+        "--wandb-project", type=str, default="pretraining",
+        help="SAME default project as pretraining.train's own wandb_project -- see that "
+        "module's job_type='train' comment; this run logs job_type='eval' so both share "
+        "one project, filterable apart in the wandb UI",
+    )
+    parser.add_argument("--run-name", type=str, default="")
     return parser
 
 
@@ -137,6 +245,7 @@ def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     langs = args.langs.split(",") if args.langs else None
     lang_pairs = _parse_lang_pairs(args.lang_pairs) if args.lang_pairs else None
+    benchmark_names = [b.strip() for b in args.benchmark.split(",")]
 
     model = load_pretrained_model(args.checkpoint, device=args.device)
     adapter = TokenizerAdapter.load(
@@ -146,7 +255,7 @@ def main(argv=None):
     results = run_evaluation(
         model,
         adapter,
-        args.benchmark,
+        benchmark_names,
         langs=langs,
         lang_pairs=lang_pairs,
         split=args.split,
@@ -163,6 +272,28 @@ def main(argv=None):
             f.write(payload)
         print(f"wrote results to {args.output}")
     print(payload)
+
+    if args.use_wandb:
+        import wandb
+
+        run = wandb.init(
+            project=args.wandb_project,
+            name=args.run_name or None,
+            job_type="eval",
+            config={
+                "checkpoint": args.checkpoint,
+                "system": args.system,
+                "tokenizer_checkpoint": args.tokenizer_checkpoint,
+                "benchmark": benchmark_names,
+                "langs": langs,
+                "lang_pairs": lang_pairs,
+                "max_examples": args.max_examples,
+                "length_normalize": args.length_normalize,
+            },
+        )
+        run.log(_wandb_log_dict(results, wandb))
+        run.finish()
+        print(f"logged eval results to wandb project={args.wandb_project!r}")
 
 
 def run_smoke_test():
@@ -207,11 +338,47 @@ def run_smoke_test():
     ]
     mt_results = evaluate_translation(model, adapter, mt_examples, device="cpu", max_new_tokens=8)
     assert mt_results["n"] == 1
-    assert ("en", "de") in mt_results["per_pair"]
+    assert "en->de" in mt_results["per_pair"]
+    assert len(mt_results["per_pair"]["en->de"]["samples"]) == 1
+
+    # run_evaluation's comma-separated multi-benchmark dispatch, exercised
+    # against fake loaders (not real xnli/xcopa/flores_mt network calls --
+    # this is testing the CLI's own fan-out/return-shape logic, which
+    # doesn't care what the individual loaders actually return) via
+    # monkeypatching benchmarks.BENCHMARKS, restored in a finally so this
+    # doesn't leak into any other test/run in the same process.
+    original_benchmarks = dict(benchmarks.BENCHMARKS)
+    try:
+        benchmarks.BENCHMARKS["xnli"] = lambda langs=None, split="test": iter(mc_examples)
+        benchmarks.BENCHMARKS["xcopa"] = lambda langs=None, split="test": iter(mc_examples)
+        multi_results = run_evaluation(model, adapter, ["xnli", "xcopa"], device="cpu")
+        assert set(multi_results) == {"xnli", "xcopa"}
+        assert multi_results["xnli"]["n"] == len(mc_examples)
+        assert multi_results["xcopa"]["n"] == len(mc_examples)
+        json.dumps(multi_results, default=str)  # confirms the combined dict is actually JSON-serializable
+
+        single_result = run_evaluation(model, adapter, "xnli", device="cpu")
+        assert set(single_result) == {"xnli"}  # single-name input still comes back wrapped by benchmark name
+
+        # _wandb_log_dict against BOTH result shapes (multiple-choice via
+        # multi_results, translation via mt_results) -- built with the real
+        # wandb module (for real wandb.Table construction) but never
+        # actually wandb.init'd/logged, so this needs no network/login.
+        import wandb
+
+        combined = {**multi_results, "flores_mt": mt_results}
+        log_dict = _wandb_log_dict(combined, wandb)
+        assert log_dict["xnli/accuracy"] == multi_results["xnli"]["accuracy"]
+        assert log_dict["flores_mt/bleu"] == mt_results["bleu"]
+        assert isinstance(log_dict["flores_mt/samples"], wandb.Table)
+    finally:
+        benchmarks.BENCHMARKS.clear()
+        benchmarks.BENCHMARKS.update(original_benchmarks)
 
     print("pretraining.cli_eval smoke test passed:")
     print(f"  multiple-choice: accuracy={mc_results['accuracy']:.3f} n={mc_results['n']}")
     print(f"  translation: bleu={mt_results['bleu']:.3f} chrf={mt_results['chrf']:.3f} n={mt_results['n']}")
+    print(f"  multi-benchmark dispatch: {sorted(multi_results)}")
 
 
 if __name__ == "__main__":

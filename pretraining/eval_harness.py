@@ -138,7 +138,14 @@ def evaluate_multiple_choice(model, adapter, examples, device="cpu", length_norm
 
 
 def evaluate_translation(
-    model, adapter, examples, device="cpu", max_new_tokens=128, temperature=1.0, prompt_template=None
+    model,
+    adapter,
+    examples,
+    device="cpu",
+    max_new_tokens=128,
+    temperature=1.0,
+    prompt_template=None,
+    max_samples_per_pair=5,
 ):
     """examples: iterable of benchmarks.TranslationExample. Generates a
     translation via model.generate (no beam search / KV cache -- see that
@@ -156,8 +163,23 @@ def evaluate_translation(
     a real few-shot-example bank per language pair is future work, not
     infrastructure this module should silently fake.
 
-    Returns {"bleu": float, "chrf": float, "n": int, "per_pair": {(src,tgt):
-    {"bleu": float, "chrf": float, "n": int}}}.
+    max_samples_per_pair: how many raw (source, hypothesis, reference)
+    triples to keep verbatim per pair for qualitative inspection (the
+    corpus-level BLEU/chrF numbers alone don't tell you WHAT the model
+    actually generated) -- capped, not all of them, since a real eval run
+    can have thousands of examples per pair; a print() notes when a pair's
+    samples were truncated, so a small --max-samples-per-pair isn't mistaken
+    for "the model only translated this many sentences."
+
+    Returns {"bleu": float, "chrf": float, "n": int, "per_pair": {"src->tgt":
+    {"bleu": float, "chrf": float, "n": int, "samples": [{"source":...,
+    "hypothesis":..., "reference":...}, ...]}}}. Pair keys are "src->tgt"
+    STRINGS, not (src, tgt) tuples -- tuple dict keys aren't valid JSON, and
+    this result is written straight to disk via json.dumps in
+    pretraining.cli_eval.main (confirmed directly: json.dumps on a
+    tuple-keyed dict raises TypeError -- this was caught before it could
+    crash a real eval run, since cli_eval's own smoke test only ever
+    inspected this dict in-memory, never serialized it).
     """
     import sacrebleu
 
@@ -166,7 +188,7 @@ def evaluate_translation(
     )
 
     model.eval()
-    by_pair = collections.defaultdict(lambda: {"hyps": [], "refs": []})
+    by_pair = collections.defaultdict(lambda: {"srcs": [], "hyps": [], "refs": []})
 
     for ex in examples:
         prompt = template(ex)
@@ -176,16 +198,36 @@ def evaluate_translation(
         )
         new_ids = generated[0, len(ids) :].tolist()
         hyp_text = adapter.decode(new_ids).decode("utf-8", errors="replace")
-        pair = (ex.source_lang, ex.target_lang)
-        by_pair[pair]["hyps"].append(hyp_text)
-        by_pair[pair]["refs"].append(ex.reference_text)
+        pair_key = f"{ex.source_lang}->{ex.target_lang}"
+        by_pair[pair_key]["srcs"].append(ex.source_text)
+        by_pair[pair_key]["hyps"].append(hyp_text)
+        by_pair[pair_key]["refs"].append(ex.reference_text)
 
     per_pair = {}
     all_hyps, all_refs = [], []
-    for pair, bucket in by_pair.items():
+    for pair_key, bucket in by_pair.items():
         bleu = sacrebleu.corpus_bleu(bucket["hyps"], [bucket["refs"]])
         chrf = sacrebleu.corpus_chrf(bucket["hyps"], [bucket["refs"]])
-        per_pair[pair] = {"bleu": bleu.score, "chrf": chrf.score, "n": len(bucket["hyps"])}
+        if len(bucket["hyps"]) > max_samples_per_pair:
+            print(
+                f"[eval_harness] {pair_key}: keeping {max_samples_per_pair} of "
+                f"{len(bucket['hyps'])} generated samples in results (full set "
+                "still scored in bleu/chrf above, just not stored verbatim)"
+            )
+        samples = [
+            {"source": s, "hypothesis": h, "reference": r}
+            for s, h, r in zip(
+                bucket["srcs"][:max_samples_per_pair],
+                bucket["hyps"][:max_samples_per_pair],
+                bucket["refs"][:max_samples_per_pair],
+            )
+        ]
+        per_pair[pair_key] = {
+            "bleu": bleu.score,
+            "chrf": chrf.score,
+            "n": len(bucket["hyps"]),
+            "samples": samples,
+        }
         all_hyps.extend(bucket["hyps"])
         all_refs.extend(bucket["refs"])
 

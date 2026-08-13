@@ -196,6 +196,10 @@ def train(cfg: TrainConfig):
         run = wandb.init(
             project=cfg.wandb_project,
             name=cfg.run_name or None,
+            job_type="train",  # lets pretraining.cli_eval/cli_generate's own
+            # wandb runs share this SAME project (see their own wandb_project
+            # defaults) while still being filterable apart by job_type in the
+            # wandb UI, rather than needing a separate project per pipeline stage.
             config={
                 **dataclasses.asdict(cfg),
                 "vocab_size": vocab_size,

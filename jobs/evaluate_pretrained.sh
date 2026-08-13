@@ -44,6 +44,21 @@
 #       --benchmark flores_mt --lang-pairs eng:spa,eng:arz,eng:ben \
 #       --max-examples 200 --output results/flores_fanta.json
 #
+#   sbatch jobs/evaluate_pretrained.sh --checkpoint checkpoints/pretrain/final.pt \
+#       --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \
+#       --benchmark xnli,xcopa,flores_mt --langs en,de,fr --lang-pairs eng:spa,eng:arz \
+#       --max-examples 500 --output results/all_bpe.json \
+#       --use-wandb --wandb-project pretraining --run-name eval_bpe_50k
+#   # ^ --benchmark takes a comma-separated list -- one job, one combined
+#   # results file (keyed by benchmark name) instead of one sbatch call per
+#   # benchmark; --langs only applies to xnli/xcopa, --lang-pairs only to
+#   # flores_mt, each benchmark in the list ignores the flag it has no use for.
+#   # --use-wandb logs every metric above (plus flores_mt's raw generated
+#   # samples as a wandb.Table) as job_type="eval", in the SAME project
+#   # pretraining.train's own run used (job_type="train") -- filter by
+#   # job_type in the wandb UI to see just one stage, or by run name to line
+#   # up a specific eval against the training run it evaluated.
+#
 # All flags forward directly to pretraining/cli_eval.py -- see
 # `python3 -m pretraining.cli_eval --help`.
 
