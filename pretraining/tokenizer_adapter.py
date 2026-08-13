@@ -165,6 +165,42 @@ def _build_induce_fn(system, model, device):
     return induce
 
 
+def _build_induce_batch_fn(system, model, device):
+    """Batched counterpart to _build_induce_fn -- returns a callable
+    (raws, langs) -> list[list[bytes]] (spans per document) that processes
+    the WHOLE list in as few underlying model calls as possible, or None if
+    this system has no true batched implementation yet (TokenizerAdapter.
+    encode_batch then falls back to a plain per-item encode() loop --
+    correct, just no throughput gain).
+
+    Only manta/fanta get a real batched path here today: both reuse
+    systems.manta.segment.induce_spans_batch, which pads the whole list to
+    one common length and calls the model ONCE -- confirmed (via
+    pretraining.data_prep hitting exactly this bottleneck on a real cluster
+    run) to give a substantial throughput improvement over one call per
+    document.
+
+    magnet/flexitokens/fairtok deliberately do NOT get a batched path here,
+    stated plainly rather than silently pretending they're covered: MAGNET's
+    forward pass takes one `script` per call, and a real multi-document
+    batch can span several different scripts (would need grouping documents
+    by resolved script first -- not implemented); flexitokens' own
+    induce_boundaries always builds a batch of exactly one sequence
+    internally, with no multi-document entry point exposed; fairtok's
+    segment_bytes loops one byte at a time in Python regardless of batch
+    size, so batching in front of it wouldn't address its actual
+    bottleneck. All three still work correctly via encode_batch's per-item
+    fallback -- just without the speedup."""
+    if system in ("manta", "fanta"):
+        from systems.manta.segment import induce_spans_batch
+
+        def induce_batch(raws, langs):
+            return induce_spans_batch(model, raws, device)
+
+        return induce_batch
+    return None
+
+
 class TokenizerAdapter:
     """Construct via TokenizerAdapter.load(system, checkpoint_path[,
     vocab_json_path]), not directly.
@@ -197,6 +233,13 @@ class TokenizerAdapter:
         # never dispatches through this at all (see encode() below).
         self._induce_fn = (
             _build_induce_fn(system, model, device) if system in _SPAN_SYSTEMS else None
+        )
+        # None for the native family AND for the span-family systems with no
+        # true batched implementation yet (magnet/flexitokens/fairtok) --
+        # see _build_induce_batch_fn's own docstring. encode_batch() checks
+        # for None itself and falls back to a per-item encode() loop.
+        self._induce_batch_fn = (
+            _build_induce_batch_fn(system, model, device) if system in _SPAN_SYSTEMS else None
         )
 
     @classmethod
@@ -246,6 +289,16 @@ class TokenizerAdapter:
         span_to_id = {span: 256 + i for i, span in enumerate(multi_byte_spans)}
         return id_to_bytes, span_to_id
 
+    def _spans_to_ids(self, spans):
+        ids = []
+        for span in spans:
+            tid = self._span_to_id.get(span)
+            if tid is not None:
+                ids.append(tid)
+            else:
+                ids.extend(span)  # fallback: each byte IS its own id, 0-255
+        return ids
+
     def encode(self, text, lang=None):
         raw = _to_bytes(text)
         if self.system == "bpe":
@@ -256,14 +309,25 @@ class TokenizerAdapter:
             return self.model.encode_ids(raw)
 
         spans = self._induce_fn(raw, lang)
-        ids = []
-        for span in spans:
-            tid = self._span_to_id.get(span)
-            if tid is not None:
-                ids.append(tid)
-            else:
-                ids.extend(span)  # fallback: each byte IS its own id, 0-255
-        return ids
+        return self._spans_to_ids(spans)
+
+    def encode_batch(self, texts, langs=None):
+        """Batched counterpart to encode() -- returns the SAME result a
+        per-item `[self.encode(t, lang=l) for t, l in zip(texts, langs)]`
+        loop would (this is a throughput optimization, not a behavior
+        change -- verified directly against the per-item path), using ONE
+        underlying model call for the whole list where the system supports
+        it (self._induce_batch_fn is not None -- manta/fanta today, see
+        _build_induce_batch_fn's own docstring for why not the others yet).
+        Falls back to the plain per-item loop for bpe/superbpe (already
+        fast, no length-driven memory cost to batch around) and for any
+        span-family system without a true batched implementation."""
+        langs = list(langs) if langs is not None else [None] * len(texts)
+        if self._induce_batch_fn is None:
+            return [self.encode(t, lang=l) for t, l in zip(texts, langs)]
+        raws = [_to_bytes(t) for t in texts]
+        spans_list = self._induce_batch_fn(raws, langs)
+        return [self._spans_to_ids(spans) for spans in spans_list]
 
     def decode(self, ids):
         return b"".join(

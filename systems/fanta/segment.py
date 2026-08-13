@@ -11,4 +11,5 @@ from systems.manta.segment import (  # noqa: F401
     induce_boundaries,
     induce_boundaries_batch,
     induce_spans,
+    induce_spans_batch,
 )

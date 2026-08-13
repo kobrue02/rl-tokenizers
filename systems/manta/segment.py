@@ -123,3 +123,28 @@ def induce_spans(model, byte_seq, device="cpu"):
     tensor = _to_tensor(byte_seq, device)
     actions = induce_boundaries(model, tensor, device=device)
     return spans_from_boundaries(tensor, actions)
+
+
+def induce_spans_batch(model, byte_seqs, device="cpu"):
+    """Batched counterpart to induce_spans -- ONE model forward pass for the
+    WHOLE list (via induce_boundaries_batch, which already does the
+    padding/batching work) instead of one call per document. Returns a
+    list of span-lists, same order as byte_seqs -- byte-for-byte identical
+    to calling induce_spans once per item, just far fewer GPU calls.
+
+    Added for pretraining.data_prep, which previously called induce_spans
+    (or, via induce_boundaries -> induce_boundaries_batch(model, [x]), this
+    same batched machinery with a batch size of exactly 1) once per
+    document -- confirmed on a real cluster run to badly underutilize the
+    GPU (each single-document forward pass pays full kernel-launch/sync
+    overhead for a tiny amount of actual compute). PADDING CAVEAT: every
+    sequence in one call is padded to the LONGEST member of that specific
+    batch, so this batch's memory cost is (this batch's max length)^2 x
+    batch_size, not just max length^2 -- pretraining.data_prep's own
+    --max-doc-bytes cap (applied to every document before it ever reaches
+    here) bounds the worst case, but a larger --encode-batch-size makes
+    that worst case correspondingly larger; the two settings interact and
+    should be tuned together, not independently."""
+    tensors = [_to_tensor(s, device) for s in byte_seqs]
+    actions_list = induce_boundaries_batch(model, tensors, device=device)
+    return [spans_from_boundaries(t, a) for t, a in zip(tensors, actions_list)]

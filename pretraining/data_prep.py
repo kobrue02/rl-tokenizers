@@ -84,21 +84,31 @@ language (shards_meta.json's "num_truncated_docs"/"num_truncated_by_lang")
 and printed/logged the same way dedup's own drop counts are -- never
 silently absent from the run's own report.
 
-PERFORMANCE, stated plainly rather than discovered the hard way later (this
-project has already hit this exact class of problem once -- see
-systems/fanta's max_seq_length field and jobs/evaluate.sh's time-limit fix,
-both from an unbatched-per-sequence cost surfacing only at real scale):
-encoding here is ONE DOCUMENT AT A TIME, single process. bpe/superbpe
-(Rust-backed / a pure-Python but still O(document length) merge apply) are
-fast. The five span-family systems call their own model's induce_spans PER
-DOCUMENT -- fairtok's specifically loops one byte at a time in Python (see
-systems.fairtok.policy.segment_bytes), the others at least batch internally
-per call but still one document per Python-level call here. For a genuinely
-large prep run with one of the five neural systems, this will be
-substantially slower than bpe/superbpe; parallelizing across CPU processes
-or batching multiple documents through one model call are the natural next
-steps if that becomes a real bottleneck, neither of which is implemented yet
--- flagged here, not hidden.
+PERFORMANCE / ENCODE_BATCH_SIZE (--encode-batch-size, default
+ENCODE_BATCH_SIZE=32): documents are now grouped into batches of this size
+and encoded via TokenizerAdapter.encode_batch, not one document per
+adapter.encode() call -- a real, CONFIRMED bottleneck this fixes, not a
+speculative optimization: a real cluster run of this module against FANTA
+measured ~56.8k tok/s against bpe/superbpe's ~74-83k tok/s DESPITE running
+on an A100 GPU bpe/superbpe never even use, because manta.segment's
+induce_boundaries_batch (which the old one-document-per-call code path
+already routed through, just always with a batch size of exactly 1) pays
+full GPU kernel-launch/sync overhead per document for a tiny amount of
+actual compute. See pretraining/tokenizer_adapter.py's own
+_build_induce_batch_fn for which systems get a REAL batched speedup today
+(manta/fanta) versus which still fall back to a correct-but-unsped-up
+per-item loop (bpe/superbpe, magnet, flexitokens, fairtok -- stated
+plainly, not silently pretended to be covered).
+
+MEMORY CAVEAT, a real interaction worth understanding before raising
+--encode-batch-size casually: every sequence in one batch gets padded to
+that batch's OWN longest member, so a batch's memory cost scales with
+(that batch's max length)^2 x batch_size, not just max length^2 -- see
+systems/manta/segment.py's own induce_spans_batch docstring. --max-doc-bytes
+(above) bounds the worst case per document, but a larger --encode-batch-size
+still makes that worst case correspondingly larger; the two settings
+interact and should be tuned together, not independently, especially for
+the neural systems this batching actually speeds up.
 """
 
 import argparse
@@ -135,6 +145,11 @@ MAX_DOC_BYTES = 4096  # default --max-doc-bytes -- see prep_dataset's own
 # call informed directly by that history, not a mechanical copy of the
 # training-side field's own default.
 
+ENCODE_BATCH_SIZE = 32  # default --encode-batch-size -- see this module's
+# own PERFORMANCE / ENCODE_BATCH_SIZE docstring section for the real
+# bottleneck this fixes and the MEMORY CAVEAT section for how this
+# interacts with MAX_DOC_BYTES.
+
 
 def _dtype_for_vocab(vocab_size):
     return "uint16" if vocab_size <= 65536 else "uint32"
@@ -158,6 +173,7 @@ def prep_dataset(
     dedup_shingle_size=13,
     dedup_min_words_for_near_dup=50,
     max_doc_bytes=MAX_DOC_BYTES,
+    encode_batch_size=ENCODE_BATCH_SIZE,
 ):
     """dataset_name: one of common.corpora.ALL_SOURCES. langs: language
     codes for the language-selectable sources (synthetic/oldi_seed/
@@ -179,6 +195,12 @@ def prep_dataset(
     every document BEFORE encode() regardless of system (harmless for
     bpe/superbpe, which have no length-driven memory cost at all). 0 or
     None disables entirely (truncate_to_max_bytes treats both as "off").
+    encode_batch_size: see this module's own PERFORMANCE / ENCODE_BATCH_SIZE
+    docstring section -- max_tokens/max_docs are checked at BATCH
+    granularity (every encode_batch_size documents), not per document, so a
+    capped run may overshoot the exact target by up to one batch's worth of
+    tokens/documents -- a deliberate, minor tradeoff for the throughput
+    gain from batched encoding, not an oversight.
 
     Returns the shards_meta.json dict this also writes to output_dir.
     """
@@ -237,6 +259,41 @@ def prep_dataset(
         shard_idx += 1
         buffer_pos = 0
 
+    # (lang, encode_bytes, raw_byte_len) tuples awaiting a batched encode()
+    # call -- see this module's own PERFORMANCE / ENCODE_BATCH_SIZE
+    # docstring section. Kept/truncated documents ACCUMULATE here instead
+    # of being encoded immediately; dedup/truncation themselves stay
+    # per-document (cheap, no GPU cost) since they only need to run once
+    # each regardless of batching.
+    pending = []
+
+    def process_pending():
+        nonlocal buffer_pos, shard_idx, total_tokens, num_docs
+        if not pending:
+            return
+        langs_batch = [p[0] for p in pending]
+        bytes_batch = [p[1] for p in pending]
+        ids_list = adapter.encode_batch(bytes_batch, langs_batch)
+        for (lang, _, raw_len), ids in zip(pending, ids_list):
+            ids = list(ids)
+            ids.append(adapter.eos_id)
+            num_docs += 1
+            lang_counts[lang]["docs"] += 1
+            lang_counts[lang]["tokens"] += len(ids)
+            lang_counts[lang]["bytes"] += raw_len
+
+            i = 0
+            while i < len(ids):
+                n = min(len(ids) - i, shard_size - buffer_pos)
+                buffer[buffer_pos : buffer_pos + n] = ids[i : i + n]
+                buffer_pos += n
+                i += n
+                total_tokens += n
+                pbar.update(n)
+                if buffer_pos == shard_size:
+                    flush()
+        pending.clear()
+
     pbar = tqdm(desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True)
     done = False
     for group in stream:
@@ -256,47 +313,34 @@ def prep_dataset(
                 dropped_dup_by_lang[lang]["bytes"] += len(raw_bytes)
                 continue
             # Encoded to raw bytes ONCE here (not left as a str for
-            # adapter.encode to re-encode internally) -- encode() already
-            # accepts bytes directly (see tokenizer_adapter._to_bytes), so
-            # this doubles as the exact byte count "bytes" below needs,
+            # adapter.encode_batch to re-encode internally) -- encode_batch
+            # already accepts bytes directly (see tokenizer_adapter._to_bytes),
+            # so this doubles as the exact byte count "bytes" below needs,
             # rather than encoding the same text to UTF-8 twice per document.
             raw_bytes = text.encode("utf-8") if isinstance(text, str) else bytes(text)
             # Truncated for ENCODING only -- dedup above already compared
             # the ORIGINAL untruncated text, and lang_counts["bytes"]
-            # below still counts the FULL raw_bytes length (a truncated
-            # document's own compression_rate is therefore slightly
-            # inflated: more bytes counted than were actually tokenized --
-            # accepted since truncation is meant to be rare, a safety net
-            # not a routine operation; see MAX_DOC_BYTES's own docstring
-            # for the real OOM this guards against, confirmed on a real
-            # cluster run).
+            # (in process_pending) still counts the FULL raw_bytes length
+            # (a truncated document's own compression_rate is therefore
+            # slightly inflated: more bytes counted than were actually
+            # tokenized -- accepted since truncation is meant to be rare, a
+            # safety net not a routine operation; see MAX_DOC_BYTES's own
+            # docstring for the real OOM this guards against, confirmed on
+            # a real cluster run).
             encode_bytes, was_truncated = truncate_to_max_bytes(raw_bytes, max_doc_bytes)
             if was_truncated:
                 num_truncated_docs += 1
                 num_truncated_by_lang[lang] += 1
-            ids = adapter.encode(encode_bytes, lang=lang)
-            ids.append(adapter.eos_id)
-            num_docs += 1
-            lang_counts[lang]["docs"] += 1
-            lang_counts[lang]["tokens"] += len(ids)
-            lang_counts[lang]["bytes"] += len(raw_bytes)
-
-            i = 0
-            while i < len(ids):
-                n = min(len(ids) - i, shard_size - buffer_pos)
-                buffer[buffer_pos : buffer_pos + n] = ids[i : i + n]
-                buffer_pos += n
-                i += n
-                total_tokens += n
-                pbar.update(n)
-                if buffer_pos == shard_size:
-                    flush()
+            pending.append((lang, encode_bytes, len(raw_bytes)))
+            if len(pending) >= encode_batch_size:
+                process_pending()
 
             if (max_tokens and total_tokens >= max_tokens) or (max_docs and num_docs >= max_docs):
                 done = True
                 break
         if done:
             break
+    process_pending()  # flush any partial batch smaller than encode_batch_size
     flush()
     pbar.close()
 
@@ -433,6 +477,13 @@ def build_arg_parser():
         "against a real, confirmed OOM (a long document reaching a neural system's dense "
         "attention uncapped, see this module's own MAX_DOC_BYTES docstring section); pass 0 to disable",
     )
+    parser.add_argument(
+        "--encode-batch-size", type=int, default=ENCODE_BATCH_SIZE,
+        help="group this many documents into one encode_batch() call -- a real, confirmed "
+        "throughput fix for the neural systems (see this module's own PERFORMANCE / "
+        "ENCODE_BATCH_SIZE docstring section); interacts with --max-doc-bytes, see the "
+        "MEMORY CAVEAT section before raising this",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -472,6 +523,7 @@ def main(argv=None):
         dedup_shingle_size=args.dedup_shingle_size,
         dedup_min_words_for_near_dup=args.dedup_min_words_for_near_dup,
         max_doc_bytes=args.max_doc_bytes,
+        encode_batch_size=args.encode_batch_size,
     )
 
     if args.use_wandb:
@@ -496,6 +548,7 @@ def main(argv=None):
                 "dedup_shingle_size": args.dedup_shingle_size,
                 "dedup_min_words_for_near_dup": args.dedup_min_words_for_near_dup,
                 "max_doc_bytes": args.max_doc_bytes,
+                "encode_batch_size": args.encode_batch_size,
             },
         )
         lang_rows = [
