@@ -50,6 +50,22 @@ choice text -- linguistically imperfect (English scaffolding around
 non-English content), but honest about being a default, not a claim of
 faithful multilingual prompting. Swap in real localized templates via
 PROMPT_OVERRIDES before running a non-English XNLI/XCOPA eval that matters.
+
+CONTAMINATION: checked, not just described, via pretraining.cli_contamination
+-- an n-gram text-overlap scan between any common.corpora source (the SAME
+sources a pretraining run actually trains on) and any of these three
+benchmarks' own examples (see pretraining/contamination.py for the
+detection approach: shingle the small benchmark side into an index, stream
+the large corpus side once checking for matches). FLORES-MT specifically
+also uses load_flores_plus's "devtest" split, disjoint from the "dev" split
+systems/ tokenizer training draws on -- that guards against one additional,
+narrower leak on top of the general n-gram scan. Run it explicitly (`python3
+-m pretraining.cli_contamination --benchmark ... --corpus-dataset ...`)
+against whichever source(s) actually fed a given pretraining run before
+trusting that run's eval numbers -- a scan that was never run, or one
+capped short of the full corpus via --max-corpus-docs, still tells you
+nothing either way (see cli_contamination.py's own docstring for that
+caveat).
 """
 
 import dataclasses

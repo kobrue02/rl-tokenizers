@@ -6,3 +6,5 @@ checkpoint: checkpoints/fanta_50k.pt
 vocab_json: vocab_out/fanta_50k_vocab.json
 output_dir: pretrain_data/glot500_fanta
 max_tokens: 5000000000
+use_wandb: true
+run_name: fanta_50k_data_prep

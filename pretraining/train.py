@@ -151,11 +151,32 @@ def train(cfg: TrainConfig):
     model_cfg = get_preset(cfg.model_size)
     model_cfg.max_seq_len = max(model_cfg.max_seq_len, cfg.seq_len)
     model = TransformerLM(model_cfg, vocab_size).to(device)
+    model_params = model.num_parameters()
+    effective_batch_size = cfg.per_device_batch_size * cfg.grad_accum_steps * world_size
+    # Tokens/FLOPs this run is PLANNED to see, not what it's actually seen so
+    # far -- a static property of (total_steps, batch config, model size),
+    # known before the first step runs. tokens_per_param compares against
+    # Chinchilla's ~20-tokens/param compute-optimal ratio (Hoffmann et al.
+    # 2022); estimated_flops uses the standard ~6ND approximation (Kaplan et
+    # al. 2020) with N = TOTAL parameters (embedding included) -- the same
+    # loose convention most reports use, not the non-embedding-only variant
+    # some papers prefer. Both are exactly the kind of top-line numbers
+    # frontier lab reports (LLaMA/Chinchilla/OLMo) state alongside a training
+    # run, and both are free here -- no new tracking, just derived from
+    # numbers this function already has in hand.
+    planned_training_tokens = effective_batch_size * cfg.total_steps * cfg.seq_len
+    tokens_per_param = planned_training_tokens / model_params if model_params else 0.0
+    estimated_flops = 6 * model_params * planned_training_tokens
     if is_main:
         print(
-            f"model_size={cfg.model_size} params={model.num_parameters():,} "
+            f"model_size={cfg.model_size} params={model_params:,} "
             f"vocab_size={vocab_size} (from {cfg.shard_dir}/shards_meta.json) "
             f"world_size={world_size}"
+        )
+        print(
+            f"planned_training_tokens={planned_training_tokens:,} "
+            f"tokens_per_param={tokens_per_param:.1f} (Chinchilla-optimal ~20) "
+            f"estimated_flops={estimated_flops:.3e} (~6*N*D)"
         )
     if distributed:
         model = DistributedDataParallel(model, device_ids=[local_rank])
@@ -203,13 +224,12 @@ def train(cfg: TrainConfig):
             config={
                 **dataclasses.asdict(cfg),
                 "vocab_size": vocab_size,
-                "model_params": model.module.num_parameters()
-                if distributed
-                else model.num_parameters(),
+                "model_params": model_params,
                 "world_size": world_size,
-                "effective_batch_size": cfg.per_device_batch_size
-                * cfg.grad_accum_steps
-                * world_size,
+                "effective_batch_size": effective_batch_size,
+                "planned_training_tokens": planned_training_tokens,
+                "tokens_per_param": tokens_per_param,
+                "estimated_flops": estimated_flops,
             },
         )
 

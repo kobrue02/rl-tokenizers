@@ -5,3 +5,5 @@ system: bpe
 checkpoint: checkpoints/bpe_50k.json
 output_dir: pretrain_data/glot500_bpe
 max_tokens: 5000000000
+use_wandb: true
+run_name: bpe_50k_data_prep

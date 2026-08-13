@@ -7,3 +7,15 @@ output_dir: checkpoints/fanta_50k.pt
 vocab_out: vocab_out/fanta_50k_vocab.json
 use_wandb: true
 run_name: fanta_50k
+# max_seq_length WAS left at its default (0 = no cap) here, and a real run
+# OOM'd on a real cluster GPU at step 154/20000 -- manta.model's frontier
+# boundary predictor computes dense (B,H,T,T) attention, and a single
+# unusually long real sentence/paragraph is enough to blow up memory even
+# with group_concat_size at its own default (1, no concatenation). See
+# FantaConfig.max_seq_length's own docstring for the (milder) earlier
+# incident this field was originally added for. 1024 bytes is a conservative
+# starting cap -- FantaTrainer prints a running truncation-rate summary
+# (num_truncated / num_sequences_total); if that comes back high, most real
+# sentences are getting cut and this cap is too aggressive for this corpus,
+# raise it; if it's near zero, this is barely being exercised, which is fine.
+max_seq_length: 1024
