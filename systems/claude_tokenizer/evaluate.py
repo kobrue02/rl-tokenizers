@@ -25,9 +25,23 @@ specifically because a long multi-entry list makes losing every other
 entry's already-completed result to one bad one a real, not hypothetical,
 waste of time -- doubly true here given each entry can involve tens of
 thousands of real network calls.
+
+--checkpoint-dir (or its --output-derived default) makes a run resumable:
+every successfully completed (group, lang, count) call is appended to a
+per-model JSONL file as it happens, and a resumed run (same command,
+same output/checkpoint-dir) skips whatever's already recorded there
+instead of re-querying it. This matters because an org's real rate limit
+can be far below its tier's published number (confirmed live: 429s at
+--rpm 2000 whose own error message stated the account's actual cap was
+100/min) -- at a low real rpm, scoring the full ~272k-pair BOUQuET test
+split can take longer than a single job's time limit, so the intended
+workflow is: submit, let it run until it's killed/times out, then
+resubmit the EXACT SAME command as many times as it takes to finish.
 """
 
 import json
+import os
+import threading
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -65,7 +79,12 @@ def build_arg_parser():
         "--rpm", type=int, default=2000,
         help="requests-per-minute cap shared across every model in --model and every worker "
         "thread -- match this to your actual Anthropic usage tier (Start=2000, Build=4000, "
-        "Scale=8000 at time of writing; see Anthropic's own rate-limits page for current values)",
+        "Scale=8000 at time of writing; see Anthropic's own rate-limits page for current "
+        "values). WARNING: an org's real configured limit can be LOWER than its tier's "
+        "published default (confirmed live: one org saw 429s at --rpm 2000 with the API's own "
+        "error message stating its actual cap was 100) -- if you see repeated RateLimitError "
+        "429s in the failure log, lower this to match the limit the error message itself reports, "
+        "don't assume the published tier number is what you're actually allowed",
     )
     parser.add_argument(
         "--max-workers", type=int, default=25,
@@ -91,6 +110,17 @@ def build_arg_parser():
         "capped by default (an explicit choice -- narrow it yourself if you don't want that)",
     )
     parser.add_argument("--output", type=str, default=None, help="write combined JSON results here (default: print to stdout)")
+    parser.add_argument(
+        "--checkpoint-dir", type=str, default=None,
+        help="directory to store one <model>.jsonl checkpoint file per model, appending every "
+        "successfully completed (group, lang, count) call as it happens -- lets a killed, "
+        "preempted, or timed-out job resume via the exact same command without re-querying "
+        "calls already paid for (a failed call is never checkpointed, so it's retried on the "
+        "next run, not skipped forever). Defaults to '<output>.checkpoint/' if --output is "
+        "given; if neither is set, checkpointing is disabled and an interrupted run has no "
+        "resume safety net -- pass --output or this flag explicitly for any run long enough "
+        "that a mid-run interruption would be costly to redo from scratch",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="claude_tokenizer",
@@ -113,7 +143,28 @@ def _load_eval_groups(args):
     return groups
 
 
-def evaluate_claude_on_groups(eval_groups, count_fn, anchor_lang="eng", max_workers=25, progress_every=1000):
+def _load_checkpoint(checkpoint_path):
+    counts = {}
+    if not checkpoint_path or not os.path.exists(checkpoint_path):
+        return counts
+    with open(checkpoint_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+                counts[(row["group"], row["lang"])] = row["count"]
+            except (json.JSONDecodeError, KeyError):
+                # A killed job can leave its last line half-written -- skip
+                # it rather than fail the whole resume over one truncated row.
+                continue
+    return counts
+
+
+def evaluate_claude_on_groups(
+    eval_groups, count_fn, anchor_lang="eng", max_workers=25, progress_every=1000, checkpoint_path=None
+):
     """count_fn: (text) -> int token count (e.g. ClaudeTokenCounter.count,
     already bound to one model + rate limiter). Mirrors common.eval.
     cross_tokenizer.evaluate_on_groups's own compression/fertility/
@@ -129,37 +180,70 @@ def evaluate_claude_on_groups(eval_groups, count_fn, anchor_lang="eng", max_work
     error for the whole run -- printed immediately (group, lang, exception)
     as it happens, not silently swallowed or only reported as a count later.
 
+    checkpoint_path: optional JSONL file that every SUCCESSFUL (group, lang,
+    count) triple is appended to (and flushed) as it completes. If the file
+    already has content (a prior run of this same command got killed,
+    preempted, or hit its job time limit), those (group, lang) pairs are
+    loaded up front and never re-queried -- this is what lets a genuinely
+    multi-day run (e.g. bouquet_test at a low real rpm cap) survive being
+    resubmitted from scratch after an interruption instead of re-paying for
+    every already-completed call. Failed calls are deliberately never
+    checkpointed, so they're retried (not skipped forever) on the next run.
+
     Returns {"per_lang_compression": {...}, "avg_compression": float,
     "fertility": {...}, "token_parity": {...}, "token_parity_anchor": str,
     "renyi": {} (always empty), "gini": None (always), "num_failed_calls":
-    int, "num_total_calls": int}.
+    int, "num_total_calls": int, "num_skipped_via_checkpoint": int}.
     """
-    tasks = [(gi, lang, text) for gi, group in enumerate(eval_groups) for lang, text in group.items()]
+    tasks_all = [(gi, lang, text) for gi, group in enumerate(eval_groups) for lang, text in group.items()]
 
-    counts = {}
+    counts = _load_checkpoint(checkpoint_path)
+    if counts:
+        print(f"  resuming from checkpoint: {len(counts)} (group, lang) calls already done, skipping those")
+
+    tasks = [(gi, lang, text) for gi, lang, text in tasks_all if (gi, lang) not in counts]
+    skipped = len(tasks_all) - len(tasks)
+
+    if checkpoint_path:
+        os.makedirs(os.path.dirname(checkpoint_path) or ".", exist_ok=True)
+    checkpoint_file = open(checkpoint_path, "a", encoding="utf-8") if checkpoint_path else None
+    checkpoint_lock = threading.Lock()
+
     errors = []
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        future_to_task = {ex.submit(count_fn, text): (gi, lang) for gi, lang, text in tasks}
-        done = 0
-        for fut in as_completed(future_to_task):
-            gi, lang = future_to_task[fut]
-            try:
-                counts[(gi, lang)] = fut.result()
-            except Exception as e:
-                cause = e.__cause__
-                detail = f"{type(e).__name__}: {e}"
-                if cause is not None:
-                    # count()'s own RuntimeError wraps the real reason (a rate
-                    # limit, an overload, a connection drop, ...) via `raise
-                    # ... from last_exc` -- without unwrapping it here, every
-                    # failure prints the same uninformative "failed after 5
-                    # attempts" and the actual cause is lost.
-                    detail += f" (caused by {type(cause).__name__}: {cause})"
-                errors.append((gi, lang, detail))
-                print(f"  [FAILED] group={gi} lang={lang}: {detail}", flush=True)
-            done += 1
-            if progress_every and done % progress_every == 0:
-                print(f"  ...{done}/{len(tasks)} count_tokens calls done ({len(errors)} failed so far)")
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            future_to_task = {ex.submit(count_fn, text): (gi, lang) for gi, lang, text in tasks}
+            done = 0
+            for fut in as_completed(future_to_task):
+                gi, lang = future_to_task[fut]
+                try:
+                    count = fut.result()
+                    counts[(gi, lang)] = count
+                    if checkpoint_file is not None:
+                        with checkpoint_lock:
+                            checkpoint_file.write(json.dumps({"group": gi, "lang": lang, "count": count}) + "\n")
+                            checkpoint_file.flush()
+                except Exception as e:
+                    cause = e.__cause__
+                    detail = f"{type(e).__name__}: {e}"
+                    if cause is not None:
+                        # count()'s own RuntimeError wraps the real reason (a rate
+                        # limit, an overload, a connection drop, ...) via `raise
+                        # ... from last_exc` -- without unwrapping it here, every
+                        # failure prints the same uninformative "failed after 5
+                        # attempts" and the actual cause is lost.
+                        detail += f" (caused by {type(cause).__name__}: {cause})"
+                    errors.append((gi, lang, detail))
+                    print(f"  [FAILED] group={gi} lang={lang}: {detail}", flush=True)
+                done += 1
+                if progress_every and done % progress_every == 0:
+                    print(
+                        f"  ...{done}/{len(tasks)} count_tokens calls done this run "
+                        f"({len(errors)} failed so far, {skipped} already skipped via checkpoint)"
+                    )
+    finally:
+        if checkpoint_file is not None:
+            checkpoint_file.close()
 
     if errors:
         print(
@@ -217,7 +301,8 @@ def evaluate_claude_on_groups(eval_groups, count_fn, anchor_lang="eng", max_work
         "renyi": {},
         "gini": None,
         "num_failed_calls": len(errors),
-        "num_total_calls": len(tasks),
+        "num_total_calls": len(tasks_all),
+        "num_skipped_via_checkpoint": skipped,
     }
 
 
@@ -227,7 +312,9 @@ def report_claude_eval(results, label=""):
           f"no renyi/gini, see systems/claude_tokenizer/model.py's own docstring for why):")
     print(f"  avg_compression={results['avg_compression']:.2f}")
     if results.get("num_total_calls"):
-        print(f"  count_tokens calls: {results['num_total_calls']} total, {results['num_failed_calls']} failed")
+        skipped = results.get("num_skipped_via_checkpoint", 0)
+        skipped_note = f", {skipped} resumed from checkpoint" if skipped else ""
+        print(f"  count_tokens calls: {results['num_total_calls']} total, {results['num_failed_calls']} failed{skipped_note}")
     anchor = results.get("token_parity_anchor", "eng")
     print(f"  per-language compression / fertility / token parity vs {anchor}=1.0:")
     for lang in sorted(results["per_lang_compression"]):
@@ -259,12 +346,21 @@ def main(argv=None):
     # ONE shared rate limiter across every model in this run -- see module docstring for why.
     rate_limiter = RateLimiter(max_calls=args.rpm, period=60.0)
 
+    checkpoint_dir = args.checkpoint_dir or (f"{args.output}.checkpoint" if args.output else None)
+    if checkpoint_dir:
+        print(f"checkpointing enabled: {checkpoint_dir}/<model>.jsonl (resumes automatically if this run is interrupted)")
+    else:
+        print("no --output/--checkpoint-dir given -- checkpointing disabled, an interrupted run can't resume")
+
     all_results = {}
     failed = {}
     for model in models:
+        checkpoint_path = os.path.join(checkpoint_dir, f"{model}.jsonl") if checkpoint_dir else None
         try:
             counter = ClaudeTokenCounter(model, rate_limiter, api_key=args.api_key)
-            results = evaluate_claude_on_groups(eval_groups, counter.count, max_workers=args.max_workers)
+            results = evaluate_claude_on_groups(
+                eval_groups, counter.count, max_workers=args.max_workers, checkpoint_path=checkpoint_path
+            )
         except Exception as e:
             print(f"\n[{model}] FAILED: {type(e).__name__}: {e}")
             failed[model] = f"{type(e).__name__}: {e}"
@@ -295,6 +391,7 @@ def main(argv=None):
                 "num_groups": args.num_groups,
                 "rpm": args.rpm,
                 "max_workers": args.max_workers,
+                "checkpoint_dir": checkpoint_dir,
                 "failed_models": list(failed),
             },
         )
@@ -333,8 +430,16 @@ def run_smoke_test():
 
     If ANTHROPIC_API_KEY IS set, ALSO makes one real count_tokens call as a
     bonus confirmation that the actual SDK integration still works end to
-    end -- skipped with a printed note, not a failure, if no key is set."""
-    import os
+    end -- skipped with a printed note, not a failure, if no key is set.
+
+    3. Checkpoint resume -- pre-seed a checkpoint file with one (group, lang)
+       already "done", confirm evaluate_claude_on_groups never re-queries it
+       (a spy count_fn asserts it's not called for that pair), that the
+       skip is reflected in num_skipped_via_checkpoint, and that the
+       resulting aggregate stats exactly match an uninterrupted full run --
+       i.e. resuming from a checkpoint is invisible to the final numbers,
+       not just "doesn't crash"."""
+    import tempfile
     import time
 
     from .model import RateLimiter
@@ -365,9 +470,34 @@ def run_smoke_test():
     assert set(results["per_lang_compression"]) == {"eng", "deu"}
     assert results["token_parity"]["eng"] == 1.0, "anchor's own parity must always be exactly 1.0"
     assert results["num_total_calls"] == 4 and results["num_failed_calls"] == 0
+    assert results["num_skipped_via_checkpoint"] == 0, "no checkpoint given -- nothing should be skipped"
     json.dumps(results, default=str)  # confirms the result dict is actually JSON-serializable
 
-    print("\nclaude_tokenizer smoke test passed (RateLimiter pacing + aggregation math, no real API call).")
+    # 3. Checkpoint resume, against the exact same fake_groups/fake_count.
+    with tempfile.TemporaryDirectory() as d:
+        ckpt = os.path.join(d, "ckpt.jsonl")
+        # Pre-seed as if (group=0, lang="eng") already completed in a prior, killed run.
+        with open(ckpt, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"group": 0, "lang": "eng", "count": fake_count(fake_groups[0]["eng"])}) + "\n")
+
+        queried = []
+
+        def spy_count(text):
+            queried.append(text)
+            return fake_count(text)
+
+        resumed = evaluate_claude_on_groups(fake_groups, spy_count, max_workers=4, progress_every=0, checkpoint_path=ckpt)
+        assert fake_groups[0]["eng"] not in queried, "a checkpoint-resumed (group, lang) must not be re-queried"
+        assert resumed["num_skipped_via_checkpoint"] == 1
+        assert resumed["num_total_calls"] == 4, "total is the full dataset size, not just this run's remaining tasks"
+        for key in ("avg_compression", "per_lang_compression", "fertility", "token_parity"):
+            assert resumed[key] == results[key], f"resumed[{key!r}] must exactly match an uninterrupted full run"
+
+        with open(ckpt, encoding="utf-8") as f:
+            lines = [json.loads(line) for line in f if line.strip()]
+        assert len(lines) == 4, "checkpoint file should end up recording all 4 (group, lang) pairs"
+
+    print("\nclaude_tokenizer smoke test passed (RateLimiter pacing + aggregation math + checkpoint resume, no real API call).")
 
     if os.environ.get("ANTHROPIC_API_KEY"):
         from .model import ClaudeTokenCounter

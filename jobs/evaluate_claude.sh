@@ -23,19 +23,22 @@
 # No GPU requested: this is pure network I/O (rate-limited HTTP calls to
 # Anthropic's API), same cpu_il reasoning as jobs/evaluate_hf_frontier.sh.
 #
-# --time=08:00:00: a ROUGH, UNBENCHMARKED estimate, not a measured number
-# (this repo has no ANTHROPIC_API_KEY available in its own dev/test
-# environment to time a real run against) -- derived from the theoretical
-# floor: scoring BOUQuET test's full ~272k (group, language) pairs at
-# --rpm 2000 (the "Start" tier default) takes at least 272000/2000 ≈ 136
-# minutes if the rate limit is perfectly saturated the whole time; real
-# runs will be slower (thread/connection overhead, occasional retries,
-# network jitter), hence the wide margin here. Widen further if you use a
-# lower --rpm, narrow with --num-groups / --eval-data-source bouquet (dev,
+# --time=08:00:00: deliberately NOT sized to cover the full run -- a real
+# 429 confirmed this org's actual rate limit is 100/min, not the "Start"
+# tier's published 2000/min (configs/eval_claude.yml now uses rpm=90, a
+# safety margin under that real number). At rpm=90, the full ~272k-pair
+# bouquet_test run takes ~50 hours, which won't fit in one allocation on
+# most clusters anyway. Instead: --checkpoint-dir (set in
+# configs/eval_claude.yml) makes every completed call durable as it
+# happens, so the intended workflow is to just resubmit this exact job
+# (`sbatch jobs/evaluate_claude.sh -c configs/eval_claude.yml`) again after
+# it times out -- it picks up where it left off instead of re-querying
+# (and re-paying for) everything from scratch. Repeat until it reports 0
+# remaining. Narrow with --num-groups / --eval-data-source bouquet (dev,
 # not test) for a much cheaper exploratory pass, or raise --rpm to match a
-# higher usage tier (Build=4000, Scale=8000) if you have one. One model
-# failing (see systems/claude_tokenizer/evaluate.py's own per-model error
-# isolation) doesn't abort the rest of --model's list.
+# real rate-limit increase if you get one. One model failing (see
+# systems/claude_tokenizer/evaluate.py's own per-model error isolation)
+# doesn't abort the rest of --model's list.
 #
 # Usage:
 #   sbatch jobs/evaluate_claude.sh -c configs/eval_claude.yml

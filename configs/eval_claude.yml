@@ -15,10 +15,23 @@
 # (report compression/fertility/token_parity honestly rather than fake
 # placeholder token identities to force renyi/gini to compute a
 # meaningless, misleadingly-perfect result).
+#
+# rpm=90: NOT the "Start" tier's published 2000/min -- confirmed live via a
+# real 429 whose own error message stated this org's actual cap is
+# 100/min; 90 leaves a safety margin under that real number rather than
+# assuming the published tier default is what's actually allowed. If you
+# get a rate-limit increase from Anthropic, raise this to match.
+#
+# At rpm=90, the full ~272k-pair run takes ~50 hours -- almost certainly
+# longer than one job's time limit. checkpoint_dir makes this safe: every
+# completed call is saved as it happens, so if the job gets killed/times
+# out, resubmitting this EXACT config resumes from where it left off
+# instead of re-querying (and re-paying for) everything from scratch.
 model: "claude-opus-5"
-rpm: 2000
+rpm: 90
 max_workers: 25
 eval_data_source: bouquet_test
 output: results/claude_comparison.json
+checkpoint_dir: results/claude_comparison.checkpoint
 use_wandb: true
 run_name: claude_tokenizer_v1
