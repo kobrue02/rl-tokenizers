@@ -159,19 +159,36 @@ def write_bar_and_scatter_data(rows, out_dir):
     return families
 
 
+def _write_standalone_and_body(name, preamble_lines, body_lines, out_dir):
+    """Writes BOTH fig_<name>.tex (a full \\documentclass{standalone} document,
+    for standalone test-compiles) and fig_<name>_body.tex (just body_lines --
+    the \\begin{tikzpicture}...\\end{tikzpicture} content, nothing else) for
+    \\input-ing directly into a thesis chapter. The _body.tex file exists
+    because \\includestandalone requires shell-escape (to recompile the
+    referenced file into its own PDF) -- when that's unavailable (the
+    default on many Overleaf compiler configs), it silently falls back to an
+    empty "file not found" placeholder box instead of erroring loudly.
+    \\input-ing the body directly sidesteps that entirely: it's plain TikZ/
+    pgfplots code compiled in the SAME pass as the rest of the thesis, so it
+    only needs the relevant packages/colors declared once in the main
+    preamble (see this repo's figures/tikz/README.md)."""
+    full_tex = "\n".join(preamble_lines + [r"\begin{document}"] + body_lines + [r"\end{document}"])
+    body_tex = "\n".join(body_lines)
+    with open(os.path.join(out_dir, f"fig_{name}.tex"), "w", encoding="utf-8") as f:
+        f.write(full_tex)
+    with open(os.path.join(out_dir, f"fig_{name}_body.tex"), "w", encoding="utf-8") as f:
+        f.write(body_tex)
+    return full_tex, body_tex
+
+
 def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
     yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in rows)
     n = len(rows)
-    lines = [
-        r"\documentclass{standalone}",
-        r"\usepackage{pgfplots}",
-        r"\pgfplotsset{compat=1.18}",
-    ]
+    preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
     for fam in families:
         r_, g_, b_ = _FAMILY_RGB[fam]
-        lines.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
-    lines += [
-        r"\begin{document}",
+        preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
+    body = [
         r"\begin{tikzpicture}",
         r"\begin{axis}[",
         r"    xbar,",
@@ -190,16 +207,14 @@ def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
     ]
     for fam in families:
         col = _FAMILY_COLORS[fam]
-        lines.append(
+        body.append(
             r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=spread, y=idx] {%sbar_%s.dat};"
             % (col, col, data_prefix, fam_key(fam))
         )
-        lines.append(r"\addlegendentry{%s}" % fam)
-    lines += [r"\end{axis}", r"\end{tikzpicture}", r"\end{document}"]
-    tex = "\n".join(lines)
-    with open(os.path.join(out_dir, "fig_spread_leaderboard.tex"), "w", encoding="utf-8") as f:
-        f.write(tex)
-    return tex
+        body.append(r"\addlegendentry{%s}" % fam)
+    body += [r"\end{axis}", r"\end{tikzpicture}"]
+    full_tex, _ = _write_standalone_and_body("spread_leaderboard", preamble, body, out_dir)
+    return full_tex
 
 
 def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
@@ -207,16 +222,11 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
     worst_spread = max(rows, key=lambda r: r["spread"])
     best_compression = max(rows, key=lambda r: r["avg_compression"])
 
-    lines = [
-        r"\documentclass{standalone}",
-        r"\usepackage{pgfplots}",
-        r"\pgfplotsset{compat=1.18}",
-    ]
+    preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
     for fam in families:
         r_, g_, b_ = _FAMILY_RGB[fam]
-        lines.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
-    lines += [
-        r"\begin{document}",
+        preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
+    body = [
         r"\begin{tikzpicture}",
         r"\begin{axis}[",
         r"    width=12cm, height=9cm,",
@@ -229,21 +239,19 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
     ]
     for fam in families:
         col = _FAMILY_COLORS[fam]
-        lines.append(
+        body.append(
             r"\addplot+[only marks, mark=*, mark size=2pt, color=%s] table [x=avg_compression, y=spread] {%sscatter_%s.dat};"
             % (col, data_prefix, fam_key(fam))
         )
-        lines.append(r"\addlegendentry{%s}" % fam)
+        body.append(r"\addlegendentry{%s}" % fam)
     for r in (best_spread, worst_spread, best_compression):
-        lines.append(
+        body.append(
             r"\node[font=\scriptsize, anchor=west] at (axis cs:%.3f,%.3f) {%s};"
             % (r["avg_compression"] + 0.05, r["spread"], esc(r["short"]))
         )
-    lines += [r"\end{axis}", r"\end{tikzpicture}", r"\end{document}"]
-    tex = "\n".join(lines)
-    with open(os.path.join(out_dir, "fig_landscape.tex"), "w", encoding="utf-8") as f:
-        f.write(tex)
-    return tex
+    body += [r"\end{axis}", r"\end{tikzpicture}"]
+    full_tex, _ = _write_standalone_and_body("landscape", preamble, body, out_dir)
+    return full_tex
 
 
 def gen_heatmap_tex(rows, models, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42):
@@ -264,30 +272,25 @@ def gen_heatmap_tex(rows, models, out_dir, n_langs=20, n_buckets=40, cell_cm=0.4
     palette = [viridis(i / (n_buckets - 1)) for i in range(n_buckets)]
 
     n_cols, n_rows = len(model_order), len(top_langs)
-    lines = [
-        r"\documentclass{standalone}",
-        r"\usepackage{tikz}",
-        r"\usepackage{xcolor}",
-        r"\begin{document}",
-        r"\begin{tikzpicture}[x=%.2fcm, y=%.2fcm]" % (cell_cm, cell_cm),
-    ]
+    preamble = [r"\documentclass{standalone}", r"\usepackage{tikz}", r"\usepackage{xcolor}"]
+    body = [r"\begin{tikzpicture}[x=%.2fcm, y=%.2fcm]" % (cell_cm, cell_cm)]
     for i, (r_, g_, b_) in enumerate(palette):
-        lines.append(r"\definecolor{heat%d}{RGB}{%d,%d,%d}" % (i, r_, g_, b_))
+        body.append(r"\definecolor{heat%d}{RGB}{%d,%d,%d}" % (i, r_, g_, b_))
 
     for yi, lang in enumerate(top_langs):
         for xi, name in enumerate(model_order):
             v = models[name]["token_parity"][lang]
             b = bucket_of(v)
-            lines.append(r"\fill[heat%d] (%d,%d) rectangle ++(1,1);" % (b, xi, n_rows - 1 - yi))
+            body.append(r"\fill[heat%d] (%d,%d) rectangle ++(1,1);" % (b, xi, n_rows - 1 - yi))
 
-    lines.append(r"\draw[white, line width=0.3pt] (0,0) grid (%d,%d);" % (n_cols, n_rows))
+    body.append(r"\draw[white, line width=0.3pt] (0,0) grid (%d,%d);" % (n_cols, n_rows))
 
     for yi, lang in enumerate(top_langs):
-        lines.append(
+        body.append(
             r"\node[anchor=east, font=\tiny\ttfamily] at (-0.15,%.1f) {%s};" % (n_rows - 1 - yi + 0.5, esc(lang))
         )
     for xi, r_ in enumerate(rows):
-        lines.append(
+        body.append(
             r"\node[anchor=north east, rotate=60, font=\tiny] at (%.1f,-0.15) {%s};" % (xi + 0.5, esc(r_["short"]))
         )
 
@@ -298,19 +301,17 @@ def gen_heatmap_tex(rows, models, out_dir, n_langs=20, n_buckets=40, cell_cm=0.4
         b = min(n_buckets - 1, int(frac * n_buckets))
         y0 = n_rows * i / legend_steps
         y1 = n_rows * (i + 1) / legend_steps
-        lines.append(r"\fill[heat%d] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (b, legend_x0, y0, legend_x0 + 0.8, y1))
-    lines.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, n_rows))
-    lines.append(r"\node[anchor=west, font=\tiny] at (%.2f,0) {1.0$\times$ (parity)};" % (legend_x0 + 0.9))
-    lines.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, n_rows, vmax))
-    lines.append(
+        body.append(r"\fill[heat%d] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (b, legend_x0, y0, legend_x0 + 0.8, y1))
+    body.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, n_rows))
+    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,0) {1.0$\times$ (parity)};" % (legend_x0 + 0.9))
+    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, n_rows, vmax))
+    body.append(
         r"\node[anchor=west, font=\tiny, align=left, text width=2.2cm] at (%.2f,%.2f) {color scale: "
         r"$\sqrt{v-1}$, matching the online dashboard};" % (legend_x0 + 0.9, n_rows * 0.5)
     )
-    lines += [r"\end{tikzpicture}", r"\end{document}"]
-    tex = "\n".join(lines)
-    with open(os.path.join(out_dir, "fig_heatmap.tex"), "w", encoding="utf-8") as f:
-        f.write(tex)
-    return tex, top_langs
+    body.append(r"\end{tikzpicture}")
+    full_tex, _ = _write_standalone_and_body("heatmap", preamble, body, out_dir)
+    return full_tex, top_langs
 
 
 def _assert_well_formed(tex, name):
@@ -351,7 +352,8 @@ def generate(results_path, out_dir, data_prefix=None):
     _assert_well_formed(tex3, "fig_heatmap.tex")
 
     print(f"{len(rows)} models, {len(families)} families, heatmap languages: {top_langs}")
-    print(f"wrote fig_spread_leaderboard.tex, fig_landscape.tex, fig_heatmap.tex to {out_dir}")
+    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap}}.tex (standalone, for test-compiling)")
+    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap}}_body.tex (for \\input from your thesis) to {out_dir}")
     return rows, families, top_langs
 
 

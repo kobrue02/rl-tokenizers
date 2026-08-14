@@ -1,0 +1,24 @@
+\begin{tikzpicture}
+\begin{axis}[
+    width=12cm, height=9cm,
+    xlabel={Average byte-per-token compression (higher = more compact)},
+    ylabel={Token-parity spread (anchor-invariant; lower = more equitable)},
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
+    grid=both, grid style={gray!15},
+    axis lines=left,
+]
+\addplot+[only marks, mark=*, mark size=2pt, color=openaiCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_OpenAI_tiktoken.dat};
+\addlegendentry{OpenAI/tiktoken}
+\addplot+[only marks, mark=*, mark size=2pt, color=chinaCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_Chinese_labs.dat};
+\addlegendentry{Chinese labs}
+\addplot+[only marks, mark=*, mark size=2pt, color=metaCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_Meta_Llama.dat};
+\addlegendentry{Meta/Llama}
+\addplot+[only marks, mark=*, mark size=2pt, color=encCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_Encoder-only.dat};
+\addlegendentry{Encoder-only}
+\addplot+[only marks, mark=*, mark size=2pt, color=otherCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_Other.dat};
+\addlegendentry{Other}
+\node[font=\scriptsize, anchor=west] at (axis cs:4.099,4.853) {xlm-roberta-base};
+\node[font=\scriptsize, anchor=west] at (axis cs:4.340,20.492) {bert-base-cased};
+\node[font=\scriptsize, anchor=west] at (axis cs:4.404,19.723) {distilbert-base-uncased};
+\end{axis}
+\end{tikzpicture}

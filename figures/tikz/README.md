@@ -35,19 +35,49 @@ python3 generate_tikz_figures.py --output-dir figures/tikz --data-prefix figures
 
 ## Embedding in the thesis
 
+Each figure comes in two forms:
+
+- `fig_<name>.tex` -- a full standalone document (has its own
+  `\documentclass{standalone}`), for test-compiling on its own.
+- `fig_<name>_body.tex` -- just the `tikzpicture` content, nothing else. This
+  is the one to actually embed in your thesis, via `\input`, NOT
+  `\includestandalone`: `\includestandalone` needs shell-escape enabled to
+  recompile the referenced file into its own PDF at build time, and without
+  it, it silently falls back to a "file not found" placeholder box instead
+  of erroring loudly (a real, observed failure mode on Overleaf's default
+  compiler). `\input`-ing the body directly sidesteps that: it's plain
+  TikZ/pgfplots code that compiles in the SAME pass as the rest of your
+  thesis.
+
 ```latex
-\usepackage{standalone}
-...
-\begin{figure}
+\begin{figure}[htbp]
   \centering
-  \includestandalone[width=\linewidth]{figures/tikz/fig_spread_leaderboard}
+  \input{figures/tikz/fig_spread_leaderboard_body.tex}
   \caption{...}
   \label{fig:spread-leaderboard}
 \end{figure}
 ```
 
-`fig_heatmap.tex` has no external `.dat` dependency (colors are baked in
-directly), so it isn't affected by any of the above.
+This needs the relevant packages/colors declared ONCE in your thesis's main
+preamble (NOT `\usepackage{standalone}` -- that's no longer needed at all):
+
+```latex
+% --- for fig_spread_leaderboard_body.tex and fig_landscape_body.tex ---
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\definecolor{openaiCol}{RGB}{16,110,118}
+\definecolor{chinaCol}{RGB}{214,96,42}
+\definecolor{metaCol}{RGB}{74,111,227}
+\definecolor{encCol}{RGB}{140,140,140}
+\definecolor{otherCol}{RGB}{163,79,168}
+
+% --- for fig_heatmap_body.tex ---
+\usepackage{tikz}
+\usepackage{xcolor}
+```
+
+(`fig_heatmap_body.tex` defines its own `heat0`..`heat39` colors inline, so
+nothing else is needed for it beyond `tikz`/`xcolor`.)
 
 ## Design notes
 
