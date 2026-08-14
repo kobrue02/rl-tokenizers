@@ -1,27 +1,91 @@
+\begin{minipage}[t]{0.48\linewidth}
+\centering
 \begin{tikzpicture}
 \begin{axis}[
-    width=13cm, height=8cm,
+    boxplot/draw direction=y,
+    width=\linewidth, height=5.2cm,
     ymode=log,
-    ylabel={Cost (USD) to tokenize 1M words of English-equivalent input},
-    xlabel={Linguistic resource level (Joshi et al. 2020)},
-    xtick={0,1,2,3,4,5},
-    xticklabels={{0: Left-Behinds}, {1: Scraping-Bys}, {2: Hopefuls}, {3: Rising Stars}, {4: Underdogs}, {5: Winners}},
-    x tick label style={font=\scriptsize},
-    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
+    title={DeepSeek V4-Pro},
+    title style={font=\small},
+    xtick={1,2,3,4,5,6},
+    xticklabels={0,1,2,3,4,5},
+    x tick label style={font=\tiny},
+    ylabel={Cost (USD)},
+    y label style={font=\scriptsize},
+    yticklabel style={font=\tiny},
     grid=both, grid style={gray!15},
-    axis lines=left,
 ]
-\addplot+[color=apicolor0, mark=*, mark size=1.5pt, mark options={fill=apicolor0}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor0.dat};
-\addlegendentry{DeepSeek V4-Pro}
-\addplot+[color=apicolor1, mark=*, mark size=1.5pt, mark options={fill=apicolor1}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor1.dat};
-\addlegendentry{Kimi K3}
-\addplot+[color=apicolor2, mark=*, mark size=1.5pt, mark options={fill=apicolor2}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor2.dat};
-\addlegendentry{GPT-4o}
-\addplot+[color=apicolor3, mark=*, mark size=1.5pt, mark options={fill=apicolor3}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor3.dat};
-\addlegendentry{GPT-4-Turbo}
-\addplot+[color=apicolor4, mark=*, mark size=1.5pt, mark options={fill=apicolor4}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor4.dat};
-\addlegendentry{davinci-002}
-\addplot+[color=apicolor5, mark=*, mark size=1.5pt, mark options={fill=apicolor5}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor5.dat};
-\addlegendentry{gpt-3.5-turbo-instruct}
+\addplot+[boxplot prepared={median=1.120889,upper quartile=1.394162,lower quartile=1.013527,upper whisker=1.923153,lower whisker=0.584685},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {(0,2.190756) (0,2.327207) (0,3.641414) (0,4.439788) (0,5.247114) (0,5.352326)};
+\addplot+[boxplot prepared={median=1.161238,upper quartile=1.488119,lower quartile=1.006939,upper whisker=2.115982,lower whisker=0.547855},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {(0,2.220705) (0,2.565214) (0,2.695526) (0,2.948351) (0,3.108612) (0,3.230127) (0,3.254544) (0,3.988191) (0,4.273897) (0,5.744885)};
+\addplot+[boxplot prepared={median=1.167894,upper quartile=1.865430,lower quartile=1.060371,upper whisker=2.959474,lower whisker=0.904758},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {(0,3.687432)};
+\addplot+[boxplot prepared={median=0.977245,upper quartile=1.096365,lower quartile=0.893087,upper whisker=1.386831,lower whisker=0.666712},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {(0,1.569241) (0,1.838428)};
+\addplot+[boxplot prepared={median=0.904132,upper quartile=0.963375,lower quartile=0.802019,upper whisker=1.062321,lower whisker=0.707061},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {(0,1.373577)};
+\addplot+[boxplot prepared={median=0.700355,upper quartile=0.743246,lower quartile=0.541111,upper whisker=0.863080,lower whisker=0.430191},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {};
 \end{axis}
 \end{tikzpicture}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    boxplot/draw direction=y,
+    width=\linewidth, height=5.2cm,
+    ymode=log,
+    title={GPT-4o},
+    title style={font=\small},
+    xtick={1,2,3,4,5,6},
+    xticklabels={0,1,2,3,4,5},
+    x tick label style={font=\tiny},
+    ylabel={Cost (USD)},
+    y label style={font=\scriptsize},
+    yticklabel style={font=\tiny},
+    grid=both, grid style={gray!15},
+]
+\addplot+[boxplot prepared={median=5.562983,upper quartile=6.908087,lower quartile=5.139875,upper whisker=9.276919,lower whisker=3.168479},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {(0,9.810579) (0,10.219418) (0,11.619967) (0,20.186275) (0,25.505011) (0,30.153132) (0,30.764313)};
+\addplot+[boxplot prepared={median=5.269920,upper quartile=5.912081,lower quartile=4.887061,upper whisker=7.100036,lower whisker=3.771908},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {(0,7.727283) (0,7.788963) (0,8.026919) (0,8.064444) (0,8.205105) (0,8.487889) (0,8.538334) (0,13.690679) (0,23.585408) (0,24.591610) (0,24.682388) (0,26.098890) (0,32.749865) (0,39.328600)};
+\addplot+[boxplot prepared={median=5.283514,upper quartile=7.324538,lower quartile=4.769880,upper whisker=8.043210,lower whisker=4.172546},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {(0,16.025638) (0,16.382909) (0,21.717374)};
+\addplot+[boxplot prepared={median=4.743731,upper quartile=4.993708,lower quartile=4.228890,upper whisker=6.060916,lower whisker=3.445645},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {(0,6.580757)};
+\addplot+[boxplot prepared={median=4.212767,upper quartile=4.625258,lower quartile=3.926501,upper whisker=5.089205,lower whisker=3.391381},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {};
+\addplot+[boxplot prepared={median=3.597317,upper quartile=3.828195,lower quartile=3.239035,upper whisker=4.496225,lower whisker=3.037255},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {};
+\end{axis}
+\end{tikzpicture}
+\end{minipage}
+\\[0.5cm]
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=\linewidth, height=5.2cm, title={Claude Opus 5}, title style={font=\small},
+    axis lines=none, xmin=0, xmax=1, ymin=0, ymax=1]
+\node[align=center, font=\footnotesize] at (axis cs:0.5,0.5) {Pending evaluation results};
+\end{axis}
+\end{tikzpicture}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\linewidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    boxplot/draw direction=y,
+    width=\linewidth, height=5.2cm,
+    ymode=log,
+    title={Kimi K3},
+    title style={font=\small},
+    xtick={1,2,3,4,5,6},
+    xticklabels={0,1,2,3,4,5},
+    x tick label style={font=\tiny},
+    ylabel={Cost (USD)},
+    y label style={font=\scriptsize},
+    yticklabel style={font=\tiny},
+    grid=both, grid style={gray!15},
+]
+\addplot+[boxplot prepared={median=8.036581,upper quartile=9.892841,lower quartile=7.051119,upper whisker=12.653739,lower whisker=4.003865},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {(0,14.212790) (0,14.509258) (0,14.716205) (0,19.015594) (0,30.613832) (0,36.187264) (0,36.922164)};
+\addplot+[boxplot prepared={median=8.040491,upper quartile=10.580858,lower quartile=7.099081,upper whisker=15.058242,lower whisker=3.527683},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {(0,16.992091) (0,18.384370) (0,19.716924) (0,21.303344) (0,22.674996) (0,25.389313) (0,27.079948) (0,29.502247)};
+\addplot+[boxplot prepared={median=8.075409,upper quartile=11.468947,lower quartile=7.350890,upper whisker=15.375607,lower whisker=6.311028},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {(0,19.680793)};
+\addplot+[boxplot prepared={median=7.095812,upper quartile=7.953128,lower quartile=6.370888,upper whisker=8.866933,lower whisker=5.285053},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {(0,10.408053) (0,10.565927) (0,11.136078) (0,13.829094) (0,15.006471)};
+\addplot+[boxplot prepared={median=6.925400,upper quartile=7.149537,lower quartile=6.162660,upper whisker=7.915378,lower whisker=5.560489},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {(0,9.357945) (0,9.648346)};
+\addplot+[boxplot prepared={median=5.565747,upper quartile=5.909267,lower quartile=4.050917,upper whisker=7.294805,lower whisker=2.766763},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {};
+\end{axis}
+\end{tikzpicture}
+\end{minipage}
+\\[0.5cm]

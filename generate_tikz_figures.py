@@ -29,13 +29,13 @@ unreadable in print:
      languages resolve against that external taxonomy; the rest genuinely aren't in it).
      One line per tokenizer (colored by family, no per-tokenizer legend spam), using the
      FULL per-language token_parity data, not the heatmap's worst-20 subset.
-  5. Real API cost by resource level (fig_api_cost.tex + apicost_*.dat): dollar cost to
-     tokenize a fixed 1M-word English-equivalent input, per resource level, for the small
-     set of tokenizers with an unambiguous or clearly-flagship priced API model (see
-     _API_PRICING's own comment for exactly which ones and why the rest are excluded --
-     most of this project's 33 tokenizers belong to open-weight, self-hosted models with
-     no official metered price at all). Uses real, live-fetched pricing from
-     platform.claude.com, developers.openai.com, and deepseek.ai.
+  5. Real API cost by provider (fig_api_cost.tex, self-contained -- no external .dat
+     needed): 4 subplots (DeepSeek, GPT, Claude, Kimi K3 -- see _PROVIDER_PANELS), each
+     with 6 REAL Tukey box-and-whisker plots (one per Joshi et al. resource level) built
+     from every resolved language's own dollar cost, not just a group mean. Claude's
+     panel renders as a "pending" placeholder until its evaluation results exist and are
+     merged in. Uses real, live-fetched pricing from platform.claude.com,
+     developers.openai.com, and deepseek.ai (Kimi K3: supplied by the user).
 
 Usage:
     python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --output-dir figures/tikz
@@ -52,6 +52,7 @@ import os
 from collections import Counter, defaultdict
 
 import langcodes
+import numpy as np
 
 from common.config_file import parse_args_with_config
 from common.data.lang2tax import load_resource_levels
@@ -112,33 +113,27 @@ _RESOURCE_LEVEL_LABELS = {
     5: "5: Winners",
 }
 
-# Real, published input pricing ($/million tokens): DeepSeek/OpenAI entries fetched live
-# from platform.claude.com/docs/en/about-claude/pricing, developers.openai.com/api/docs/pricing,
-# and deepseek.ai/pricing; Kimi-K3 pricing supplied directly by the user from Moonshot AI's
-# own pricing page (cache-miss input rate used, matching the convention already used for
-# DeepSeek V4-Pro's own cache-miss rate -- the standard, non-cached request price). Only
-# tokenizers with an unambiguous or clearly-flagship priced model are included here -- most
-# of this project's 33 evaluated tokenizers belong to open-weight, self-hosted models
-# (Llama, Mistral, Gemma, BLOOM, Falcon, every BERT-family encoder, gpt-oss, Qwen) with NO
-# official metered API price from any of these providers, so they're deliberately absent,
-# not overlooked. Excluded for a real, confirmed reason (not silently dropped):
-#   - deepseek-ai/DeepSeek-R1: confirmed retired (deepseek-reasoner alias no longer
-#     routes anywhere as of 24 July 2026); no current price exists to cite.
-#   - tiktoken:p50k_edit: priced its own edit-mode models (e.g. text-davinci-edit-001),
-#     which have no current successor at all.
-#   - tiktoken:o200k_harmony: used only by the open-weight gpt-oss family, which has
-#     no OpenAI-hosted metered price.
-#   - tiktoken:r50k_base: confirmed identical to tiktoken:gpt2 (same token_parity and
-#     fertility values for every language) -- the same tiktoken encoding under two
-#     names, so only one is kept to avoid a redundant duplicate series.
-_API_PRICING = {
-    "deepseek-ai/DeepSeek-V4-Pro": {"display": "DeepSeek V4-Pro", "input": 0.435, "color": (214, 96, 42)},
-    "moonshotai/Kimi-K3": {"display": "Kimi K3", "input": 3.00, "color": (60, 150, 130)},
-    "tiktoken:o200k_base": {"display": "GPT-4o", "input": 2.50, "color": (16, 110, 118)},
-    "tiktoken:cl100k_base": {"display": "GPT-4-Turbo", "input": 10.00, "color": (150, 40, 40)},
-    "tiktoken:gpt2": {"display": "davinci-002", "input": 2.00, "color": (90, 130, 180)},
-    "tiktoken:p50k_base": {"display": "gpt-3.5-turbo-instruct", "input": 1.50, "color": (120, 150, 60)},
-}
+# Real, published input pricing ($/million tokens): DeepSeek/OpenAI/Anthropic entries
+# fetched live from deepseek.ai/pricing, developers.openai.com/api/docs/pricing, and
+# platform.claude.com/docs/en/about-claude/pricing; Kimi-K3 pricing supplied directly by
+# the user from Moonshot AI's own pricing page. Cache-miss input rates used throughout
+# (the standard, non-cached request price) for consistency across providers. One panel
+# per PROVIDER (not per tokenizer/encoding) -- OpenAI alone has 4 different tiktoken
+# encodings with their own flagship-model prices (GPT-4o/GPT-4-Turbo/davinci-002/
+# gpt-3.5-turbo-instruct, see this dict's git history for that earlier line-chart
+# version), but a 4-subplot-by-provider layout needs exactly one representative model
+# per provider -- GPT-4o chosen as OpenAI's current flagship, per explicit user choice.
+# claude-opus-5 is the key evaluate.py's own configs/eval_claude.yml writes results
+# under; its panel renders as a "pending" placeholder until that evaluation finishes
+# and its entry is merged into the input results file (e.g. via combine_eval_results.py)
+# -- gen_api_cost_boxplot_tex checks for the key at generation time, not hardcoded to
+# always expect it.
+_PROVIDER_PANELS = [
+    {"key": "deepseek-ai/DeepSeek-V4-Pro", "display": "DeepSeek V4-Pro", "input": 0.435, "color": (214, 96, 42)},
+    {"key": "tiktoken:o200k_base", "display": "GPT-4o", "input": 2.50, "color": (16, 110, 118)},
+    {"key": "claude-opus-5", "display": "Claude Opus 5", "input": 5.00, "color": (180, 70, 150)},
+    {"key": "moonshotai/Kimi-K3", "display": "Kimi K3", "input": 3.00, "color": (60, 150, 130)},
+]
 
 
 def cost_color(t):
@@ -607,100 +602,153 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
     return full_tex, dict(counts), unresolved
 
 
-def gen_api_cost_tex(models, out_dir, data_prefix="", reference_words=1_000_000):
-    """Real dollar cost to tokenize a fixed reference amount of English-
-    equivalent input text (default: 1M words -- a natural unit, matching how
-    these APIs price themselves), across Joshi et al.'s 6 resource levels,
-    for the handful of tokenizers with an unambiguous or clearly-flagship
-    priced API model -- see _API_PRICING's own comment for exactly which
-    tokenizers qualify and why the rest don't.
+def _boxplot_stats(values):
+    """Standard Tukey five-number summary from REAL data (not simulated):
+    median/quartiles via numpy, whiskers extended to the most extreme point
+    within 1.5*IQR of the quartiles (clipped to the actual data range, never
+    invented beyond it), remaining points beyond that returned separately as
+    outliers -- pgfplots' `boxplot prepared` plots these as individual
+    points, same as any standard box-and-whisker plot."""
+    arr = np.array(sorted(values))
+    q1, median, q3 = np.percentile(arr, [25, 50, 75])
+    iqr = q3 - q1
+    lo_fence, hi_fence = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+    inliers = arr[(arr >= lo_fence) & (arr <= hi_fence)]
+    whisker_lo = float(inliers.min()) if len(inliers) else float(arr.min())
+    whisker_hi = float(inliers.max()) if len(inliers) else float(arr.max())
+    outliers = arr[(arr < whisker_lo) | (arr > whisker_hi)]
+    return {
+        "median": float(median), "q1": float(q1), "q3": float(q3),
+        "whisker_lo": whisker_lo, "whisker_hi": whisker_hi,
+        "outliers": [float(v) for v in outliers],
+    }
 
-    cost(model, level) = fertility(model, eng_Latn) * reference_words *
-    mean_token_parity(model, level) * input_price_per_token(model) -- i.e.
-    the SAME English-anchored token_parity this whole module already uses,
+
+def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
+    """Real per-language cost DISTRIBUTIONS (not just means), one subplot per
+    PROVIDER (DeepSeek, GPT, Claude, Kimi K3 -- see _PROVIDER_PANELS), each
+    with 6 real Tukey box-and-whisker plots (one per Joshi et al. resource
+    level). Confirmed live that an earlier single-chart line version (mean
+    cost only) visually tangled two similarly-priced series together and hid
+    all per-language variance -- a box plot surfaces that variance directly
+    instead of collapsing it into one number.
+
+    cost(model, lang) = fertility(model, eng_Latn) * reference_words *
+    token_parity(model, lang) * input_price_per_token(model) / 1e6 -- the
+    SAME English-anchored token_parity this whole module already uses,
     converted to an absolute token count via that model's own measured
-    English fertility, then priced at its real per-token rate.
+    English fertility, then priced at its real per-token rate. Every
+    resolved language contributes its OWN point to its level's box, not
+    just a group mean.
 
-    A LINE chart (not bars): input price alone varies ~23x across these 5
-    models before any token-count effect, so a log y-axis is needed to see
-    each model's OWN resource-level trend at all, not just the gap between
-    models -- and ybar + ymode=log is a known pgfplots pitfall (bars can't
-    reach a y=0 baseline on a log axis), so lines+markers (already used,
-    working, for the resource-level trend figure) avoid that entirely.
-    Only 5 series here (vs. 33 for the trend figure), so each gets a real
-    legend entry -- no need for the forget-plot + addlegendimage workaround.
+    Uses plain LaTeX `minipage`s (not pgfplots' groupplots library) for the
+    2x2 layout -- lower-risk than a library this project hasn't used
+    elsewhere, given no local LaTeX install to compile-test against.
+    `\\usepgfplotslibrary{statistics}` is required for `boxplot prepared`
+    and is NOT loaded by plain `\\usepackage{pgfplots}` alone -- baked into
+    this figure's own preamble, and called out again in figures/tikz/README.md
+    since the user must also add it to their thesis's main preamble.
+
+    Claude's panel renders as a "pending" placeholder if "claude-opus-5"
+    (the key configs/eval_claude.yml's own evaluate.py run writes results
+    under) isn't in `models` yet -- checked at generation time, not
+    hardcoded to always expect it.
     """
-    priced = {name: price for name, price in _API_PRICING.items() if name in models}
-    missing = [name for name in _API_PRICING if name not in models]
-    if missing:
-        print(f"  note: {len(missing)} priced tokenizer(s) not in this results file, skipping: {missing}")
-    if not priced:
-        raise ValueError("none of _API_PRICING's tokenizers are present in this results file -- nothing to plot")
-
+    present_panels = [p for p in _PROVIDER_PANELS if p["key"] in models]
     all_codes = set()
-    for name in priced:
-        all_codes.update(models[name]["token_parity"].keys())
-    levels, unresolved = load_resource_levels(sorted(all_codes))
-    present_levels = sorted(set(levels.values()))
+    for p in present_panels:
+        all_codes.update(models[p["key"]]["token_parity"].keys())
+    levels, unresolved = load_resource_levels(sorted(all_codes)) if all_codes else ({}, [])
+    present_levels = sorted(set(levels.values())) if levels else list(range(6))
 
-    color_names = {name: f"apicolor{i}" for i, name in enumerate(priced)}
-    for name, price in priced.items():
-        m = models[name]
-        tp = m["token_parity"]
-        eng_tokens = m["fertility"]["eng_Latn"] * reference_words
-        by_level = defaultdict(list)
-        for lang, lvl in levels.items():
-            v = tp.get(lang)
-            if v is not None:
-                by_level[lvl].append(v)
-        path = os.path.join(out_dir, f"apicost_{color_names[name]}.dat")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("level cost\n")
-            for lvl in present_levels:
-                vals = by_level.get(lvl)
-                if vals:
-                    mean_parity = sum(vals) / len(vals)
-                    cost = eng_tokens * mean_parity * price["input"] / 1_000_000
-                    f.write(f"{lvl} {cost:.6f}\n")
-
-    preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
-    for name, price in priced.items():
-        r_, g_, b_ = price["color"]
-        preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (color_names[name], r_, g_, b_))
-
-    xticklabels = ", ".join(f"{{{_RESOURCE_LEVEL_LABELS.get(l, str(l))}}}" for l in present_levels)
-    body = [
-        r"\begin{tikzpicture}",
-        r"\begin{axis}[",
-        r"    width=13cm, height=8cm,",
-        r"    ymode=log,",
-        r"    ylabel={Cost (USD) to tokenize 1M words of English-equivalent input},",
-        r"    xlabel={Linguistic resource level (Joshi et al. 2020)},",
-        r"    xtick={%s}," % ",".join(str(l) for l in present_levels),
-        r"    xticklabels={%s}," % xticklabels,
-        r"    x tick label style={font=\scriptsize},",
-        r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},",
-        r"    grid=both, grid style={gray!15},",
-        r"    axis lines=left,",
-        r"]",
+    color_names = {p["key"]: f"boxcolor{i}" for i, p in enumerate(_PROVIDER_PANELS)}
+    preamble = [
+        r"\documentclass{standalone}",
+        r"\usepackage{pgfplots}",
+        r"\pgfplotsset{compat=1.18}",
+        r"\usepgfplotslibrary{statistics}",
     ]
-    for name, price in priced.items():
-        col = color_names[name]
-        body.append(
-            r"\addplot+[color=%s, mark=*, mark size=1.5pt, mark options={fill=%s}, line width=0.8pt] "
-            r"table [x=level, y=cost] {%sapicost_%s.dat};" % (col, col, data_prefix, col)
-        )
-        body.append(r"\addlegendentry{%s}" % price["display"])
-    body += [r"\end{axis}", r"\end{tikzpicture}"]
-    full_tex, _ = _write_standalone_and_body("api_cost", preamble, body, out_dir)
+    for p in _PROVIDER_PANELS:
+        r_, g_, b_ = p["color"]
+        preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (color_names[p["key"]], r_, g_, b_))
+
+    body = []
+    for i, panel in enumerate(_PROVIDER_PANELS):
+        col = color_names[panel["key"]]
+        body.append(r"\begin{minipage}[t]{0.48\linewidth}")
+        body.append(r"\centering")
+        if panel["key"] not in models:
+            body += [
+                r"\begin{tikzpicture}",
+                r"\begin{axis}[width=\linewidth, height=5.2cm, title={%s}, title style={font=\small}," % panel["display"],
+                r"    axis lines=none, xmin=0, xmax=1, ymin=0, ymax=1]",
+                r"\node[align=center, font=\footnotesize] at (axis cs:0.5,0.5) {Pending evaluation results};",
+                r"\end{axis}",
+                r"\end{tikzpicture}",
+            ]
+        else:
+            m = models[panel["key"]]
+            tp = m["token_parity"]
+            eng_tokens = m["fertility"]["eng_Latn"] * reference_words
+            by_level = defaultdict(list)
+            for lang, lvl in levels.items():
+                v = tp.get(lang)
+                if v is not None:
+                    by_level[lvl].append(v * eng_tokens * panel["input"] / 1_000_000)
+            body += [
+                r"\begin{tikzpicture}",
+                r"\begin{axis}[",
+                r"    boxplot/draw direction=y,",
+                r"    width=\linewidth, height=5.2cm,",
+                r"    ymode=log,",
+                r"    title={%s}," % panel["display"],
+                r"    title style={font=\small},",
+                r"    xtick={%s}," % ",".join(str(j + 1) for j in range(len(present_levels))),
+                r"    xticklabels={%s}," % ",".join(str(l) for l in present_levels),
+                r"    x tick label style={font=\tiny},",
+                r"    ylabel={Cost (USD)},",
+                r"    y label style={font=\scriptsize},",
+                r"    yticklabel style={font=\tiny},",
+                r"    grid=both, grid style={gray!15},",
+                r"]",
+            ]
+            for lvl in present_levels:
+                vals = by_level.get(lvl, [])
+                if not vals:
+                    continue
+                stats = _boxplot_stats(vals)
+                outlier_coords = " ".join(f"(0,{v:.6f})" for v in stats["outliers"])
+                body.append(
+                    r"\addplot+[boxplot prepared={median=%.6f,upper quartile=%.6f,lower quartile=%.6f,"
+                    r"upper whisker=%.6f,lower whisker=%.6f},fill=%s,draw=%s,"
+                    r"mark options={fill=%s,draw=%s}] coordinates {%s};"
+                    % (
+                        stats["median"], stats["q3"], stats["q1"], stats["whisker_hi"], stats["whisker_lo"],
+                        col, col, col, col, outlier_coords,
+                    )
+                )
+            body += [r"\end{axis}", r"\end{tikzpicture}"]
+        body.append(r"\end{minipage}")
+        body.append(r"\hfill" if i % 2 == 0 else r"\\[0.5cm]")
+
+    full_tex = "\n".join(preamble + [r"\begin{document}"] + body + [r"\end{document}"])
+    body_tex = "\n".join(body)
+    with open(os.path.join(out_dir, "fig_api_cost.tex"), "w", encoding="utf-8") as f:
+        f.write(full_tex)
+    with open(os.path.join(out_dir, "fig_api_cost_body.tex"), "w", encoding="utf-8") as f:
+        f.write(body_tex)
     return full_tex, unresolved
 
 
-def _assert_well_formed(tex, name):
-    for env in ("document", "tikzpicture"):
-        assert tex.count(rf"\begin{{{env}}}") == tex.count(rf"\end{{{env}}}") == 1, f"{name}: unbalanced {env}"
+def _assert_well_formed(tex, name, expected_tikzpictures=1):
+    assert tex.count(r"\begin{document}") == tex.count(r"\end{document}") == 1, f"{name}: unbalanced document"
+    assert tex.count(r"\begin{tikzpicture}") == tex.count(r"\end{tikzpicture}") == expected_tikzpictures, (
+        f"{name}: expected {expected_tikzpictures} tikzpicture(s)"
+    )
     if r"\begin{axis}" in tex:
         assert tex.count(r"\begin{axis}") == tex.count(r"\end{axis}"), f"{name}: unbalanced axis"
+    if r"\begin{minipage}" in tex:
+        assert tex.count(r"\begin{minipage}") == tex.count(r"\end{minipage}"), f"{name}: unbalanced minipage"
     assert tex.count("{") == tex.count("}"), f"{name}: unbalanced braces"
 
 
@@ -742,7 +790,7 @@ def generate(results_path, out_dir, data_prefix=None):
     landscape_dir, landscape_prefix = subdir("landscape")
     heatmap_dir, _heatmap_prefix = subdir("heatmap")
     resource_level_dir, resource_level_prefix = subdir("resource_level")
-    api_cost_dir, api_cost_prefix = subdir("api_cost")
+    api_cost_dir, _api_cost_prefix = subdir("api_cost")  # no external .dat files -- prefix unused
 
     rows, models = load_rows(results_path)
     families = compute_families(rows)
@@ -755,13 +803,13 @@ def generate(results_path, out_dir, data_prefix=None):
     tex4, level_counts, unresolved_langs = gen_resource_level_tex(
         rows, models, families, resource_level_dir, data_prefix=resource_level_prefix
     )
-    tex5, unresolved_cost_langs = gen_api_cost_tex(models, api_cost_dir, data_prefix=api_cost_prefix)
+    tex5, unresolved_cost_langs = gen_api_cost_boxplot_tex(models, api_cost_dir)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
     _assert_well_formed(tex2, "fig_landscape.tex")
     _assert_well_formed(tex3, "fig_heatmap.tex")
     _assert_well_formed(tex4, "fig_resource_level.tex")
-    _assert_well_formed(tex5, "fig_api_cost.tex")
+    _assert_well_formed(tex5, "fig_api_cost.tex", expected_tikzpictures=4)
 
     print(f"{len(rows)} models, {len(families)} families, heatmap languages: {top_langs}")
     print(f"resource-level coverage: {sum(level_counts.values())} resolved {dict(sorted(level_counts.items()))}, "

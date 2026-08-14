@@ -32,8 +32,7 @@ figures/tikz/
 │   └── resourcelevel_*.dat               (33 files, one per tokenizer)
 └── api_cost/
     ├── fig_api_cost.tex
-    ├── fig_api_cost_body.tex
-    └── apicost_*.dat                     (6 files, one per priced tokenizer)
+    └── fig_api_cost_body.tex             (self-contained -- 4 subplots, no .dat needed)
 ```
 
 ## Compiling to test
@@ -142,20 +141,32 @@ directly rather than retyping them, since color RGB values can drift as
 figures get regenerated:
 
 ```latex
-% --- for fig_spread_leaderboard_body.tex, fig_landscape_body.tex,
-%     fig_resource_level_body.tex, and fig_api_cost_body.tex ---
+% --- for fig_spread_leaderboard_body.tex, fig_landscape_body.tex, and
+%     fig_resource_level_body.tex ---
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
-% ...plus each figure's own \definecolor lines (family colors for the first
-% three, apicolorN for the cost figure) -- see the top of each fig_*.tex.
+% ...plus each figure's own \definecolor lines (family colors) -- see the
+% top of each fig_*.tex.
+
+% --- for fig_api_cost_body.tex specifically -- ALSO needs the statistics
+%     library for `boxplot prepared` (not loaded by plain pgfplots alone) ---
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{statistics}
+% ...plus its own boxcolor0..boxcolor3 \definecolor lines -- see the top of
+% figures/tikz/api_cost/fig_api_cost.tex.
 
 % --- for fig_heatmap_body.tex ---
 \usepackage{tikz}
 \usepackage{xcolor}
 ```
 
-(`fig_heatmap_body.tex` defines its own `heat0`..`heat39` colors inline, so
-nothing else is needed for it beyond `tikz`/`xcolor`.)
+(`\usepackage{pgfplots}`/`\pgfplotsset{compat=1.18}` only need to appear ONCE
+in your preamble even though listed under multiple figures above --
+`\usepgfplotslibrary{statistics}` is the one line that's genuinely new and
+required specifically for the API cost figure's box plots. `fig_heatmap_body.tex`
+defines its own `heat0`..`heat39` colors inline, so nothing else is needed
+for it beyond `tikz`/`xcolor`.)
 
 ## Design notes
 
@@ -186,18 +197,22 @@ nothing else is needed for it beyond `tikz`/`xcolor`.)
   with only 5 legend entries (one per family, added manually via
   `\addlegendimage` -- the 33 real `\addplot` calls use `forget plot` so
   they don't each spam their own legend row).
-- **Real API cost by resource level**: dollar cost to tokenize a fixed 1M-word
-  English-equivalent input, per resource level, using REAL pricing fetched
-  live from platform.claude.com, developers.openai.com, and deepseek.ai (see
-  `_API_PRICING`'s own comment in the script for exact source/date and why
-  each included tokenizer was chosen). Most of this project's 33 tokenizers
-  belong to open-weight, self-hosted models with no official metered API
-  price at all, so only ~5 appear here -- deliberately, not an oversight. Log
-  y-axis: input price alone varies ~23x across these 5 models before any
-  token-count effect, which would make the cheaper models' own resource-level
-  trend invisible on a linear axis. Uses lines, not bars, specifically
-  because `ybar` + `ymode=log` is a known pgfplots pitfall (bars can't reach
-  a y=0 baseline on a log axis).
+- **Real API cost by provider**: 4 subplots (DeepSeek, GPT, Claude, Kimi K3 --
+  see `_PROVIDER_PANELS`'s own comment in the script for exact pricing
+  source/date and why each was chosen, including why OpenAI collapses to a
+  single GPT-4o panel rather than showing all 4 priced tiktoken encodings
+  separately). Each subplot has 6 REAL Tukey box-and-whisker plots (one per
+  resource level), built from every resolved language's own dollar cost --
+  not just a mean, so real per-language variance and outliers are visible
+  directly, instead of being hidden behind a single trend line (an earlier
+  single-chart line version did exactly that, and also visually tangled two
+  similarly-priced series together). Claude's panel renders as a "pending
+  evaluation results" placeholder until `claude-opus-5` exists in the input
+  results file. Log y-axis, same reasoning as before (price alone varies
+  substantially across providers). Uses plain LaTeX `minipage`s for the 2x2
+  layout rather than pgfplots' `groupplots` library, since this project
+  doesn't use that library elsewhere and there's no local LaTeX install to
+  compile-test a new one against.
 - **Color scale matches the online dashboard** (`sqrt(v-1)` normalization),
   so the same visual intuition carries over between the two.
 - No LaTeX was available to compile-test when this was written -- verify with
