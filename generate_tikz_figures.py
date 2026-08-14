@@ -93,15 +93,16 @@ _ENCODER_ONLY_NAMES = {
     "microsoft/deberta-v3-base", "answerdotai/ModernBERT-base", "google/electra-base-discriminator",
 }
 
-# Joshi et al. 2020's own 6-level names -- see common.data.lang2tax's module
-# docstring for the code->level mapping this project uses.
+# Joshi et al. 2020's own 6-class names ("The State and Fate of Linguistic
+# Diversity and Inclusion in the NLP World") -- see common.data.lang2tax's
+# module docstring for the code->level mapping this project uses.
 _RESOURCE_LEVEL_LABELS = {
-    0: "0 (ultra-low)",
-    1: "1 (low)",
-    2: "2 (medium-low)",
-    3: "3 (medium)",
-    4: "4 (medium-high)",
-    5: "5 (high)",
+    0: "0: Left-Behinds",
+    1: "1: Scraping-Bys",
+    2: "2: Hopefuls",
+    3: "3: Rising Stars",
+    4: "4: Underdogs",
+    5: "5: Winners",
 }
 
 
