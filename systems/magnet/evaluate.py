@@ -7,97 +7,36 @@ lang_to_script), which is the one real difference from fairtok/flexitokens/manta
 own evaluate.py here. BOUQuET's langs="all" mode keys groups by full lang_Script
 stem (e.g. "arz_Arab"), which lang_to_script's LANG_SCRIPT lookup can't resolve
 (only plain codes like "arz") -- eval_lang_to_script handles that; synthetic data
-still uses plain (if fake) profile names, so main() picks the resolver based on
---eval-data-source rather than guessing from string shape (see
+still uses plain (if fake) profile names, so build_induce_fn_by_lang picks the
+resolver based on --eval-data-source rather than guessing from string shape (see
 eval_lang_to_script's own docstring for why that guess would be unsafe: "high_resource"
 also contains an underscore but isn't a real stem).
 """
 
-import argparse
-
-from common.data.synthetic import make_synthetic_parallel_groups
-from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
-from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
-from common.eval.stability import sequences_by_lang_from_groups
+from common.eval.cross_tokenizer import run_eval_cli
 
 from .inference import load_checkpoint
 from .segment import induce_spans
 from .train import eval_lang_to_script, lang_to_script
 
 
-def build_arg_parser():
-    parser = argparse.ArgumentParser(
-        description="Evaluate a trained MAGNET checkpoint on held-out data."
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        required=True,
-        help="path to a MAGNET checkpoint (see magnet.inference.save_checkpoint / "
-        "--output-dir at training time)",
-    )
-    parser.add_argument(
-        "--eval-data-source",
-        choices=["bouquet", "bouquet_test", "synthetic"],
-        default="bouquet",
-        help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
-        "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
-        "reported numbers, not repeated tuning checks; "
-        "'synthetic': the placeholder corpus, for a quick sanity check with no network access",
-    )
-    parser.add_argument(
-        "--num-groups",
-        type=int,
-        default=None,
-        help="cap the number of held-out groups scored; omit for the full set",
-    )
-    parser.add_argument("--device", type=str, default="cpu")
-    return parser
-
-
-def _load_eval_groups(args):
-    if args.eval_data_source == "synthetic":
-        return make_synthetic_parallel_groups(args.num_groups or 40)
-    # "all": every language BOUQuET covers, not just the 9-language panel --
-    # common.eval.cross_tokenizer.evaluate_on_groups already skips languages this
-    # checkpoint has no entry for, so this is always safe.
-    loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
-    groups = loader("all")
-    if args.num_groups:
-        groups = groups[: args.num_groups]
-    return groups
-
-
-def main(argv=None):
-    args = build_arg_parser().parse_args(argv)
-    model = load_checkpoint(args.checkpoint, device=args.device)
-
-    eval_groups = _load_eval_groups(args)
-    print(
-        f"checkpoint={args.checkpoint} eval_data_source={args.eval_data_source} "
-        f"groups={len(eval_groups)}"
-    )
-
-    sequences_by_lang = sequences_by_lang_from_groups(eval_groups)
+def build_induce_fn_by_lang(model, sequences_by_lang, args):
     # Languages whose SCRIPT this checkpoint never saw during training have no
     # entry in model.boundary_predictors -- skip them rather than erroring, same
-    # policy as common.eval.cross_tokenizer.evaluate_on_groups already applies to languages
-    # missing from induce_fn_by_lang entirely.
-    script_of = (
-        lang_to_script if args.eval_data_source == "synthetic" else eval_lang_to_script
-    )
-    induce_fn_by_lang = {
+    # policy as common.eval.cross_tokenizer.evaluate_on_groups already applies to
+    # languages missing from induce_fn_by_lang entirely.
+    script_of = lang_to_script if args.eval_data_source == "synthetic" else eval_lang_to_script
+    return {
         lang: (
-            lambda raw, m=model, s=script_of(lang), d=args.device: induce_spans(
-                m, raw, s, d
-            )
+            lambda raw, m=model, s=script_of(lang), d=args.device: induce_spans(m, raw, s, d)
         )
         for lang in sequences_by_lang
         if script_of(lang) in model.boundary_predictors
     }
-    results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
-    report_eval(results, label="magnet")
-    return results
+
+
+def main(argv=None):
+    return run_eval_cli(argv, "magnet", load_checkpoint, build_induce_fn_by_lang)
 
 
 if __name__ == "__main__":

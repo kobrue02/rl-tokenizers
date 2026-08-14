@@ -7,18 +7,13 @@ by every tokenizer's CLI in this repo (fairtok, magnet, flexitokens, manta).
 """
 
 import argparse
-import dataclasses
 
-from common.data.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
 from common.config_file import parse_args_with_config
-from common.eval.reporting import (
-    fertility_by_lang,
-    report_collapse,
-    report_fertility,
-    report_stability,
-)
+from common.data.cli_data import add_data_source_args, load_bouquet_dev_for_training, load_groups
+from common.eval.reporting import fertility_by_lang, report_collapse, report_fertility, report_stability
 from common.eval.stability import sequences_by_lang_from_groups, stability_by_lang
-from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
+from common.vocab import report_and_save_vocab
+from systems.cli_common import add_dataclass_fields, add_vocab_output_args, config_from_args
 
 from .segment import induce_spans
 from .train import FlexiTokensConfig, FlexiTokensTrainer, _print_vocab_metrics
@@ -28,58 +23,15 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Train the FlexiTokens baseline tokenizer."
     )
-
-    for field in dataclasses.fields(FlexiTokensConfig):
-        flag = "--" + field.name.replace("_", "-")
-        help_text = f"(FlexiTokensConfig.{field.name}, default: {field.default})"
-        if field.type is bool:
-            parser.add_argument(
-                flag,
-                action=argparse.BooleanOptionalAction,
-                default=field.default,
-                help=help_text,
-            )
-        else:
-            parser.add_argument(
-                flag, type=field.type, default=field.default, help=help_text
-            )
-
-    parser.add_argument(
-        "--data-source",
-        choices=DATA_SOURCES,
-        default="all",
-        help="'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus",
-    )
-    parser.add_argument(
-        "--num-groups",
-        type=int,
-        default=None,
-        help="cap the number of parallel groups loaded (real sources are large; omit for the full set)",
-    )
-    parser.add_argument(
-        "--langs",
-        type=str,
-        default=None,
-        help="comma-separated language codes; 'all' to use every language oldi_seed/flores_dev natively "
-        "offer; defaults to the 9-language panel for the chosen data source",
-    )
-    parser.add_argument("--vocab-out", type=str, default="flexitokens_vocab.json")
-    parser.add_argument(
-        "--vocab-stats-out", type=str, default="flexitokens_vocab_stats.json"
-    )
-    parser.add_argument("--vocab-preview", type=int, default=20)
+    add_dataclass_fields(parser, FlexiTokensConfig)
+    add_data_source_args(parser)
+    add_vocab_output_args(parser, "flexitokens_")
     return parser
-
-
-def _config_from_args(args):
-    field_names = {f.name for f in dataclasses.fields(FlexiTokensConfig)}
-    kwargs = {k: v for k, v in vars(args).items() if k in field_names}
-    return FlexiTokensConfig(**kwargs)
 
 
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
-    cfg = _config_from_args(args)
+    cfg = config_from_args(args, FlexiTokensConfig)
     train_groups = load_groups(args)
     eval_groups = load_bouquet_dev_for_training(args)
 
@@ -100,24 +52,7 @@ def main(argv=None):
         stability_by_lang(induce_fn_by_lang, sequences_by_lang, seed=cfg.seed)
     )
 
-    entries = vocab_with_stats(token_freq, cfg.vocab_size)
-    if args.vocab_preview:
-        print(
-            f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:"
-        )
-        for span, total, per_lang in entries[: args.vocab_preview]:
-            langs = ", ".join(
-                f"{lang}:{c}"
-                for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1])
-            )
-            print(f"  {total:6d}  {span!r:20s} [{langs}]")
-    if args.vocab_out:
-        save_vocab_json(entries, args.vocab_out)
-        print(f"\nsaved vocab ({len(entries)} entries) to {args.vocab_out}")
-    if args.vocab_stats_out:
-        save_vocab_stats(entries, args.vocab_stats_out)
-        print(f"saved per-entry frequency/language stats to {args.vocab_stats_out}")
-
+    report_and_save_vocab(token_freq, cfg.vocab_size, args.vocab_out, args.vocab_stats_out, args.vocab_preview)
     return model, token_freq, final_vocab, info
 
 

@@ -3,19 +3,14 @@ from the dataclass itself so this can't drift out of sync with fairtok.train.GRP
 """
 
 import argparse
-import dataclasses
 
 from common.bytes_utils import bytes_to_tensor
-from common.data.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
 from common.config_file import parse_args_with_config
-from common.eval.reporting import (
-    fertility_by_lang,
-    report_collapse,
-    report_fertility,
-    report_stability,
-)
+from common.data.cli_data import add_data_source_args, load_bouquet_dev_for_training, load_groups
+from common.eval.reporting import fertility_by_lang, report_collapse, report_fertility, report_stability
 from common.eval.stability import sequences_by_lang_from_groups, stability_by_lang
-from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
+from common.vocab import report_and_save_vocab
+from systems.cli_common import add_dataclass_fields, add_vocab_output_args, config_from_args
 
 from .policy import segment_bytes
 from .train import GRPOConfig, GRPOTrainer
@@ -29,81 +24,32 @@ _HELP_OVERRIDES = {
     "steps that takes given per_device_train_batch_size -- not a fixed step count",
 }
 
+_LANGS_HELP = (
+    "comma-separated language codes; 'all' to use every language oldi_seed/flores_dev "
+    "natively offer (smol stays on the 9-language panel regardless); "
+    "defaults to the 9-language panel for the chosen data source"
+)
+
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Train the fairness-aware byte-boundary policy."
     )
-
-    for field in dataclasses.fields(GRPOConfig):
-        flag = "--" + field.name.replace("_", "-")
-        help_text = f"(GRPOConfig.{field.name}, default: {field.default})"
-        if field.name in _HELP_OVERRIDES:
-            help_text = f"{_HELP_OVERRIDES[field.name]} {help_text}"
-        if field.type is bool:
-            # type=bool would make "--flag false" truthy (any non-empty string is
-            # truthy) -- BooleanOptionalAction gives a real --flag/--no-flag pair.
-            parser.add_argument(
-                flag,
-                action=argparse.BooleanOptionalAction,
-                default=field.default,
-                help=help_text,
-            )
-        else:
-            parser.add_argument(
-                flag, type=field.type, default=field.default, help=help_text
-            )
-
-    parser.add_argument(
-        "--data-source",
-        choices=DATA_SOURCES,
-        default="all",
-        help="'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus",
-    )
-    parser.add_argument(
-        "--num-groups",
-        type=int,
-        default=None,
-        help="cap the number of parallel groups loaded (real sources are large; omit for the full set)",
-    )
-    parser.add_argument(
-        "--langs",
-        type=str,
-        default=None,
-        help="comma-separated language codes; 'all' to use every language oldi_seed/flores_dev "
-        "natively offer (smol stays on the 9-language panel regardless); "
-        "defaults to the 9-language panel for the chosen data source",
-    )
-    parser.add_argument(
-        "--vocab-out",
-        type=str,
-        default="vocab.json",
-        help="where to save the final vocab as a HuggingFace-style {token: id} JSON file; empty string to skip",
-    )
-    parser.add_argument(
-        "--vocab-stats-out",
-        type=str,
-        default="vocab_stats.json",
-        help="companion file with per-entry frequency and per-language usage breakdown; empty string to skip",
-    )
-    parser.add_argument(
-        "--vocab-preview",
-        type=int,
-        default=20,
-        help="print this many of the most frequent vocab entries to the terminal; 0 to skip",
+    add_dataclass_fields(parser, GRPOConfig, help_overrides=_HELP_OVERRIDES)
+    add_data_source_args(parser, langs_help=_LANGS_HELP)
+    add_vocab_output_args(
+        parser,
+        vocab_prefix="",
+        vocab_out_help="where to save the final vocab as a HuggingFace-style {token: id} JSON file; empty string to skip",
+        vocab_stats_help="companion file with per-entry frequency and per-language usage breakdown; empty string to skip",
+        vocab_preview_help="print this many of the most frequent vocab entries to the terminal; 0 to skip",
     )
     return parser
 
 
-def _config_from_args(args):
-    field_names = {f.name for f in dataclasses.fields(GRPOConfig)}
-    kwargs = {k: v for k, v in vars(args).items() if k in field_names}
-    return GRPOConfig(**kwargs)
-
-
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
-    cfg = _config_from_args(args)
+    cfg = config_from_args(args, GRPOConfig)
     train_groups = load_groups(args)
     eval_groups = load_bouquet_dev_for_training(args)
 
@@ -127,26 +73,7 @@ def main(argv=None):
         stability_by_lang(induce_fn_by_lang, sequences_by_lang, seed=cfg.seed)
     )
 
-    entries = vocab_with_stats(token_freq, cfg.vocab_size)
-
-    if args.vocab_preview:
-        print(
-            f"\ntop {min(args.vocab_preview, len(entries))} vocab entries by frequency:"
-        )
-        for span, total, per_lang in entries[: args.vocab_preview]:
-            langs = ", ".join(
-                f"{lang}:{c}"
-                for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1])
-            )
-            print(f"  {total:6d}  {span!r:20s} [{langs}]")
-
-    if args.vocab_out:
-        save_vocab_json(entries, args.vocab_out)
-        print(f"\nsaved vocab ({len(entries)} entries) to {args.vocab_out}")
-    if args.vocab_stats_out:
-        save_vocab_stats(entries, args.vocab_stats_out)
-        print(f"saved per-entry frequency/language stats to {args.vocab_stats_out}")
-
+    report_and_save_vocab(token_freq, cfg.vocab_size, args.vocab_out, args.vocab_stats_out, args.vocab_preview)
     return policy, token_freq, final_vocab, target_rate
 
 

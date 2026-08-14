@@ -16,12 +16,14 @@ agnostic to how that callable was built, the same pattern common.eval.stability 
 uses for the boundary-stability diagnostic.
 """
 
+import argparse
 from collections import Counter, defaultdict
 
 import numpy as np
 
 from common.eval.metrics import compression_rate, fertility, gini_coefficient, renyi_efficiency
 from common.eval.reporting import word_count
+from common.eval.stability import sequences_by_lang_from_groups
 
 
 def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
@@ -129,3 +131,111 @@ def eval_wandb_log_dict(results, prefix="eval"):
         {f"{prefix}/fertility/{lang}": v for lang, v in results["fertility"].items()}
     )
     return log_dict
+
+
+_EVAL_DATA_SOURCE_HELP = (
+    "'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
+    "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
+    "reported numbers, not repeated tuning checks; "
+    "'synthetic': the placeholder corpus, for a quick sanity check with no network access"
+)
+
+
+def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_help=None):
+    """--checkpoint/--eval-data-source/--num-groups/--device, confirmed live
+    to be the ENTIRE argparse surface of all seven systems/*/evaluate.py in
+    this repo (hf_frontier is the one evaluate.py NOT built on this: it scores
+    externally-downloaded HF tokenizers, not a checkpoint this repo trained,
+    and genuinely needs its own CLI shape) -- extracted verbatim rather than
+    copy-pasted a seventh time."""
+    parser = argparse.ArgumentParser(
+        description=f"Evaluate a trained {system_label} checkpoint on held-out data."
+    )
+    parser.add_argument(
+        "--checkpoint", type=str, required=True,
+        help=checkpoint_help or f"path to a {system_label} checkpoint (--output-dir at training time)",
+    )
+    parser.add_argument(
+        "--eval-data-source", choices=["bouquet", "bouquet_test", "synthetic"], default="bouquet",
+        help=eval_data_source_help or _EVAL_DATA_SOURCE_HELP,
+    )
+    parser.add_argument(
+        "--num-groups", type=int, default=None,
+        help="cap the number of held-out groups scored; omit for the full set",
+    )
+    parser.add_argument("--device", type=str, default="cpu")
+    return parser
+
+
+def load_eval_groups(args, synthetic_groups=None):
+    """`args`: the Namespace build_eval_arg_parser's own parser produces (or
+    anything with the same `.eval_data_source`/`.num_groups` attributes).
+    synthetic_groups: an already-built list to slice for --eval-data-source
+    synthetic instead of the default common.data.synthetic.
+    make_synthetic_parallel_groups call -- bpe's own evaluate.py is the one
+    system that passes this (its own _SMOKE_TEST_GROUPS, real short text
+    rather than synthetic's byte generator, since --data-source synthetic
+    means something different for bpe at TRAINING time too -- see
+    bpe/train.py's own module docstring)."""
+    if args.eval_data_source == "synthetic":
+        if synthetic_groups is not None:
+            return synthetic_groups[: args.num_groups] if args.num_groups else synthetic_groups
+        from common.data.synthetic import make_synthetic_parallel_groups
+
+        return make_synthetic_parallel_groups(args.num_groups or 40)
+    # "all": every language BOUQuET covers, not just the 9-language panel --
+    # evaluate_on_groups already skips languages this checkpoint has no entry
+    # for, so this is always safe.
+    from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
+
+    loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
+    groups = loader("all")
+    if args.num_groups:
+        groups = groups[: args.num_groups]
+    return groups
+
+
+def run_eval_cli(
+    argv,
+    system_label,
+    load_model,
+    build_induce_fn_by_lang,
+    checkpoint_help=None,
+    eval_data_source_help=None,
+    synthetic_groups=None,
+):
+    """The shared main() body every systems/*/evaluate.py ran, near-verbatim
+    (confirmed live: identical modulo the induce_spans call shape and the
+    checkpoint-loading step) -- parses args, loads the checkpoint, loads held-
+    out groups, scores, reports. The two callables below are the genuinely
+    per-system pieces, deliberately left as callables rather than guessed at:
+
+    load_model(checkpoint_path, device) -> model: e.g. plain `load_checkpoint`
+    for the six systems whose own inference.load_checkpoint already takes
+    (path, device); fairtok's own load_checkpoint takes no device (its
+    checkpoint is a live nn.Module policy, not a frozen artifact), so fairtok
+    passes `lambda path, device: load_checkpoint(path).to(device).eval()`.
+
+    build_induce_fn_by_lang(model, sequences_by_lang, args) -> {lang: (bytes
+    -> spans) callable}: e.g. magnet's own extra per-script boundary-predictor
+    resolution + its own model.boundary_predictors coverage filter, fairtok's
+    segment_bytes-over-a-live-policy, or the plain 2-arg (bpe/superbpe) /
+    3-arg-with-device (flexitokens/manta/fanta) induce_spans call every other
+    system makes.
+
+    Returns the same results dict evaluate_on_groups does.
+    """
+    args = build_eval_arg_parser(system_label, checkpoint_help, eval_data_source_help).parse_args(argv)
+    model = load_model(args.checkpoint, args.device)
+
+    eval_groups = load_eval_groups(args, synthetic_groups=synthetic_groups)
+    print(
+        f"checkpoint={args.checkpoint} eval_data_source={args.eval_data_source} "
+        f"groups={len(eval_groups)}"
+    )
+
+    sequences_by_lang = sequences_by_lang_from_groups(eval_groups)
+    induce_fn_by_lang = build_induce_fn_by_lang(model, sequences_by_lang, args)
+    results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
+    report_eval(results, label=system_label)
+    return results

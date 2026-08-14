@@ -152,3 +152,32 @@ def save_vocab_stats(entries, path):
     ]
     with open(path, "w", encoding="utf-8") as f:
         json.dump(records, f, ensure_ascii=False, indent=2)
+
+
+def report_and_save_vocab(token_freq, vocab_size, vocab_out, vocab_stats_out, vocab_preview):
+    """The final-vocab preview/save step every systems/*/cli.py runs identically
+    after training, extracted verbatim from that repeated tail (confirmed
+    byte-identical in substance across all seven, only cosmetic whitespace
+    differed) -- terminal preview of the `vocab_preview` most frequent entries,
+    then vocab.json (if `vocab_out`) and the richer vocab_stats.json (if
+    `vocab_stats_out`), both skipped by passing "" (empty string), matching
+    each flag's own existing --vocab-out/--vocab-stats-out convention.
+    Returns `entries` (vocab_with_stats(token_freq, vocab_size)'s own return
+    shape) in case a caller wants it after this -- none currently do, but
+    nothing here needs entries to be recomputed to add that later.
+    """
+    entries = vocab_with_stats(token_freq, vocab_size)
+    if vocab_preview:
+        print(f"\ntop {min(vocab_preview, len(entries))} vocab entries by frequency:")
+        for span, total, per_lang in entries[:vocab_preview]:
+            langs = ", ".join(
+                f"{lang}:{c}" for lang, c in sorted(per_lang.items(), key=lambda kv: -kv[1])
+            )
+            print(f"  {total:6d}  {span!r:20s} [{langs}]")
+    if vocab_out:
+        save_vocab_json(entries, vocab_out)
+        print(f"\nsaved vocab ({len(entries)} entries) to {vocab_out}")
+    if vocab_stats_out:
+        save_vocab_stats(entries, vocab_stats_out)
+        print(f"saved per-entry frequency/language stats to {vocab_stats_out}")
+    return entries

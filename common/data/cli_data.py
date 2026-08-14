@@ -33,6 +33,29 @@ DATA_SOURCES = ALL_SOURCES + ["all"]
 # unbounded amount of data. Used only when --num-groups isn't given.
 _DEFAULT_MONOLINGUAL_GROUPS_PER_LANG = 2000
 
+_DEFAULT_DATA_SOURCE_HELP = "'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus"
+_DEFAULT_LANGS_HELP = (
+    "comma-separated language codes; 'all' to use every language oldi_seed/flores_dev natively "
+    "offer; defaults to the 9-language panel for the chosen data source"
+)
+
+
+def add_data_source_args(parser, data_source_help=None, langs_help=None):
+    """--data-source/--num-groups/--langs, the three flags every systems/*/
+    cli.py's build_arg_parser already added identically (confirmed live:
+    five of seven byte-identical; bpe adds an extra UTF-8 caveat sentence to
+    --data-source's help, fairtok adds an extra clarifying clause to
+    --langs's -- both passed through via the optional *_help params rather
+    than silently overwritten with the plain default text)."""
+    parser.add_argument(
+        "--data-source", choices=DATA_SOURCES, default="all", help=data_source_help or _DEFAULT_DATA_SOURCE_HELP
+    )
+    parser.add_argument(
+        "--num-groups", type=int, default=None,
+        help="cap the number of parallel groups loaded (real sources are large; omit for the full set)",
+    )
+    parser.add_argument("--langs", type=str, default=None, help=langs_help or _DEFAULT_LANGS_HELP)
+
 
 def load_groups(args):
     """args: an argparse.Namespace (or anything with the same attributes) with
