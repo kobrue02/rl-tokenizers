@@ -159,7 +159,7 @@ def write_bar_and_scatter_data(rows, out_dir):
     return families
 
 
-def gen_spread_leaderboard_tex(rows, families, out_dir):
+def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
     yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in rows)
     n = len(rows)
     lines = [
@@ -191,8 +191,8 @@ def gen_spread_leaderboard_tex(rows, families, out_dir):
     for fam in families:
         col = _FAMILY_COLORS[fam]
         lines.append(
-            r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=spread, y=idx] {bar_%s.dat};"
-            % (col, col, fam_key(fam))
+            r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=spread, y=idx] {%sbar_%s.dat};"
+            % (col, col, data_prefix, fam_key(fam))
         )
         lines.append(r"\addlegendentry{%s}" % fam)
     lines += [r"\end{axis}", r"\end{tikzpicture}", r"\end{document}"]
@@ -202,7 +202,7 @@ def gen_spread_leaderboard_tex(rows, families, out_dir):
     return tex
 
 
-def gen_landscape_tex(rows, families, out_dir):
+def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
     best_spread = min(rows, key=lambda r: r["spread"])
     worst_spread = max(rows, key=lambda r: r["spread"])
     best_compression = max(rows, key=lambda r: r["avg_compression"])
@@ -230,8 +230,8 @@ def gen_landscape_tex(rows, families, out_dir):
     for fam in families:
         col = _FAMILY_COLORS[fam]
         lines.append(
-            r"\addplot+[only marks, mark=*, mark size=2pt, color=%s] table [x=avg_compression, y=spread] {scatter_%s.dat};"
-            % (col, fam_key(fam))
+            r"\addplot+[only marks, mark=*, mark size=2pt, color=%s] table [x=avg_compression, y=spread] {%sscatter_%s.dat};"
+            % (col, data_prefix, fam_key(fam))
         )
         lines.append(r"\addlegendentry{%s}" % fam)
     for r in (best_spread, worst_spread, best_compression):
@@ -321,13 +321,29 @@ def _assert_well_formed(tex, name):
     assert tex.count("{") == tex.count("}"), f"{name}: unbalanced braces"
 
 
-def generate(results_path, out_dir):
+def generate(results_path, out_dir, data_prefix=None):
+    """data_prefix: path prefix baked into every `table {...}` reference inside
+    fig_spread_leaderboard.tex/fig_landscape.tex, e.g. "figures/tikz/". Needed
+    because \\includestandalone (without shell-escape) runs pgfplots from the
+    HOST document's own directory, not from out_dir -- a bare filename like
+    "bar_X.dat" only resolves when compiling standalone directly inside
+    out_dir, and fails with "Could not read table file" once the figure is
+    included from a thesis's main .tex elsewhere. Defaults to out_dir itself
+    (normalized to forward slashes, trailing slash added), which is correct
+    whenever the main document compiles from the same root this script was
+    run from -- override if your actual include path differs (e.g. the
+    figures live one level up from where the main .tex compiles).
+    """
     os.makedirs(out_dir, exist_ok=True)
+    if data_prefix is None:
+        data_prefix = out_dir.replace(os.sep, "/")
+        if data_prefix and not data_prefix.endswith("/"):
+            data_prefix += "/"
     rows, models = load_rows(results_path)
 
     families = write_bar_and_scatter_data(rows, out_dir)
-    tex1 = gen_spread_leaderboard_tex(rows, families, out_dir)
-    tex2 = gen_landscape_tex(rows, families, out_dir)
+    tex1 = gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=data_prefix)
+    tex2 = gen_landscape_tex(rows, families, out_dir, data_prefix=data_prefix)
     tex3, top_langs = gen_heatmap_tex(rows, models, out_dir)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
@@ -352,12 +368,18 @@ def build_arg_parser():
         "--output-dir", type=str, default="figures/tikz",
         help="directory to write the .tex + .dat files into (created if missing)",
     )
+    parser.add_argument(
+        "--data-prefix", type=str, default=None,
+        help="path prefix baked into the .dat file references inside the generated .tex "
+        "(default: --output-dir itself) -- override only if your thesis's main .tex "
+        "includes these figures from a different relative location",
+    )
     return parser
 
 
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
-    generate(args.input, args.output_dir)
+    generate(args.input, args.output_dir, data_prefix=args.data_prefix)
 
 
 if __name__ == "__main__":

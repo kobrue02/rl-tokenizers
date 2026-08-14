@@ -10,16 +10,28 @@ python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --o
 
 ## Compiling to test
 
-Each `fig_*.tex` is a standalone document:
+The `table {...}` references inside `fig_spread_leaderboard.tex`/
+`fig_landscape.tex` are baked in as `figures/tikz/bar_*.dat` etc. (relative to
+`--output-dir`, i.e. relative to wherever your MAIN thesis document
+compiles from) -- NOT bare filenames. That means standalone test-compiles
+need to be run from the project root, not from inside this directory:
 
 ```
-pdflatex fig_spread_leaderboard.tex
-pdflatex fig_landscape.tex
-pdflatex fig_heatmap.tex
+cd <project root>
+pdflatex figures/tikz/fig_spread_leaderboard.tex
+pdflatex figures/tikz/fig_landscape.tex
+pdflatex figures/tikz/fig_heatmap.tex
 ```
 
-(`fig_spread_leaderboard.tex`/`fig_landscape.tex` need their `bar_*.dat`/
-`scatter_*.dat` files in the same directory -- already here.)
+(running `pdflatex fig_spread_leaderboard.tex` from *inside* `figures/tikz/`
+will fail with "Could not read table file" -- it needs the same relative
+path the main document sees, not the file's own directory.)
+
+If your thesis's main `.tex` compiles from somewhere other than this
+project's root, regenerate with `--data-prefix` set to match:
+```
+python3 generate_tikz_figures.py --output-dir figures/tikz --data-prefix figures/tikz/
+```
 
 ## Embedding in the thesis
 
@@ -28,11 +40,14 @@ pdflatex fig_heatmap.tex
 ...
 \begin{figure}
   \centering
-  \includestandalone[width=\linewidth]{fig_spread_leaderboard}
+  \includestandalone[width=\linewidth]{figures/tikz/fig_spread_leaderboard}
   \caption{...}
   \label{fig:spread-leaderboard}
 \end{figure}
 ```
+
+`fig_heatmap.tex` has no external `.dat` dependency (colors are baked in
+directly), so it isn't affected by any of the above.
 
 ## Design notes
 
