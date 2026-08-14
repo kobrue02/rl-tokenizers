@@ -1,15 +1,46 @@
 # systems/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
 #
-# --trust-remote-code applies to ALL three repos below (harmless no-op for
-# the two that don't need it) -- required for moonshotai/Kimi-K3's own
-# custom tokenizer class. meta-llama/Llama-3.1-8B-Instruct is a GATED repo:
-# it needs its license accepted on huggingface.co AND your own HF_TOKEN to
-# actually have that access granted (see jobs/evaluate_hf_frontier.sh's own
-# prerequisites) -- if you don't have access, drop it from the list below
-# rather than let the whole job fail on one repo.
-hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct"
+# 16 repos, verified live (HfApi().model_info + a real tokenizer-only load +
+# span-reconstruction round-trip via systems/hf_frontier/model.py, confirmed
+# for every one of these before adding it here -- none guessed):
+#   - The original 3: deepseek-ai/DeepSeek-V4-Pro, moonshotai/Kimi-K3,
+#     meta-llama/Llama-3.1-8B-Instruct.
+#   - 8 more frontier/production models: Qwen/Qwen3.8-2.4T-A95B,
+#     meta-llama/Llama-3.3-70B-Instruct, openai-community/gpt2,
+#     openai/gpt-oss-20b, deepseek-ai/DeepSeek-R1, openai/gpt-oss-120b,
+#     facebook/opt-125m, Qwen/Qwen3-8B.
+#   - 5 "standard open-source era" models added for genuine TOKENIZER-FAMILY
+#     diversity, not just more of the same byte-level BPE the other 11
+#     already are: mistralai/Mistral-7B-v0.1, NousResearch/Llama-2-7b-hf,
+#     google/gemma-7b (all SentencePiece, span_method="offset_mapping" --
+#     confirmed live these three round-trip correctly, unlike e.g.
+#     bert-base-multilingual-cased/xlm-roberta-base, which were tried and
+#     REJECTED: neither WordPiece nor SentencePiece-unigram round-trips
+#     under model.py's own two supported schemes, so including them would
+#     just fail that one repo -- see systems/hf_frontier/evaluate.py's own
+#     per-repo error isolation for what happens if a FUTURE addition hits
+#     the same wall), plus bigscience/bloom and tiiuae/falcon-7b (more
+#     byte-level BPE, but genuinely distinct vocab sizes/eras).
+#
+# GATED repos in this list (need their license accepted on huggingface.co
+# AND your own HF_TOKEN to actually have that access granted -- a plain
+# HF_TOKEN without accepted access fails to load just that one repo, same
+# as before): meta-llama/Llama-3.1-8B-Instruct, meta-llama/
+# Llama-3.3-70B-Instruct, google/gemma-7b.
+#
+# --trust-remote-code applies to ALL repos below uniformly (harmless no-op
+# for the ones that don't need it) -- required for moonshotai/Kimi-K3's own
+# custom tokenizer class.
+#
+# One repo failing (gated-without-access, a transient network error) no
+# longer aborts the whole run -- see systems/hf_frontier/evaluate.py's own
+# per-repo error isolation, added specifically because this list got long
+# enough that losing every other repo's result over one bad one would waste
+# real cluster time; failures land under a "_failed" key in the output JSON
+# instead.
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b"
 trust_remote_code: true
 eval_data_source: bouquet_test
 output: results/hf_frontier_comparison.json
 use_wandb: true
-run_name: hf_frontier_v1
+run_name: hf_frontier_v2_16models

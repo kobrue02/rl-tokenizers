@@ -11,6 +11,13 @@ Optimal Tokenization" (Limisiewicz et al. 2026), which finds real deployed token
 systematically over-compress high-resource languages and under-compress low-resource
 ones relative to the compute-optimal rate, i.e. a single global target rate is itself
 a fairness problem, not a neutral simplification.
+
+See common.eval.cross_tokenizer.evaluate_on_groups's own "token_parity" output for
+the TOKEN-COUNT analog of this same ratio (this module's own ratio is computed from
+raw untokenized bytes, an input-side property shared by every tokenizer scoring the
+same content; token_parity is computed from a SPECIFIC tokenizer's own resulting
+token counts, an output-side property that can differ between two tokenizers scoring
+the exact same byte-length-parity-matched content).
 """
 
 from collections import defaultdict

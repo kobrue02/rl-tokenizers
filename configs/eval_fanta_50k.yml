@@ -7,9 +7,20 @@ system: fanta
 tokenizer_checkpoint: checkpoints/fanta_6284655.pt
 vocab_json: vocab_out/fanta_vocab_6284655.json
 benchmark: "xnli,xcopa,flores_mt"
-langs: "en,de,fr,ar,zh"
+# The union of XNLI_LANGS (15) and XCOPA_LANGS (11) -- every code here is
+# valid for at least one of the two, and _resolve_multiple_choice_langs
+# (pretraining/cli_eval.py) intersects per-benchmark automatically, so XNLI
+# scores all 15 of its own languages and XCOPA scores all 11 of its own,
+# with nothing dropped/warned for either (the previous "en,de,fr,ar,zh" only
+# gave XCOPA one usable language -- "zh" -- since it has no en/de/fr/ar
+# config at all).
+langs: "ar,bg,de,el,en,es,et,fr,hi,ht,id,it,qu,ru,sw,ta,th,tr,ur,vi,zh"
 lang_pairs: "eng:spa,eng:arz,eng:ben"
-max_examples: 1000
+# Bumped 1000 -> 4000 (roughly 21/5 the languages above vs. the previous
+# list) to keep per-language example depth in the same ballpark (~190-200
+# examples/language on average under the round-robin sampling both
+# load_xnli/load_xcopa use) rather than silently thinning to ~48/language.
+max_examples: 4000
 output: results/all_fanta.json
 use_wandb: true
 run_name: fanta_50k_250k_steps

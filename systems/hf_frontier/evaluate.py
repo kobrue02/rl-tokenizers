@@ -16,6 +16,13 @@ token to a repo that doesn't need one, or --trust-remote-code to a repo
 that doesn't require custom code, is a harmless no-op) -- if different
 repos in a real comparison genuinely need different tokens, run them as
 separate invocations instead.
+
+A single repo's failure (gated-without-access, a tokenizer scheme model.py's
+own span-detection can't handle, a transient network error) does NOT abort
+the whole run -- main() catches per-repo and records it under a "_failed"
+key in the combined results (only present when at least one repo actually
+failed, so a fully-successful run's own result shape is unchanged) rather
+than losing every OTHER repo's already-completed results over one bad one.
 """
 
 import json
@@ -119,8 +126,20 @@ def main(argv=None):
 
     all_results = {}
     all_wrapped = {}
+    failed = {}
     for repo_id in repo_ids:
-        wrapped, results = _evaluate_one(repo_id, eval_groups, args.trust_remote_code, args.hf_token)
+        try:
+            wrapped, results = _evaluate_one(repo_id, eval_groups, args.trust_remote_code, args.hf_token)
+        except Exception as e:
+            # One bad repo (gated-without-access, a tokenizer scheme model.py's
+            # own span-detection can't handle, a transient network error) must
+            # not lose every OTHER repo's already-completed results -- this
+            # matters far more now that --hf-repo-id can list a dozen-plus
+            # models than it did for the original handful, where a failure was
+            # rare enough to just let the whole job die and resubmit.
+            print(f"\n[{repo_id}] FAILED: {type(e).__name__}: {e}")
+            failed[repo_id] = f"{type(e).__name__}: {e}"
+            continue
         all_wrapped[repo_id] = wrapped
         # token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't
         # valid JSON, and aren't needed for the summary metrics this writes
@@ -131,6 +150,12 @@ def main(argv=None):
         # class of bug with tuple-keyed dicts -- checked for it here before
         # shipping, not after).
         all_results[repo_id] = {k: v for k, v in results.items() if k != "token_freq"}
+
+    if failed:
+        print(f"\n{len(failed)}/{len(repo_ids)} repo(s) failed: {list(failed)} -- see FAILED lines above for why")
+        all_results["_failed"] = failed  # only added when non-empty, so a fully-successful
+        # run's own all_results keys are unchanged from before this fix (see run_smoke_test's
+        # own `set(all_results) == {"gpt2"}` assertion, which still holds for that case)
 
     payload = json.dumps(all_results, indent=2)
     if args.output:
@@ -150,12 +175,14 @@ def main(argv=None):
                 "trust_remote_code": args.trust_remote_code,
                 "eval_data_source": args.eval_data_source,
                 "num_groups": args.num_groups,
+                "failed_repos": list(failed),
             },
         )
+        successful = {r: res for r, res in all_results.items() if r != "_failed"}
         summary_rows = [
             [repo_id, all_wrapped[repo_id].span_method, all_wrapped[repo_id].vocab_size,
              r["avg_compression"], r["gini"]]
-            for repo_id, r in all_results.items()
+            for repo_id, r in successful.items()
         ]
         run.log(
             {
@@ -165,7 +192,7 @@ def main(argv=None):
                 ),
             }
         )
-        for repo_id, r in all_results.items():
+        for repo_id, r in successful.items():
             run.log(
                 {
                     f"{repo_id}/avg_compression": r["avg_compression"],
@@ -195,7 +222,10 @@ def run_smoke_test():
     JSON path directly (gpt2 twice under different labels -- no need for a
     second real network-distinct tokenizer just to prove the fan-out and
     JSON serialization both work), including a real json.dumps call, which
-    is exactly the step that would catch a tuple/bytes-key regression."""
+    is exactly the step that would catch a tuple/bytes-key regression. And
+    exercises per-repo error isolation with a genuinely nonexistent repo
+    alongside a real one, confirming the bad one lands under "_failed"
+    rather than crashing the whole run and losing gpt2's own real result."""
     import tempfile
     import os
 
@@ -213,6 +243,14 @@ def run_smoke_test():
         with open(out_path) as f:
             reloaded = json.load(f)
         assert reloaded == all_results, "the JSON file written to --output must match what main() returned"
+
+        mixed_results = main([
+            "--hf-repo-id", "gpt2,this-repo-genuinely-does-not-exist/nope",
+            "--eval-data-source", "synthetic",
+        ])
+        assert set(mixed_results) == {"gpt2", "_failed"}, "a bad repo must not take gpt2's real result down with it"
+        assert "this-repo-genuinely-does-not-exist/nope" in mixed_results["_failed"]
+        assert mixed_results["gpt2"] == all_results["gpt2"], "the good repo's result must be unaffected by the bad one"
 
     print("\nhf_frontier smoke test passed.")
     return all_results

@@ -22,11 +22,12 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from common.eval.metrics import compression_rate, fertility, gini_coefficient, renyi_efficiency
+from common.eval.parity import _find_anchor_key
 from common.eval.reporting import word_count
 from common.eval.stability import sequences_by_lang_from_groups
 
 
-def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
+def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     """induce_spans_fn_by_lang: dict[lang -> (bytes -> list[bytes] spans)] callable.
     eval_groups: list[dict[lang -> text]] (e.g. common.data.oldi_data.load_bouquet_dev()'s
     return value).
@@ -37,15 +38,38 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
     legitimately differ (e.g. a checkpoint trained on fewer languages than BOUQuET
     covers).
 
+    anchor_lang: also computes TOKEN PARITY against this language (default "eng") --
+    the same "how many X does `lang` need vs. the anchor, for the exact same
+    underlying content" question common.eval.parity.compute_lang_parity_ratios
+    already answers for raw BYTE length, computed here instead from each group's
+    OWN already-tokenized spans (no re-tokenization, no extra cost -- this reuses
+    the exact `spans` the loop below already computed for the aggregate stats).
+    ratio > 1 means THIS tokenizer produces more tokens for `lang` than for the
+    anchor to say the same thing -- a real, tokenizer-specific fairness cost, not
+    just the byte-length disparity common.eval.parity's own ratio already
+    explains structurally (e.g. a tokenizer could still show token parity ratio
+    > 1 for a language whose byte-length ratio is ~1.0, if its own vocabulary/
+    merges just serve that language worse). anchor_lang's own key is resolved
+    per-group via common.eval.parity._find_anchor_key (same short-code-vs-full-
+    stem handling that module's own docstring explains), so a group keyed by
+    "eng_Latn" still matches anchor_lang="eng". A language never paired with the
+    anchor in any group gets ratio 1.0 (no evidence of a disparity), same
+    convention compute_lang_parity_ratios uses.
+
     Returns {"token_freq": {lang: Counter}, "renyi": {lang: float}, "gini": float,
     "per_lang_compression": {lang: float}, "avg_compression": float,
-    "fertility": {lang: float}}.
+    "fertility": {lang: float}, "token_parity": {lang: float},
+    "token_parity_anchor": str}.
     """
     token_freq = defaultdict(Counter)
     compressions_by_lang = defaultdict(list)
     word_counts = defaultdict(int)
+    paired_anchor_counts = defaultdict(list)
+    paired_lang_counts = defaultdict(list)
+    anchor_found = False
 
     for group in eval_groups:
+        num_tokens_this_group = {}
         for lang, text in group.items():
             induce_fn = induce_spans_fn_by_lang.get(lang)
             if induce_fn is None:
@@ -55,6 +79,15 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
             token_freq[lang].update(spans)
             compressions_by_lang[lang].append(compression_rate(len(raw), len(spans)))
             word_counts[lang] += word_count(text)
+            num_tokens_this_group[lang] = len(spans)
+
+        anchor_key = _find_anchor_key(num_tokens_this_group, anchor_lang)
+        if anchor_key is not None:
+            anchor_found = True
+            anchor_count = num_tokens_this_group[anchor_key]
+            for lang, count in num_tokens_this_group.items():
+                paired_anchor_counts[lang].append(anchor_count)
+                paired_lang_counts[lang].append(count)
 
     renyi = {
         lang: renyi_efficiency(list(c.values())) for lang, c in token_freq.items() if c
@@ -72,6 +105,15 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
         lang: fertility(sum(counter.values()), word_counts.get(lang, 0))
         for lang, counter in token_freq.items()
     }
+    token_parity_anchor = anchor_lang if anchor_found else next(iter(token_freq), anchor_lang)
+    token_parity = {}
+    for lang in token_freq:
+        a_counts = paired_anchor_counts.get(lang, [])
+        l_counts = paired_lang_counts.get(lang, [])
+        if a_counts and sum(a_counts) > 0:
+            token_parity[lang] = (sum(l_counts) / len(l_counts)) / (sum(a_counts) / len(a_counts))
+        else:
+            token_parity[lang] = 1.0
     return {
         "token_freq": token_freq,
         "renyi": renyi,
@@ -79,6 +121,8 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
         "per_lang_compression": per_lang_compression,
         "avg_compression": avg_compression,
         "fertility": fertility_by_lang,
+        "token_parity": token_parity,
+        "token_parity_anchor": token_parity_anchor,
     }
 
 
@@ -86,12 +130,15 @@ def report_eval(results, label=""):
     prefix = f"[{label}] " if label else ""
     print(f"\n{prefix}held-out evaluation:")
     print(f"  avg_compression={results['avg_compression']:.2f}  gini={results['gini']:.4f}")
-    print("  per-language compression / renyi efficiency / fertility:")
+    anchor = results.get("token_parity_anchor", "eng")
+    print(f"  per-language compression / renyi efficiency / fertility / token parity vs {anchor}=1.0:")
+    token_parity = results.get("token_parity", {})
     for lang in sorted(results["renyi"]):
         print(
             f"    {lang}: compression={results['per_lang_compression'].get(lang, 0.0):.2f}  "
             f"renyi={results['renyi'][lang]:.4f}  "
-            f"fertility={results['fertility'].get(lang, 0.0):.2f}"
+            f"fertility={results['fertility'].get(lang, 0.0):.2f}  "
+            f"token_parity={token_parity.get(lang, 1.0):.3f}"
         )
 
 
@@ -129,6 +176,9 @@ def eval_wandb_log_dict(results, prefix="eval"):
     )
     log_dict.update(
         {f"{prefix}/fertility/{lang}": v for lang, v in results["fertility"].items()}
+    )
+    log_dict.update(
+        {f"{prefix}/token_parity/{lang}": v for lang, v in results.get("token_parity", {}).items()}
     )
     return log_dict
 
