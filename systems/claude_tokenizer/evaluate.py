@@ -39,6 +39,8 @@ from common.eval.metrics import compression_rate, fertility
 from common.eval.parity import _find_anchor_key
 from common.eval.reporting import word_count
 
+from systems.bpe.train import _SMOKE_TEST_GROUPS
+
 from .model import ClaudeTokenCounter, RateLimiter
 
 
@@ -78,7 +80,9 @@ def build_arg_parser():
         help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
         "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
         "reported numbers, not repeated tuning checks; "
-        "'synthetic': the placeholder corpus, for a quick sanity check with minimal API usage",
+        "'synthetic': a small real-text placeholder (reuses systems.bpe.train's own "
+        "_SMOKE_TEST_GROUPS -- NOT common.data.synthetic's byte generator, which isn't guaranteed "
+        "valid UTF-8), for a quick sanity check with minimal API usage",
     )
     parser.add_argument(
         "--num-groups", type=int, default=None,
@@ -100,9 +104,8 @@ def build_arg_parser():
 
 def _load_eval_groups(args):
     if args.eval_data_source == "synthetic":
-        from common.data.synthetic import make_synthetic_parallel_groups
-
-        return make_synthetic_parallel_groups(args.num_groups or 40)
+        groups = _SMOKE_TEST_GROUPS
+        return groups[: args.num_groups] if args.num_groups else groups
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
     groups = loader("all")
     if args.num_groups:
