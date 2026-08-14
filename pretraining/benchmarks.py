@@ -22,16 +22,16 @@ before writing this (not assumed):
     project (systems/ tokenizer training also draws on it). load_flores_mt
     calls it with langs="all" (not a short list), which VERIFIED LIVE
     (not assumed -- an earlier version of this docstring wrongly assumed
-    the intersection would collapse to a much smaller panel; it does not)
+    the intersection would collapse to a much smaller set; it does not)
     loads all ~227 of flores_plus's native languages with ZERO id
     shrinkage: every one of those 227 per-language files shares the exact
     same 997 sentence ids, because FLORES is deliberately built as a fully
     N-way parallel benchmark. So ANY pair of its languages is valid
     parallel content, not just a curated subset -- load_flores_mt accepts
     any of flores_plus's own lang_Script stems (e.g. "deu_Latn"), plus (for
-    backward compatibility with this project's other 9-language-panel
-    tooling -- oldi_seed/smol/BOUQuET) the short codes from
-    common.data.oldi_data.LANG_SCRIPT, auto-resolved to their full stem.
+    backward compatibility with other tooling elsewhere in this project --
+    oldi_seed/smol/BOUQuET) the short codes from common.data.oldi_data.
+    LANG_SCRIPT, auto-resolved to their full stem.
     split="devtest" (confirmed to exist as its own top-level split,
     distinct from "dev") is the standard FLORES held-out MT evaluation
     split -- "dev" is what systems/ tokenizer training itself already
@@ -195,12 +195,12 @@ def load_xcopa(langs=None, split="test"):
 
 
 def _resolve_flores_lang(code):
-    """Accepts either a short code from this project's own 9-language panel
-    (resolved via common.data.oldi_data.LANG_SCRIPT, e.g. "eng" -> "eng_Latn" --
-    kept for backward compatibility with the rest of this project's
-    9-language-panel tooling: oldi_seed/smol/BOUQuET) or a full lang_Script
-    stem directly (e.g. "deu_Latn") -- any of flores_plus's ~227 native
-    languages. Passed through unchanged if it isn't a known short code."""
+    """Accepts either a short code common.data.oldi_data.LANG_SCRIPT maps
+    (e.g. "eng" -> "eng_Latn" -- kept for backward compatibility with other
+    tooling elsewhere in this project: oldi_seed/smol/BOUQuET) or a full
+    lang_Script stem directly (e.g. "deu_Latn") -- any of flores_plus's
+    ~227 native languages. Passed through unchanged if it isn't a known
+    short code."""
     return LANG_SCRIPT.get(code, code)
 
 
@@ -208,7 +208,7 @@ def load_flores_mt(lang_pairs, split="devtest"):
     """lang_pairs: list of (source_lang, target_lang) tuples -- either
     short codes (see _resolve_flores_lang) or full flores_plus lang_Script
     stems (e.g. "eng_Latn", "deu_Latn"), any of its ~227 native languages,
-    not restricted to a curated panel (verified live: flores_plus's
+    not restricted to a curated subset (verified live: flores_plus's
     langs="all" expansion is genuinely fully N-way parallel across all 227
     languages -- see module docstring).
 
@@ -216,7 +216,7 @@ def load_flores_mt(lang_pairs, split="devtest"):
     requested (langs="all"), then slices out whichever pairs were asked
     for -- more expensive than loading just 2 languages for a SINGLE pair,
     but the only way to support arbitrary pairs at all (LANG_SCRIPT only
-    maps the 9-language short-code panel), and cheaper than the old
+    maps its own fixed 9 short codes), and cheaper than the old
     per-pair-reload design once more than one pair is requested for the
     same split. flores_plus's own per-language files are cached locally
     after the first download (see common.data.oldi_data._download), so repeated

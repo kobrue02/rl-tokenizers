@@ -6,13 +6,13 @@ fairtok.train.GRPOTrainer.evaluate's periodic in-training eval, which only ever
 scores the live, currently-training policy. Held-out by default means BOUQuET dev
 (common.data.oldi_data.load_bouquet_dev("all")) -- disjoint from every --data-source
 common.data.cli_data.load_groups trains on, and loading EVERY language BOUQuET's
-paragraph_level/dev split actually offers (259, not just this project's own
-9-language training panel) -- common.eval.cross_tokenizer.evaluate_on_groups already skips
-languages a given checkpoint has no entry for, so this scores whatever the
-checkpoint covers, out of everything BOUQuET has, with no manual language list
-needed. kas/mni/nqo (3 of the 9-language panel) still aren't in BOUQuET at all --
-no fallback for them is wired in here, so a checkpoint trained on those 3 simply
-gets no reported numbers for them from this evaluator.
+paragraph_level/dev split actually offers (259) -- common.eval.cross_tokenizer.
+evaluate_on_groups already skips languages a given checkpoint has no entry for,
+so this scores whatever the checkpoint covers, out of everything BOUQuET has,
+with no manual language list needed. kas/mni/nqo (3 of common.data.oldi_data.
+LANGS's own 9 codes) still aren't in BOUQuET at all -- no fallback for them is
+wired in here, so a checkpoint trained on those 3 simply gets no reported
+numbers for them from this evaluator.
 
 Scoring itself (Rényi efficiency, Gini, compression rate, fertility) is
 common.eval.cross_tokenizer.evaluate_on_groups, shared verbatim with magnet/flexitokens/

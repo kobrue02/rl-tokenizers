@@ -101,8 +101,8 @@ def build_arg_parser():
     parser.add_argument(
         "--benchmark-lang-pairs", type=str, default=None,
         help="comma-separated src:tgt pairs (e.g. eng:spa,deu_Latn:fra_Latn), for flores_mt -- "
-        "accepts this project's 9-language short codes OR any of flores_plus's ~227 native "
-        "lang_Script stems directly, see benchmarks.py",
+        "accepts a short code common.data.oldi_data.LANG_SCRIPT maps OR any of flores_plus's "
+        "~227 native lang_Script stems directly, see benchmarks.py",
     )
     parser.add_argument("--benchmark-split", type=str, default=None, help="override the benchmark loader's own default split")
     parser.add_argument("--corpus-dataset", choices=ALL_SOURCES, required=True)

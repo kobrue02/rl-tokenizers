@@ -5,21 +5,21 @@ Shared by every tokenizer in this repo (fairtok's RL policy, and the
 magnet/flexitokens/manta baselines) -- comparing them meaningfully requires
 training/evaluating them all on the same real multilingual data.
 
-TRAINING (load_oldi_seed/load_flores_plus below) now defaults to `langs="all"`
--- every language the source natively offers -- rather than a curated panel;
-see common.data.corpora's own module docstring for why (and for smol, which
-moved out of this module entirely into corpora.py's BITEXT_SOURCES pattern,
-since it's English/Russian-pivot bilingual pairs, not true N-way parallel
-content the way oldi_seed/flores_plus are).
+Every loader here defaults to `langs="all"` -- every language the source
+natively offers, no curated subset. TRAINING (load_oldi_seed/load_flores_plus)
+and EVAL (load_bouquet_dev/load_bouquet_test) both work this way; smol moved
+out of this module entirely into corpora.py's BITEXT_SOURCES pattern (see
+that module's own docstring), since it's English/Russian-pivot bilingual
+pairs, not true N-way parallel content the way oldi_seed/flores_plus are.
 
-LANGS below is NOT a training default any more -- it survives as a genuinely
-useful reference: the strict cross-lingual intersection of flores_plus/
-oldi_seed/smol_sent's language coverage once wmt24pp is dropped (wmt24pp is a
-high/mid-resource-only benchmark unrelated to OLDI's low-resource focus, and
-including it collapses the intersection to just {eng}). Still used directly
-by systems/fairtok/train_morfessor_cli.py's own default panel, and it's the
-9-language set this project's own EVAL side (BOUQuET, mostly) still centers
-its held-out comparisons on:
+LANGS below is one specific, fixed list of 9 language codes -- the strict
+cross-lingual intersection of flores_plus/oldi_seed/smol_sent's language
+coverage once wmt24pp is dropped (wmt24pp is a high/mid-resource-only
+benchmark unrelated to OLDI's low-resource focus, and including it collapses
+the intersection to just {eng}). It is not a training or eval default
+anywhere any more -- its one remaining real consumer is
+systems/fairtok/train_morfessor_cli.py's own default language list (see that
+module):
 
     arz (Egyptian Arabic), bam (Bambara), ben (Bengali), eng (English), kas (Kashmiri),
     lij (Ligurian), mni (Manipuri), nqo (N'Ko), spa (Spanish)
@@ -28,14 +28,13 @@ One canonical script is picked per language where a dataset offers more than one
 (e.g. kas_Arab over kas_Deva, ben_Beng over ben_Latn) -- see LANG_SCRIPT below.
 
 oldi_seed/flores_plus: one file per language, aligned by an explicit `id` field
-(true N-way parallel -- a `langs="all"` group can have every language both
-datasets offer, ~46/~227 respectively at last count, not just LANGS's 9).
+(true N-way parallel -- a `langs="all"` group has every language both
+datasets offer, ~46/~227 respectively at last count).
 
-Eval: BOUQuET dev/test (load_bouquet_dev/load_bouquet_test below) default to
-`langs="all"` too (every one of BOUQuET's 259 languages) -- common.eval.
+BOUQuET dev/test (load_bouquet_dev/load_bouquet_test below) default to
+`langs="all"` too (every one of its 259 languages) -- common.eval.
 cross_tokenizer.evaluate_on_groups already skips languages a given checkpoint
-has no entry for, so this is always safe, and every real call site in this
-repo already passes "all" explicitly regardless of this module's own default.
+has no entry for, so this is always safe.
 """
 
 import json
@@ -71,8 +70,8 @@ def _list_all_stems(repo_id, dir_prefix, ext=".jsonl"):
     """Every lang[_Script[_variant]] stem this dataset natively offers in
     `dir_prefix`, discovered from the repo's file listing rather than our
     curated LANG_SCRIPT table -- this is what lets a group use everything a
-    fully N-way parallel source (oldi_seed, flores_plus, bouquet) actually has,
-    instead of just the 9-language reporting panel. `ext` defaults to ".jsonl"
+    fully N-way parallel source (oldi_seed, flores_plus, bouquet) actually
+    has, not just LANG_SCRIPT's own fixed entries. `ext` defaults to ".jsonl"
     (oldi_seed/flores_plus's own layout); bouquet's own files are ".parquet"."""
     prefix = dir_prefix + "/"
     files = list_repo_files(repo_id, repo_type="dataset")

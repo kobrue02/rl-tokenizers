@@ -49,7 +49,7 @@ def lang_to_script(lang):
     boundary rate (see model.py's MagnetModel/BoundaryPredictor).
     common.data.oldi_data.LANG_SCRIPT gives the real lang_Script code (e.g.
     "arz_Arab" -> the part after the underscore is the ISO 15924 script code:
-    Arab, Latn, Beng, Nkoo cover this project's 9-language panel.
+    Arab, Latn, Beng, Nkoo cover LANG_SCRIPT's own fixed set of codes.
 
     Synthetic placeholder "languages" (common.data.synthetic.make_synthetic_parallel_groups's
     profile names, e.g. "high_resource") aren't real language codes and carry no

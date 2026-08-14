@@ -1,12 +1,15 @@
 """CLI: train per-language unsupervised Morfessor 2.0 models on monolingual text
 pooled from Glot500 + MADLAD-400 (see morphology.py for why, and for the per-language
-source list). These stand in for the gold morphological data (UniMorph/Universal
-Dependencies) that MorphScore normally requires and that most of this project's
-9-language panel doesn't have.
+source list -- discover_morph_sources finds usable text for 636 languages, not a
+hand-picked handful). These stand in for the gold morphological data (UniMorph/
+Universal Dependencies) that MorphScore normally requires and that most languages
+don't have.
 
 This is a separate, one-off preprocessing step -- not part of Phase 1 training. Run it
 once (or whenever you want to refresh the models), then load the saved .bin files
-wherever a MorphScore-style alignment check is computed.
+wherever a MorphScore-style alignment check is computed. Defaulting --langs to all 636
+discovered languages is a genuinely large, slow run (hundreds of Glot500/MADLAD-400
+downloads) -- narrow --langs down for anything short of a real full-scale refresh.
 """
 
 import argparse
@@ -14,9 +17,7 @@ import json
 import time
 from pathlib import Path
 
-from common.data.oldi_data import LANGS
-
-from .morphology import MORPH_SOURCES, collect_word_counts, train_morfessor
+from .morphology import collect_word_counts, discover_morph_sources, train_morfessor
 
 
 def build_arg_parser():
@@ -27,8 +28,10 @@ def build_arg_parser():
         "--langs",
         type=str,
         default=None,
-        help=f"comma-separated language codes; defaults to the full 9-language panel ({','.join(LANGS)}). "
-        "Languages with no configured source (kas, nqo) are skipped with a warning, not an error.",
+        help="comma-separated language codes; defaults to EVERY language "
+        "morphology.discover_morph_sources() finds across Glot500 + MADLAD-400 (636 at "
+        "last count, not just a handful) -- expect a long, slow run if you don't narrow "
+        "this down. Languages with no usable source are skipped with a warning, not an error.",
     )
     parser.add_argument(
         "--max-words-per-source",
@@ -87,7 +90,8 @@ def build_arg_parser():
 
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
-    langs = args.langs.split(",") if args.langs else list(LANGS)
+    morph_sources = discover_morph_sources()  # one live discovery call, not per --langs
+    langs = args.langs.split(",") if args.langs else sorted(morph_sources)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,10 +101,10 @@ def main(argv=None):
     summary = {}
 
     for lang in langs:
-        sources = MORPH_SOURCES.get(lang, [])
+        sources = morph_sources.get(lang, [])
         if not sources:
             print(
-                f"[{lang}] skipped -- no configured monolingual source (see morphology.MORPH_SOURCES)"
+                f"[{lang}] skipped -- no configured monolingual source (see morphology.discover_morph_sources)"
             )
             summary[lang] = {"status": "skipped_no_source"}
             continue

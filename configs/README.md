@@ -33,16 +33,15 @@ see `common/data/corpora.py`'s own module docstring for the full registry
 (`oldi_seed`/`flores_dev`, `glot500`/`fineweb_edu`/`olmo_mix`,
 `smol`/`ccmatrix`/`un_pc`/`europarl`/`tatoeba_mt`, `bible_nlp`, `synthetic`).
 Every source now defaults to loading EVERY language/pair it natively offers
-— there's no built-in curated panel any more, so `langs`/`dataset_config`
-are rarely needed at all (`bible_nlp` is the one exception: it always needs
-an explicit, small `langs` list, and needs `common.data.prepare_bible_nlp`
-run once first — see that module's own docstring).
+— no curated subset of any kind — so `langs`/`dataset_config` are rarely
+needed at all (`bible_nlp` is the one exception: it always needs an
+explicit, small `langs` list, and needs `common.data.prepare_bible_nlp` run
+once first — see that module's own docstring).
 
 `data_source` takes:
 - one source name (e.g. `data_source: ccmatrix`),
 - the literal `all` (the original oldi_seed+flores_dev+smol pool, kept for
-  backward compatibility — each of the three now loads everything it has,
-  not the old 9-language panel),
+  backward compatibility — each of the three now loads everything it has),
 - or a comma-separated list of several source names to pool for one run
   (e.g. `data_source: "oldi_seed,ccmatrix,europarl"`) — `langs`/
   `dataset_config` aren't supported alongside a multi-source list (they

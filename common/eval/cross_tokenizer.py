@@ -183,9 +183,9 @@ def load_eval_groups(args, synthetic_groups=None):
         from common.data.synthetic import make_synthetic_parallel_groups
 
         return make_synthetic_parallel_groups(args.num_groups or 40)
-    # "all": every language BOUQuET covers, not just the 9-language panel --
-    # evaluate_on_groups already skips languages this checkpoint has no entry
-    # for, so this is always safe.
+    # "all": every language BOUQuET covers -- evaluate_on_groups already
+    # skips languages this checkpoint has no entry for, so this is always
+    # safe.
     from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
 
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev

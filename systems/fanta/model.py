@@ -132,11 +132,10 @@ def rate_anchor_loss(per_lang_rate, target_rate_by_lang, eps=1e-6):
     Penalty is a SQUARED LOG-RATIO, `(log(rate) - log(target))**2`, not a plain
     squared difference: target rates can differ by many-fold across languages
     (e.g. ~3 bytes/token for English vs. ~8+ for a verbose script, per the real
-    per-language spread fairtok's own target_rate_by_lang produces on this
-    project's 9-language panel) -- a plain squared error would weight
-    high-target-rate languages' errors far more heavily for the SAME relative
-    deviation. The log-ratio form treats "20% off target" the same regardless
-    of the target's absolute scale.
+    per-language spread fairtok's own target_rate_by_lang produces) -- a plain
+    squared error would weight high-target-rate languages' errors far more
+    heavily for the SAME relative deviation. The log-ratio form treats "20%
+    off target" the same regardless of the target's absolute scale.
 
     Languages present in per_lang_rate but missing from target_rate_by_lang
     (shouldn't happen in practice, since both are derived from the same

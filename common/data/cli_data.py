@@ -14,14 +14,14 @@ plain next-byte CE loss every trainer has, it just contributes nothing to any
 fairness loss term that needs genuinely parallel content within a group.
 
 Every source now defaults to loading EVERY language it natively offers (no
-built-in curated panel any more -- bible_nlp is the one deliberate exception,
-which has no default at all and always requires an explicit --langs, given
-the real cost of scanning it -- see common.data.corpora's own docstring).
-Config files decide WHICH corpora feed a given training run: --data-source
-takes either one source name, the literal "all" (the original oldi_seed+
-flores_dev+smol pool, kept for backward compatibility with existing configs
--- each of the three now loads every language it has, not the old 9-panel),
-or a comma-separated list of several source names to pool together for one
+curated subset of any kind any more -- bible_nlp is the one deliberate
+exception, which has no default at all and always requires an explicit
+--langs, given the real cost of scanning it -- see common.data.corpora's own
+docstring). Config files decide WHICH corpora feed a given training run:
+--data-source takes either one source name, the literal "all" (the original
+oldi_seed+flores_dev+smol pool, kept for backward compatibility with existing
+configs -- each of the three now loads every language it has), or a
+comma-separated list of several source names to pool together for one
 run (e.g. "oldi_seed,ccmatrix,europarl") -- --langs/--dataset-config aren't
 supported alongside a multi-source list (they aren't source-specific), so
 override either by training on a single source at a time instead.
@@ -182,9 +182,9 @@ def load_bouquet_dev_for_training(args):
     --data-source load_groups above trains on, used for periodic in-training
     evaluation at epoch boundaries (see each tokenizer's own Trainer.train()).
     Skipped (returns None) for --data-source synthetic, which has no real
-    BOUQuET counterpart. Loads EVERY language BOUQuET covers ("all"), not just
-    this project's 9-language panel -- common.eval.cross_tokenizer.evaluate_on_groups
-    already skips languages the training model has no entry for.
+    BOUQuET counterpart. Loads EVERY language BOUQuET covers ("all") --
+    common.eval.cross_tokenizer.evaluate_on_groups already skips languages
+    the training model has no entry for.
 
     Reserve BOUQuET's TEST split (common.data.oldi_data.load_bouquet_test) for final
     reported numbers, via each tokenizer's own evaluate.py

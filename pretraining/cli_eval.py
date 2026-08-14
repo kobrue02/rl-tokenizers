@@ -14,12 +14,12 @@ Usage:
         --vocab-json vocab_out/fanta_vocab_12345.json \\
         --benchmark flores_mt --lang-pairs eng:spa,eng:arz,deu_Latn:fra_Latn \\
         --max-examples 200 --output results/flores_fanta.json
-        # (flores_mt lang-pairs codes accept EITHER this project's own
-        # 9-language short codes (arz/bam/ben/eng/kas/lij/mni/nqo/spa,
-        # auto-resolved to their full stem) OR any of flores_plus's own
-        # ~227 native lang_Script stems directly (e.g. deu_Latn, fra_Latn)
-        # -- verified live to be genuinely fully N-way parallel across all
-        # of them, see benchmarks.py's own module docstring)
+        # (flores_mt lang-pairs codes accept EITHER a short code
+        # common.data.oldi_data.LANG_SCRIPT maps (auto-resolved to its full
+        # stem) OR any of flores_plus's own ~227 native lang_Script stems
+        # directly (e.g. deu_Latn, fra_Latn) -- verified live to be
+        # genuinely fully N-way parallel across all of them, see
+        # benchmarks.py's own module docstring)
 
     python3 -m pretraining.cli_eval --checkpoint checkpoints/pretrain/final.pt \\
         --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \\
@@ -269,8 +269,8 @@ def build_arg_parser():
     parser.add_argument(
         "--lang-pairs", type=str, default=None,
         help="comma-separated src:tgt pairs (e.g. eng:spa,deu_Latn:fra_Latn), for flores_mt -- "
-        "accepts this project's 9-language short codes OR any of flores_plus's ~227 native "
-        "lang_Script stems directly, see benchmarks.py",
+        "accepts a short code common.data.oldi_data.LANG_SCRIPT maps OR any of flores_plus's "
+        "~227 native lang_Script stems directly, see benchmarks.py",
     )
     parser.add_argument("--split", type=str, default=None, help="dataset split override (loader-specific default otherwise)")
     parser.add_argument("--max-examples", type=int, default=None, help="cap examples scored (None = full split)")

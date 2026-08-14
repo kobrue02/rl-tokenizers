@@ -1002,9 +1002,9 @@ def run_smoke_test():
 def run_real_smoke_test(num_groups=60):
     """Same gate, but on a slice of the real OLDI-and-friends training data
     (oldi_seed's first `num_groups` rows, under its own default langs="all" --
-    every language it offers, ~46 at last count, not just this project's own
-    9-language panel) instead of synthetic placeholder data -- confirms real
-    UTF-8 multi-byte text flows through the whole pipeline correctly. Not a
+    every language it offers, ~46 at last count) instead of synthetic
+    placeholder data -- confirms real UTF-8 multi-byte text flows through
+    the whole pipeline correctly. Not a
     full training run: oldi_seed under langs="all" has far more groups than
     `num_groups` slices off here -- scaling this up is a separate, much
     longer run."""

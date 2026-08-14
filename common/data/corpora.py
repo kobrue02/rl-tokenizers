@@ -18,10 +18,10 @@ rather than papering over it:
     need to fully materialize to compute that join, so "streaming" here
     means "iterate an already-fully-loaded list", not lazy network
     streaming -- stated plainly, not hidden. Both default to `langs="all"`
-    now (every language the source natively offers), not a curated panel --
-    the old 9-language default (the strict cross-lingual intersection this
-    project's own eval panel is built from) stays available as an explicit
-    `--langs` override, it just isn't the default any more.
+    now (every language the source natively offers) -- common.data.
+    oldi_data.LANGS, a specific fixed 9-code list still used elsewhere (see
+    that module's own docstring), stays available as an explicit `--langs`
+    override, it just isn't the default here any more.
   - MONOLINGUAL_SOURCES = {glot500, fineweb_edu, olmo_mix}: no cross-lingual
     alignment exists to preserve, so every yielded group has exactly ONE
     key. Lazily streamed from the HF Hub (datasets.load_dataset(streaming=
@@ -45,8 +45,7 @@ rather than papering over it:
     PARALLEL_SOURCES despite being genuinely N-way-joinable in principle
     (it's English-pivot bilingual pairs, structurally identical to
     ccmatrix) -- confirmed live that intersecting IDs across its ~120
-    language pairs simultaneously (the old approach, on a curated 9-language
-    panel) doesn't generalize to "every language it has": the more languages
+    language pairs simultaneously doesn't work: the more languages
     forced into one join, the smaller the surviving intersection gets,
     exactly the bug BOUQuET eval already hit and fixed by switching to a
     union join (see _load_bouquet_split's own docstring) -- per-pair
