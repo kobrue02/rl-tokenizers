@@ -18,9 +18,11 @@ unreadable in print:
      the ONE figure that reduces anything, because a 259-row table isn't legible in print.
      Shows the languages with the highest max(token_parity) across ANY model in the input
      (the same data-driven rule the interactive dashboard's heatmap tab already uses -- not
-     a hand-picked subset), against every model. Colors are precomputed in Python (a viridis
-     approximation, colorblind-safe and reasonable in grayscale) and baked in as literal
-     \\fill commands, so there's no pgfplots colormap/meshing step to get subtly wrong.
+     a hand-picked subset), against every model. Colors are precomputed in Python (ColorBrewer's
+     YlOrRd sequential scheme -- pale yellow at parity, deep red at the worst disparity, so
+     "worse" reads as a stronger/darker color, unlike a general perceptual colormap such as
+     viridis, which has no inherent good/bad direction) and baked in as literal \\fill commands,
+     so there's no pgfplots colormap/meshing step to get subtly wrong.
 
 Usage:
     python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --output-dir figures/tikz
@@ -39,19 +41,26 @@ import langcodes
 
 from common.config_file import parse_args_with_config
 
-# Viridis approximation (published anchor stops), pure-python piecewise-linear
-# interpolation -- avoids a matplotlib dependency just to pick print-safe,
-# colorblind-safe colors.
-_VIRIDIS_STOPS = [
-    (0.00, (0x44, 0x01, 0x54)),
-    (0.13, (0x48, 0x28, 0x78)),
-    (0.25, (0x3e, 0x49, 0x89)),
-    (0.38, (0x31, 0x68, 0x8e)),
-    (0.50, (0x26, 0x82, 0x8e)),
-    (0.63, (0x1f, 0x9e, 0x89)),
-    (0.75, (0x35, 0xb7, 0x79)),
-    (0.88, (0x6e, 0xce, 0x58)),
-    (1.00, (0xfd, 0xe7, 0x25)),
+# ColorBrewer YlOrRd-9 (published, standard sequential scheme), pure-python
+# piecewise-linear interpolation -- avoids a matplotlib dependency. Chosen
+# over a general perceptual colormap like viridis specifically because
+# viridis has no "good/bad" direction: going dark-purple(low)->bright-
+# yellow(high) reads BACKWARDS for a lower-is-better cost metric (bright
+# intuitively reads as "more/better" to most readers, confirmed as a real
+# point of confusion). YlOrRd's pale-yellow(low, near parity)->deep-red
+# (high, worse) direction matches the metric's actual meaning, and stays
+# colorblind-safe since it varies only in lightness within one hue family,
+# not by hue discrimination.
+_COST_STOPS = [
+    (0.000, (0xff, 0xff, 0xcc)),
+    (0.125, (0xff, 0xed, 0xa0)),
+    (0.250, (0xfe, 0xd9, 0x76)),
+    (0.375, (0xfe, 0xb2, 0x4c)),
+    (0.500, (0xfd, 0x8d, 0x3c)),
+    (0.625, (0xfc, 0x4e, 0x2a)),
+    (0.750, (0xe3, 0x1a, 0x1c)),
+    (0.875, (0xbd, 0x00, 0x26)),
+    (1.000, (0x80, 0x00, 0x26)),
 ]
 
 _FAMILY_COLORS = {
@@ -77,13 +86,14 @@ _ENCODER_ONLY_NAMES = {
 }
 
 
-def viridis(t):
+def cost_color(t):
+    """t=0 (best, at parity) -> pale yellow; t=1 (worst) -> deep red."""
     t = max(0.0, min(1.0, t))
-    for (t0, c0), (t1, c1) in zip(_VIRIDIS_STOPS, _VIRIDIS_STOPS[1:]):
+    for (t0, c0), (t1, c1) in zip(_COST_STOPS, _COST_STOPS[1:]):
         if t0 <= t <= t1:
             frac = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
             return tuple(round(c0[i] + frac * (c1[i] - c0[i])) for i in range(3))
-    return _VIRIDIS_STOPS[-1][1]
+    return _COST_STOPS[-1][1]
 
 
 def family_of(name):
@@ -384,7 +394,7 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
         """Converts a "rank from top" position into TikZ's bottom-up y."""
         return total_height - pos - 1
 
-    palette = [viridis(i / (n_buckets - 1)) for i in range(n_buckets)]
+    palette = [cost_color(i / (n_buckets - 1)) for i in range(n_buckets)]
 
     preamble = [r"\documentclass{standalone}", r"\usepackage{tikz}", r"\usepackage{xcolor}"]
     body = [r"\begin{tikzpicture}[x=%.2fcm, y=%.2fcm]" % (cell_cm, cell_cm)]
@@ -457,7 +467,7 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, total_height, vmax))
     body.append(
         r"\node[anchor=west, font=\tiny, align=left, text width=2.2cm] at (%.2f,%.2f) {color scale: "
-        r"$\sqrt{v-1}$, matching the online dashboard};" % (legend_x0 + 0.9, total_height * 0.5)
+        r"$\sqrt{v-1}$ (pale = parity, red = worst)};" % (legend_x0 + 0.9, total_height * 0.5)
     )
     body.append(r"\end{tikzpicture}")
     full_tex, _ = _write_standalone_and_body("heatmap", preamble, body, out_dir)
