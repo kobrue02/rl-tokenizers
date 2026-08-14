@@ -341,12 +341,16 @@ def _grouped_positions(rows, families, gap=0.7):
     return ordered, positions, blocks, total
 
 
-def _estimate_label_width_cm(s, pt_per_char=2.6):
+def _estimate_label_width_cm(s, pt_per_char=3.6):
     """Rough (not exact-metrics) estimate of a \\tiny-font label's rendered
     width, just to reserve enough left-margin for the row-label column
     before placing the family indicator bar further left -- generous by
-    design, since underestimating causes real overlap and overestimating
-    just leaves harmless whitespace."""
+    design, since underestimating causes the bar (drawn AFTER, i.e. on TOP
+    of, the row labels) to visually paint over the longest names, confirmed
+    live: a real render at pt_per_char=2.6 clipped exactly the 3 longest
+    model names (bert-base-multilingual-cased, electra-base-discriminator,
+    distilbert-base-uncased) and nothing else. Overestimating just leaves
+    harmless whitespace, so err generous."""
     pt_to_cm = 0.03514
     return len(s) * pt_per_char * pt_to_cm
 
@@ -403,7 +407,30 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     for _, y0, y1 in blocks:
         body.append(r"\draw[white, line width=0.3pt] (0,%.2f) grid (%d,%.2f);" % (y_of(y1) + 1, n_cols, y_of(y0) + 1))
 
-    # Row labels: plain model short names, left of the grid.
+    # Family header: a colored vertical bar + rotated family name, further
+    # left than the row labels -- reserve enough margin (estimated from the
+    # longest actual model short-name string) so the bar shouldn't collide
+    # with row-label text. Drawn BEFORE the row labels (below in z-order) as
+    # a backstop: confirmed live that drawing it AFTER painted over the 3
+    # longest model names whose real rendered width came in wider than the
+    # estimate -- with labels drawn on top instead, even an imperfect
+    # estimate degrades to "label overlaps a sliver of color" rather than
+    # "label invisible."
+    row_label_margin = max((_estimate_label_width_cm(r["short"]) for r in ordered), default=1.0) / cell_cm
+    header_x1 = -(0.3 + row_label_margin + 0.5)
+    header_x0 = header_x1 - 0.4
+    for fam, y0, y1 in blocks:
+        col = _FAMILY_COLORS.get(fam, "otherCol")
+        body.append(
+            r"\fill[%s] (%.2f,%.2f) rectangle (%.2f,%.2f);" % (col, header_x0, y_of(y1) + 1, header_x1, y_of(y0) + 1)
+        )
+        body.append(
+            r"\node[anchor=south, rotate=90, font=\tiny\bfseries] at (%.2f,%.2f) {%s};"
+            % (header_x0 - 0.1, (y_of(y1) + 1 + y_of(y0) + 1) / 2, esc(fam))
+        )
+
+    # Row labels: plain model short names, left of the grid -- drawn AFTER
+    # the family bar (see above) so text always wins visually.
     for r in ordered:
         y = y_of(row_pos[r["name"]])
         body.append(r"\node[anchor=east, font=\tiny] at (-0.2,%.2f) {%s};" % (y + 0.5, esc(r["short"])))
@@ -414,23 +441,6 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
         body.append(
             r"\node[anchor=south west, rotate=45, font=\tiny] at (%d,%.2f) {%s \textcolor{gray}{\texttt{\tiny(%s)}}};"
             % (xi, total_height + 0.15, esc(lang_display_name(lang)), esc(lang))
-        )
-
-    # Family header: a colored vertical bar + rotated family name, further
-    # left than the row labels -- reserve enough margin (estimated from the
-    # longest actual model short-name string) so the bar never collides with
-    # row-label text.
-    row_label_margin = max((_estimate_label_width_cm(r["short"]) for r in ordered), default=1.0) / cell_cm
-    header_x1 = -(0.3 + row_label_margin + 0.3)
-    header_x0 = header_x1 - 0.4
-    for fam, y0, y1 in blocks:
-        col = _FAMILY_COLORS.get(fam, "otherCol")
-        body.append(
-            r"\fill[%s] (%.2f,%.2f) rectangle (%.2f,%.2f);" % (col, header_x0, y_of(y1) + 1, header_x1, y_of(y0) + 1)
-        )
-        body.append(
-            r"\node[anchor=south, rotate=90, font=\tiny\bfseries] at (%.2f,%.2f) {%s};"
-            % (header_x0 - 0.1, (y_of(y1) + 1 + y_of(y0) + 1) / 2, esc(fam))
         )
 
     # Legend, to the right of the grid, spanning the full height.
