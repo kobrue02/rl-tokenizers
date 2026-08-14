@@ -96,7 +96,14 @@ _CANARY_TEXT = "The quick brown fox jumps über den Zaun. 你好世界 🎉"
 
 
 def _token_to_bytes_gpt2(tok_str):
-    return bytes(_UNICODE_TO_BYTE[ch] for ch in tok_str)
+    # A literal ' ' can only mean a raw space byte, never the GPT-2 boundary
+    # marker -- the standard byte-to-unicode scheme always escapes byte 0x20
+    # to 'Ġ', never to itself, so it never collides with this. Needed for
+    # e.g. answerdotai/ModernBERT-base, whose vocab has ~20 literal
+    # multi-space tokens (for efficient code/indentation encoding) that
+    # bypass the escaping scheme entirely -- confirmed live: every one of
+    # its out-of-alphabet vocab tokens is a run of literal ' ' and nothing else.
+    return bytes(ord(ch) if ch == " " else _UNICODE_TO_BYTE[ch] for ch in tok_str)
 
 
 def _spans_via_byte_level(tokenizer, text):

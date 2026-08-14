@@ -146,8 +146,17 @@ def evaluate_claude_on_groups(eval_groups, count_fn, anchor_lang="eng", max_work
             try:
                 counts[(gi, lang)] = fut.result()
             except Exception as e:
-                errors.append((gi, lang, str(e)))
-                print(f"  [FAILED] group={gi} lang={lang}: {type(e).__name__}: {e}", flush=True)
+                cause = e.__cause__
+                detail = f"{type(e).__name__}: {e}"
+                if cause is not None:
+                    # count()'s own RuntimeError wraps the real reason (a rate
+                    # limit, an overload, a connection drop, ...) via `raise
+                    # ... from last_exc` -- without unwrapping it here, every
+                    # failure prints the same uninformative "failed after 5
+                    # attempts" and the actual cause is lost.
+                    detail += f" (caused by {type(cause).__name__}: {cause})"
+                errors.append((gi, lang, detail))
+                print(f"  [FAILED] group={gi} lang={lang}: {detail}", flush=True)
             done += 1
             if progress_every and done % progress_every == 0:
                 print(f"  ...{done}/{len(tasks)} count_tokens calls done ({len(errors)} failed so far)")
