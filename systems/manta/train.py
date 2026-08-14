@@ -6,7 +6,7 @@ rate-consistency loss -- see manta.model's module docstring, point 3, for
 why MANTa genuinely has none of that machinery, not just a simplified
 version of it. The only loss is next-byte cross-entropy
 (manta.model.next_byte_loss), and every byte position contributes to it
-independently; "groups" of parallel sentences (common.oldi_data's unit of
+independently; "groups" of parallel sentences (common.data.oldi_data's unit of
 organization) are used here purely as a convenient SOURCE of many
 sentences across many languages, not as a training-time structure the way
 GRPOTrainer's group-relative advantage needs them to be. Concretely: this
@@ -33,17 +33,17 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from common.data import LANG_PROFILES, make_synthetic_parallel_groups
-from common.eval_common import (
+from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
+from common.eval.cross_tokenizer import (
     eval_wandb_log_dict,
     evaluate_on_groups,
     report_eval,
     sample_eval_groups,
 )
-from common.lr_schedule import build_lr_scheduler
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.training.lr_schedule import build_lr_scheduler
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
-from common.reporting import collapse_stats
+from common.eval.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
@@ -116,9 +116,9 @@ class MantaConfig(BaseTokenizerConfig):
     # not once at the end (see evaluate.py, which always scores everything).
 
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
-    # common.lr_schedule.build_lr_scheduler.
+    # common.training.lr_schedule.build_lr_scheduler.
     lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
-    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # "cosine" -- see common.training.lr_schedule.build_lr_scheduler. "linear" matches HF
     # Trainer's own default.
 
 
@@ -141,7 +141,7 @@ def _pad_batch(tensors, device):
 
 class MantaTrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (a list of dicts {lang: text}, the
-    same shape common.oldi_data.load_all_training_groups / common.data's
+    same shape common.data.oldi_data.load_all_training_groups / common.data.synthetic's
     make_synthetic_parallel_groups produce -- reused unmodified), call
     .train(), then read .model / .token_freq / .vocab off the instance
     (train() also returns them as a tuple, mirroring GRPOTrainer's
@@ -399,7 +399,7 @@ def _span_length_histogram(token_freq):
 def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
     """Feed the smoke test's induced vocabulary straight into fairtok's own
     metrics functions, UNMODIFIED -- the whole point of reusing
-    common.metrics/common.vocab rather than writing MANTa-specific
+    common.eval.metrics/common.vocab rather than writing MANTa-specific
     versions is to confirm this model's output is a drop-in match for
     whatever consumes fairtok's own tokenizer output."""
     avg_span_len = _avg_span_length(token_freq)
@@ -457,7 +457,7 @@ def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
 
 def run_smoke_test():
     """Mirrors fairtok.train.run_smoke_test's role: a small trial run on
-    synthetic placeholder data (common.data.make_synthetic_parallel_groups,
+    synthetic placeholder data (common.data.synthetic.make_synthetic_parallel_groups,
     reused unmodified), gated by three explicit assertions:
 
       1. no crash getting here at all (train() and metric computation ran

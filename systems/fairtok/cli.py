@@ -6,15 +6,15 @@ import argparse
 import dataclasses
 
 from common.bytes_utils import bytes_to_tensor
-from common.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
+from common.data.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
 from common.config_file import parse_args_with_config
-from common.reporting import (
+from common.eval.reporting import (
     fertility_by_lang,
     report_collapse,
     report_fertility,
     report_stability,
 )
-from common.stability import sequences_by_lang_from_groups, stability_by_lang
+from common.eval.stability import sequences_by_lang_from_groups, stability_by_lang
 from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
 
 from .policy import segment_bytes

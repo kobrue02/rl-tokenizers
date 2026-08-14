@@ -1,5 +1,5 @@
-"""Offline pipeline: stream a corpus from common.corpora's shared registry
-(the SAME registry common.cli_data.load_groups uses for tokenizer training --
+"""Offline pipeline: stream a corpus from common.data.corpora's shared registry
+(the SAME registry common.data.cli_data.load_groups uses for tokenizer training --
 no separate pretraining-only source list), tokenize every document with a
 chosen systems/ checkpoint (via pretraining.tokenizer_adapter.TokenizerAdapter),
 and pack the resulting token ids into fixed-size binary shards on disk -- the
@@ -9,7 +9,7 @@ shard_dataset.py) instead of re-streaming+re-tokenizing on every run, which
 would be both slower and non-reproducible run to run (HF streaming order and
 network conditions vary).
 
-common.corpora.stream_groups yields {lang: text} dicts, not bare text rows --
+common.data.corpora.stream_groups yields {lang: text} dicts, not bare text rows --
 multi-key for the genuinely parallel sources (oldi_seed/flores_dev/smol),
 single-key for the monolingual ones (glot500/fineweb_edu/olmo_mix). This
 module flattens every group into its constituent (lang, text) documents and
@@ -39,29 +39,29 @@ language of this batch" isn't even a well-defined single value once
 packing has happened. The corpus-level realized distribution is the
 actionable number for this project's fairness angle anyway -- it's what
 tells you whether a --max-tokens/--max-docs cap combined with
-common.corpora's round-robin interleaving actually produced the balanced
-mix you asked for (see common/corpora.py's own module docstring for the
+common.data.corpora's round-robin interleaving actually produced the balanced
+mix you asked for (see common/data/corpora.py's own module docstring for the
 Glot500 incident this exact question was raised to catch). Per-language
 "lang_counts" also tracks raw UTF-8 "bytes" alongside "tokens" and "docs" --
 together these give a real bytes-per-token compression rate
-(common.metrics.compression_rate) at actual pretraining-corpus scale,
+(common.eval.metrics.compression_rate) at actual pretraining-corpus scale,
 matching the same per-language diagnostics every systems/ tokenizer already
 reports at its own (much smaller) training-time scale, plus a Gini
-coefficient (common.metrics.gini_coefficient) over each language's token
+coefficient (common.eval.metrics.gini_coefficient) over each language's token
 share -- the same "how balanced is this data mix" statistic frontier lab
 reports disclose via per-SOURCE mixture proportions, adapted here to this
 project's own per-LANGUAGE framing.
 
 DEDUPLICATION (--dedup, on by default): every document is checked against
 every OTHER document already seen so far in this same prep_dataset call,
-via common.dedup.Deduplicator -- exact-hash dedup (verbatim repeats) for
+via common.data.dedup.Deduplicator -- exact-hash dedup (verbatim repeats) for
 every document regardless of length, plus MinHash+LSH near-duplicate
 detection (small edits between otherwise-identical documents) for longer
 ones. A document flagged as a duplicate is dropped BEFORE tokenization --
 never encoded, never packed into a shard. Dropped-document/byte counts are
 tracked per language (shards_meta.json's "dropped_duplicates"/
 "dropped_duplicates_by_lang") and printed/logged the same way
-"lang_counts" is -- see common/dedup.py's own module docstring for the
+"lang_counts" is -- see common/data/dedup.py's own module docstring for the
 exact mechanism, its real memory-scaling cost, and why near-dup mostly
 matters for the longer fineweb_edu/olmo_mix documents rather than short
 individual parallel-corpus sentences.
@@ -116,9 +116,9 @@ regression the first version of ENCODE_BATCH_SIZE actually shipped with
 and hit on a real cluster run -- forming batches straight from stream
 order (as they arrive) means a batch can mix very-short and very-long
 documents, and the whole batch then pays the long member's O(T^2) cost.
-This is WORSE than it sounds for common.corpora's monolingual sources
+This is WORSE than it sounds for common.data.corpora's monolingual sources
 specifically: glot500 "all" round-robins across ~411 different language
-configs (see common/corpora.py), so CONSECUTIVE stream documents come from
+configs (see common/data/corpora.py), so CONSECUTIVE stream documents come from
 alternating sources with very different typical lengths -- almost
 maximizing the length heterogeneity any small window of consecutive
 documents sees. Confirmed empirically (not just reasoned about): a
@@ -154,9 +154,16 @@ from tqdm.auto import tqdm
 
 from common.bytes_utils import truncate_to_max_bytes
 from common.config_file import parse_args_with_config
-from common.corpora import ALL_SOURCES, FINEWEB_EDU_CONFIGS, MONOLINGUAL_SOURCES, OLMO_MIX_CONFIGS, stream_groups
-from common.dedup import Deduplicator
-from common.metrics import compression_rate, gini_coefficient
+from common.data.corpora import (
+    ALL_SOURCES,
+    BITEXT_SOURCES,
+    FINEWEB_EDU_CONFIGS,
+    MONOLINGUAL_SOURCES,
+    OLMO_MIX_CONFIGS,
+    stream_groups,
+)
+from common.data.dedup import Deduplicator
+from common.eval.metrics import compression_rate, gini_coefficient
 
 from .tokenizer_adapter import ALL_SYSTEMS, TokenizerAdapter
 
@@ -213,16 +220,18 @@ def prep_dataset(
     encode_batch_size=ENCODE_BATCH_SIZE,
     bucket_pool_multiplier=BUCKET_POOL_MULTIPLIER,
 ):
-    """dataset_name: one of common.corpora.ALL_SOURCES. langs: language
+    """dataset_name: one of common.data.corpora.ALL_SOURCES. langs: language
     codes for the language-selectable sources (synthetic/oldi_seed/
-    flores_dev/smol/glot500 -- "all" is valid for glot500); ignored for
-    fineweb_edu/olmo_mix, which use `dataset_config` (an HF config name)
-    instead -- see common.corpora.stream_groups. max_tokens/max_docs: stop
+    flores_dev/smol/glot500 -- "all" is valid for glot500; bible_nlp takes
+    an arbitrary language subset here too, with no built-in default panel);
+    ignored for fineweb_edu/olmo_mix and every BITEXT_SOURCES entry
+    (ccmatrix/un_pc/europarl/tatoeba_mt), which use `dataset_config`
+    instead -- see common.data.corpora.stream_groups. max_tokens/max_docs: stop
     once either is reached (None disables that particular cap) -- both None
     together streams until the source itself is exhausted, only realistic
     for a genuinely bounded request (e.g. one small Glot500 language, or any
     of the parallel sources, which are all comparatively small and finite
-    already). dedup/dedup_*: see common.dedup.Deduplicator and this
+    already). dedup/dedup_*: see common.data.dedup.Deduplicator and this
     module's own DEDUPLICATION docstring section -- max_tokens/max_docs are
     checked against KEPT (post-dedup) counts, so a capped run always ends
     up with that many genuinely distinct tokens/documents, not that many
@@ -248,7 +257,7 @@ def prep_dataset(
     dtype_name = _dtype_for_vocab(adapter.vocab_size)
     dtype = np.uint16 if dtype_name == "uint16" else np.uint32
 
-    if dataset_name in ("fineweb_edu", "olmo_mix"):
+    if dataset_name in ("fineweb_edu", "olmo_mix") or dataset_name in BITEXT_SOURCES:
         stream = stream_groups(dataset_name, config=dataset_config)
     else:
         stream = stream_groups(dataset_name, langs=langs)
@@ -268,7 +277,7 @@ def prep_dataset(
     # cheap, useful invariant to sanity-check this against (see the assert
     # right after the loop). "bytes" is the RAW UTF-8 byte length before
     # tokenization -- together with "tokens" this gives a real
-    # bytes-per-token compression rate (common.metrics.compression_rate) at
+    # bytes-per-token compression rate (common.eval.metrics.compression_rate) at
     # actual pretraining-corpus scale, not just the much smaller sample a
     # systems/ tokenizer's own training-time smoke test measures against.
     lang_counts = defaultdict(lambda: {"docs": 0, "tokens": 0, "bytes": 0})
@@ -400,7 +409,7 @@ def prep_dataset(
     # Gini coefficient over each language's REALIZED token share -- 0 means
     # every language got an equal number of tokens, closer to 1 means a
     # small number of languages dominate the corpus. Same function
-    # (common.metrics.gini_coefficient) every systems/ tokenizer's own
+    # (common.eval.metrics.gini_coefficient) every systems/ tokenizer's own
     # per-language fairness reporting already uses, applied here to the
     # actual pretraining corpus rather than a tokenizer's harvested
     # vocabulary -- a single top-line number for how balanced this specific
@@ -479,22 +488,27 @@ def prep_dataset(
 
 def build_arg_parser():
     parser = argparse.ArgumentParser(
-        description="Tokenize a corpus (common.corpora registry) into packed token shards."
+        description="Tokenize a corpus (common.data.corpora registry) into packed token shards."
     )
     parser.add_argument("--dataset", choices=ALL_SOURCES, required=True)
     parser.add_argument(
         "--langs",
         type=str,
         default=None,
-        help="comma-separated language codes (or 'all' for glot500) -- ignored for "
-        "fineweb_edu/olmo_mix, which use --dataset-config instead; see common.corpora",
+        help="comma-separated language codes (or 'all' for glot500; an arbitrary subset for "
+        "bible_nlp, no default panel) -- ignored for fineweb_edu/olmo_mix and every "
+        "BITEXT_SOURCES entry (ccmatrix/un_pc/europarl/tatoeba_mt), which use "
+        "--dataset-config instead; see common.data.corpora",
     )
     parser.add_argument(
         "--dataset-config",
         type=str,
         default=None,
-        help=f"HF config name, only meaningful for --dataset fineweb_edu (choices: "
-        f"{FINEWEB_EDU_CONFIGS}) or olmo_mix (choices: {OLMO_MIX_CONFIGS})",
+        help=f"HF config name for --dataset fineweb_edu (choices: {FINEWEB_EDU_CONFIGS}) or "
+        f"olmo_mix (choices: {OLMO_MIX_CONFIGS}); a native pair name or 'all' for ccmatrix/"
+        f"un_pc/europarl (see common.data.corpora.list_bitext_configs); a '{{split}}/{{pair-or-"
+        f"all}}' string (e.g. 'test/deu-eng') or bare 'all' for tatoeba_mt (see "
+        f"common.data.corpora.list_tatoeba_mt_pairs)",
     )
     parser.add_argument("--system", choices=ALL_SYSTEMS, required=True)
     parser.add_argument("--checkpoint", type=str, required=True)
@@ -512,13 +526,13 @@ def build_arg_parser():
     parser.add_argument("--shard-size", type=int, default=SHARD_SIZE)
     parser.add_argument(
         "--dedup", action=argparse.BooleanOptionalAction, default=True,
-        help="drop exact/near-duplicate documents before tokenizing (see common.dedup.Deduplicator "
+        help="drop exact/near-duplicate documents before tokenizing (see common.data.dedup.Deduplicator "
         "and this module's own DEDUPLICATION docstring section); --no-dedup disables entirely",
     )
     parser.add_argument("--dedup-near-threshold", type=float, default=0.8, help="MinHash/LSH Jaccard similarity threshold above which a document counts as a near-duplicate")
     parser.add_argument("--dedup-num-perm", type=int, default=128, help="MinHash permutation count -- higher is a more accurate Jaccard estimate at more memory/CPU per document")
     parser.add_argument("--dedup-shingle-size", type=int, default=13, help="word n-gram shingle length for near-dup comparison")
-    parser.add_argument("--dedup-min-words-for-near-dup", type=int, default=50, help="documents shorter than this only get exact-dup checked, not MinHash near-dup (see common/dedup.py's own docstring for why)")
+    parser.add_argument("--dedup-min-words-for-near-dup", type=int, default=50, help="documents shorter than this only get exact-dup checked, not MinHash near-dup (see common/data/dedup.py's own docstring for why)")
     parser.add_argument(
         "--max-doc-bytes", type=int, default=MAX_DOC_BYTES,
         help="truncate each document to at most this many UTF-8 bytes before encoding -- guards "
@@ -550,10 +564,10 @@ def build_arg_parser():
 
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
-    if args.dataset in MONOLINGUAL_SOURCES - {"glot500"} and args.langs:
+    if (args.dataset in MONOLINGUAL_SOURCES - {"glot500"} or args.dataset in BITEXT_SOURCES) and args.langs:
         print(
             f"warning: --langs is ignored for --dataset {args.dataset} "
-            "(single-language source, selected via --dataset-config instead)"
+            "(selected via --dataset-config instead)"
         )
     langs = None
     if args.langs is not None:

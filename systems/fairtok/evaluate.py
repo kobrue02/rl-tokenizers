@@ -4,18 +4,18 @@ Scores a SAVED checkpoint (see fairtok.inference.save_checkpoint -- the file
 --output-dir points training's cli.py at) against a held-out dataset, as opposed to
 fairtok.train.GRPOTrainer.evaluate's periodic in-training eval, which only ever
 scores the live, currently-training policy. Held-out by default means BOUQuET dev
-(common.oldi_data.load_bouquet_dev("all")) -- disjoint from every --data-source
-common.cli_data.load_groups trains on, and loading EVERY language BOUQuET's
+(common.data.oldi_data.load_bouquet_dev("all")) -- disjoint from every --data-source
+common.data.cli_data.load_groups trains on, and loading EVERY language BOUQuET's
 paragraph_level/dev split actually offers (259, not just this project's own
-9-language training panel) -- common.eval_common.evaluate_on_groups already skips
+9-language training panel) -- common.eval.cross_tokenizer.evaluate_on_groups already skips
 languages a given checkpoint has no entry for, so this scores whatever the
 checkpoint covers, out of everything BOUQuET has, with no manual language list
 needed. kas/mni/nqo (3 of the 9-language panel) still aren't in BOUQuET at all --
-see common.oldi_data.load_flores_devtest_fallback for a fallback covering those,
+see common.data.oldi_data.load_flores_devtest_fallback for a fallback covering those,
 not wired in here.
 
 Scoring itself (Rényi efficiency, Gini, compression rate, fertility) is
-common.eval_common.evaluate_on_groups, shared verbatim with magnet/flexitokens/
+common.eval.cross_tokenizer.evaluate_on_groups, shared verbatim with magnet/flexitokens/
 manta's own evaluate.py -- only the checkpoint-loading and boundary-inducing steps
 below are fairtok-specific.
 """
@@ -23,10 +23,10 @@ below are fairtok-specific.
 import argparse
 
 from common.bytes_utils import bytes_to_tensor
-from common.data import make_synthetic_parallel_groups
-from common.eval_common import evaluate_on_groups, report_eval
-from common.oldi_data import load_bouquet_dev, load_bouquet_test
-from common.stability import sequences_by_lang_from_groups
+from common.data.synthetic import make_synthetic_parallel_groups
+from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
+from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
+from common.eval.stability import sequences_by_lang_from_groups
 
 from .inference import load_checkpoint
 from .policy import segment_bytes
@@ -66,7 +66,7 @@ def _load_eval_groups(args):
     if args.eval_data_source == "synthetic":
         return make_synthetic_parallel_groups(args.num_groups or 40)
     # "all": every language BOUQuET covers, not just the 9-language panel --
-    # common.eval_common.evaluate_on_groups already skips languages this
+    # common.eval.cross_tokenizer.evaluate_on_groups already skips languages this
     # checkpoint has no entry for, so this is always safe.
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
     groups = loader("all")

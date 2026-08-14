@@ -14,7 +14,7 @@ import json
 import time
 from pathlib import Path
 
-from common.oldi_data import LANGS
+from common.data.oldi_data import LANGS
 
 from .morphology import MORPH_SOURCES, collect_word_counts, train_morfessor
 

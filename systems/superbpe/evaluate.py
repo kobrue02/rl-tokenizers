@@ -7,10 +7,10 @@ flexitokens/manta, so no extra per-language argument is needed here either.
 
 import argparse
 
-from common.data import make_synthetic_parallel_groups
-from common.eval_common import evaluate_on_groups, report_eval
-from common.oldi_data import load_bouquet_dev, load_bouquet_test
-from common.stability import sequences_by_lang_from_groups
+from common.data.synthetic import make_synthetic_parallel_groups
+from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
+from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
+from common.eval.stability import sequences_by_lang_from_groups
 
 from .inference import load_checkpoint
 from .segment import induce_spans

@@ -7,10 +7,10 @@ argument is needed here either.
 
 import argparse
 
-from common.data import make_synthetic_parallel_groups
-from common.eval_common import evaluate_on_groups, report_eval
-from common.oldi_data import load_bouquet_dev, load_bouquet_test
-from common.stability import sequences_by_lang_from_groups
+from common.data.synthetic import make_synthetic_parallel_groups
+from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
+from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
+from common.eval.stability import sequences_by_lang_from_groups
 
 from .inference import load_checkpoint
 from .segment import induce_spans
@@ -49,7 +49,7 @@ def _load_eval_groups(args):
     if args.eval_data_source == "synthetic":
         return make_synthetic_parallel_groups(args.num_groups or 40)
     # "all": every language BOUQuET covers, not just the 9-language panel --
-    # common.eval_common.evaluate_on_groups already skips languages this
+    # common.eval.cross_tokenizer.evaluate_on_groups already skips languages this
     # checkpoint has no entry for, so this is always safe.
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
     groups = loader("all")

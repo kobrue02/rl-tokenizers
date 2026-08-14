@@ -24,15 +24,15 @@ faked to look like the neural baselines:
 import dataclasses
 from collections import Counter, defaultdict
 
-from common.data import LANG_PROFILES, make_synthetic_parallel_groups
-from common.eval_common import (
+from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
+from common.eval.cross_tokenizer import (
     eval_wandb_log_dict,
     evaluate_on_groups,
     report_eval,
     sample_eval_groups,
 )
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from common.reporting import collapse_stats
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.eval.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
@@ -51,7 +51,7 @@ class SuperBPEConfig(BaseTokenizerConfig):
     # docstring -- JUDGMENT CALL, not a value taken from the paper's single
     # reported best configuration (the paper sweeps this, doesn't fix one).
     max_eval_samples: int = 0  # 0 scores every loaded eval group (see
-    # common.eval_common.sample_eval_groups) -- unlike the neural trainers'
+    # common.eval.cross_tokenizer.sample_eval_groups) -- unlike the neural trainers'
     # periodic in-training checks (small by default since those repeat every
     # epoch), this fires exactly ONCE, so there is no repeated-cost reason to
     # subsample by default; still available as a knob if a very broad
@@ -163,7 +163,7 @@ class SuperBPETrainer(BaseTokenizerTrainer):
 
 
 def _report_smoke_test_metrics(model, token_freq, final_vocab):
-    """Feed the smoke test's induced vocabulary into common.metrics UNMODIFIED,
+    """Feed the smoke test's induced vocabulary into common.eval.metrics UNMODIFIED,
     same as every other tokenizer's own smoke test -- confirms SuperBPE's
     output is a drop-in match for the rest of this project's evaluation
     pipeline."""
@@ -202,7 +202,7 @@ def run_smoke_test():
 
     Expect noticeably WORSE compression numbers here than the neural
     baselines' own smoke tests report on this exact same corpus (confirmed:
-    ~1.0-2.1 here vs. ~3.9 for e.g. FANTA) -- not a bug. common.data's
+    ~1.0-2.1 here vs. ~3.9 for e.g. FANTA) -- not a bug. common.data.synthetic's
     generator gives each SENTENCE its own freshly-randomized 3-byte repeated
     chunk (see make_synthetic_parallel_groups/_gen_sentence), so repetition
     is per-sequence, not corpus-wide. A neural predictor can adapt to

@@ -21,8 +21,8 @@ separate invocations instead.
 import json
 
 from common.config_file import parse_args_with_config
-from common.eval_common import evaluate_on_groups, report_eval
-from common.oldi_data import load_bouquet_dev, load_bouquet_test
+from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
+from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
 from systems.bpe.train import _SMOKE_TEST_GROUPS
 
 from .model import HFFrontierTokenizer
@@ -64,7 +64,7 @@ def build_arg_parser():
         "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
         "reported numbers, not repeated tuning checks; "
         "'synthetic': a small real-text placeholder (reuses systems.bpe.train's own "
-        "_SMOKE_TEST_GROUPS -- NOT common.data's byte generator, which isn't guaranteed "
+        "_SMOKE_TEST_GROUPS -- NOT common.data.synthetic's byte generator, which isn't guaranteed "
         "valid UTF-8), for a quick sanity check with no BOUQuET network access",
     )
     parser.add_argument(

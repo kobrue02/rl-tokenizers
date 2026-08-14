@@ -30,17 +30,17 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from common.eval_common import (
+from common.eval.cross_tokenizer import (
     eval_wandb_log_dict,
     evaluate_on_groups,
     report_eval,
     sample_eval_groups,
 )
-from common.lr_schedule import build_lr_scheduler
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.training.lr_schedule import build_lr_scheduler
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
-from common.parity import compute_lang_parity_ratios
-from common.reporting import collapse_stats
+from common.eval.parity import compute_lang_parity_ratios
+from common.eval.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
@@ -67,10 +67,10 @@ def derive_alpha_beta(
 
     alpha_L (target rate, i.e. `k/N` this language "should" be near): pick one
     anchor language (English by default, matching this project's use of English
-    as the common.oldi_data reporting pivot), and compute alpha_L PROPORTIONAL
+    as the common.data.oldi_data reporting pivot), and compute alpha_L PROPORTIONAL
     to how many bytes this language needs, on average, to say the same thing the
     anchor says -- using the genuinely N-way parallel groups from
-    common.oldi_data (or common.data's synthetic stand-in) directly, since
+    common.data.oldi_data (or common.data.synthetic's synthetic stand-in) directly, since
     "the same content in language L" and "the same content in the anchor" are
     LITERALLY the same dict entry across languages in one group:
 
@@ -79,7 +79,7 @@ def derive_alpha_beta(
 
         alpha_L = clamp(alpha_anchor / ratio_L, alpha_floor, alpha_ceiling)
 
-    ratio_L itself is computed by common.parity.compute_lang_parity_ratios, shared
+    ratio_L itself is computed by common.eval.parity.compute_lang_parity_ratios, shared
     with fairtok.train's own per-language target-rate derivation (same evidence,
     same formula -- see that module for why a single global rate is a fairness
     problem, not just a simplification).
@@ -213,16 +213,16 @@ class FlexiTokensConfig(BaseTokenizerConfig):
     # everything).
 
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
-    # common.lr_schedule.build_lr_scheduler.
+    # common.training.lr_schedule.build_lr_scheduler.
     lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
-    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # "cosine" -- see common.training.lr_schedule.build_lr_scheduler. "linear" matches HF
     # Trainer's own default.
 
 
 class FlexiTokensTrainer(BaseTokenizerTrainer):
     """Shaped after fairtok.train.GRPOTrainer: construct with args + train_groups
-    (a plain list of {lang: text} dicts, see common.oldi_data /
-    common.data.make_synthetic_parallel_groups), call .train(), then read
+    (a plain list of {lang: text} dicts, see common.data.oldi_data /
+    common.data.synthetic.make_synthetic_parallel_groups), call .train(), then read
     .model / .token_freq / .vocab / .alpha_by_lang / .beta_by_lang /
     .loss_history / .rate_history off the instance. train() also returns
     (model, token_freq, final_vocab, info) as a tuple for convenience."""
@@ -457,7 +457,7 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
 
 
 def _print_vocab_metrics(token_freq):
-    """Sanity check requested alongside the smoke test: common.metrics functions,
+    """Sanity check requested alongside the smoke test: common.eval.metrics functions,
     UNMODIFIED, consuming this module's own token_freq output -- confirms
     FlexiTokens' induced vocabulary is a drop-in match for fairtok's existing
     evaluation pipeline, exactly like a fairtok.policy.BytePolicy vocabulary is."""
@@ -471,7 +471,7 @@ def _print_vocab_metrics(token_freq):
         per_lang_renyi[lang] = renyi_efficiency(list(counter.values()))
     gini = gini_coefficient(list(per_lang_renyi.values())) if per_lang_renyi else 0.0
 
-    print("\ncommon.metrics sanity check on the FlexiTokens-induced vocabulary:")
+    print("\ncommon.eval.metrics sanity check on the FlexiTokens-induced vocabulary:")
     for lang in sorted(per_lang_compression):
         print(
             f"  {lang:16s} compression_rate={per_lang_compression[lang]:.3f} bytes/token   "
@@ -483,7 +483,7 @@ def _print_vocab_metrics(token_freq):
 
 def run_smoke_test():
     """Mirrors fairtok.train.run_smoke_test's pattern/gate: a small run on
-    synthetic placeholder data (common.data.make_synthetic_parallel_groups),
+    synthetic placeholder data (common.data.synthetic.make_synthetic_parallel_groups),
     checked for:
       (a) no crash end-to-end,
       (b) loss actually decreasing (late-training average < early-training average),
@@ -492,10 +492,10 @@ def run_smoke_test():
           entire point of the per-language hinge loss is to NOT force every
           language to the same fixed rate, so identical rates across languages
           would mean the hinge loss isn't doing anything distinguishable.
-    Also prints common.metrics (compression_rate, renyi_efficiency,
+    Also prints common.eval.metrics (compression_rate, renyi_efficiency,
     gini_coefficient) on the induced vocabulary as a pipeline-compatibility check.
     """
-    from common.data import LANG_PROFILES, make_synthetic_parallel_groups
+    from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
 
     args = FlexiTokensConfig(
         max_steps=80,

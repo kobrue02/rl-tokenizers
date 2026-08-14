@@ -9,6 +9,7 @@ dependencies = [
     "datasets>=5.0.1",
     "datasketch>=2.0.0",
     "huggingface-hub>=1.27.0",
+    "ijson>=3.5.1",
     "morfessor>=2.0.6",
     "numpy>=2.5.1",
     "pyarrow>=25.0.0",

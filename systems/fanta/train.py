@@ -10,7 +10,7 @@ empirically (an early FANTA run with no anchor collapsed mean_compression_rate t
 ~1.0 -- pure character-level segmentation -- within 10 steps, "satisfying"
 fairness by refusing to compress at all), not just anticipated as a theoretical
 risk. Per-language targets are derived the same way fairtok.train's own
-target_rate_by_lang is: common.parity.compute_lang_parity_ratios, motivated by
+target_rate_by_lang is: common.eval.parity.compute_lang_parity_ratios, motivated by
 "Compute Optimal Tokenization" (Limisiewicz et al. 2026) finding that the
 compute-optimal compression rate is language-dependent, not one global constant.
 
@@ -34,17 +34,17 @@ import torch
 from tqdm.auto import tqdm
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries, truncate_to_max_bytes as _truncate_to_max_bytes
-from common.data import make_synthetic_parallel_groups
-from common.eval_common import (
+from common.data.synthetic import make_synthetic_parallel_groups
+from common.eval.cross_tokenizer import (
     eval_wandb_log_dict,
     evaluate_on_groups,
     report_eval,
     sample_eval_groups,
 )
-from common.lr_schedule import build_lr_scheduler
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from common.parity import compute_lang_parity_ratios
-from common.reporting import avg_span_length, collapse_stats, report_collapse
+from common.training.lr_schedule import build_lr_scheduler
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.eval.parity import compute_lang_parity_ratios
+from common.eval.reporting import avg_span_length, collapse_stats, report_collapse
 from common.vocab import top_k_by_frequency
 
 from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
@@ -124,7 +124,7 @@ class FantaConfig(BaseTokenizerConfig):
     # not because the mechanism is the same.
 
     anchor_lang: str = "eng"  # pivot language for per-language target-rate scaling
-    # (see common.parity.compute_lang_parity_ratios) -- matches
+    # (see common.eval.parity.compute_lang_parity_ratios) -- matches
     # fairtok.train.GRPOConfig/flexitokens.train.FlexiTokensConfig's own field.
     target_rate_anchor: float = 4.0  # target compression rate (bytes/token) for the
     # ANCHOR language specifically; every other language's target is this scaled by
@@ -182,13 +182,13 @@ class FantaConfig(BaseTokenizerConfig):
     # not once at the end (see evaluate.py, which always scores everything).
 
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
-    # common.lr_schedule.build_lr_scheduler. Added specifically because an earlier
+    # common.training.lr_schedule.build_lr_scheduler. Added specifically because an earlier
     # 5-epoch FANTA run with a flat learning rate never reached a stable
     # equilibrium (mean_compression_rate oscillating between ~1x and ~12x its
     # target for the entire run) -- decay is a standard fix for exactly this kind
     # of late-training overshoot.
     lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
-    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # "cosine" -- see common.training.lr_schedule.build_lr_scheduler. "linear" matches HF
     # Trainer's own default.
 
 
@@ -197,7 +197,7 @@ def _build_concat_index(train_groups):
     set of language keys. Groups from the same underlying source share the
     same key set (every oldi_seed row has that source's full ~41-language
     schema, every flores_plus row its own ~212-language schema, every smol
-    row {anchor_lang} + that pair's language -- see common.oldi_data), so this
+    row {anchor_lang} + that pair's language -- see common.data.oldi_data), so this
     cheaply finds "other rows I can pull more per-language text from" without
     needing to know which source a group came from. Built once per training
     run (O(num_groups)), not per step."""
@@ -209,7 +209,7 @@ def _build_concat_index(train_groups):
 
 def _concat_texts(pieces):
     """Joins several same-language texts with a single separator byte/char --
-    bytes if this corpus's raw text is bytes (common.data's synthetic
+    bytes if this corpus's raw text is bytes (common.data.synthetic's synthetic
     placeholder groups), str otherwise (every real oldi_data source)."""
     if len(pieces) == 1:
         return pieces[0]
@@ -529,7 +529,7 @@ class FantaTrainer(BaseTokenizerTrainer):
 
 
 def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace, fairness_loss_trace):
-    """Feed the smoke test's induced vocabulary into common.metrics/common.reporting
+    """Feed the smoke test's induced vocabulary into common.eval.metrics/common.eval.reporting
     UNMODIFIED, same as every other tokenizer's own smoke test does -- confirms
     FANTA's induced vocabulary is a drop-in match for the rest of this project's
     evaluation pipeline."""

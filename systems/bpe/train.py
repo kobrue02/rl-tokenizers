@@ -11,14 +11,14 @@ architecturally the same kind of single-shot corpus-statistics fit).
 import dataclasses
 from collections import Counter, defaultdict
 
-from common.eval_common import (
+from common.eval.cross_tokenizer import (
     eval_wandb_log_dict,
     evaluate_on_groups,
     report_eval,
     sample_eval_groups,
 )
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from common.reporting import collapse_stats
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.eval.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from ..base import BaseTokenizerConfig, BaseTokenizerTrainer
@@ -118,7 +118,7 @@ class BPETrainer(BaseTokenizerTrainer):
 
 
 def _report_smoke_test_metrics(model, token_freq, final_vocab):
-    """Feed the smoke test's induced vocabulary into common.metrics UNMODIFIED,
+    """Feed the smoke test's induced vocabulary into common.eval.metrics UNMODIFIED,
     same as every other tokenizer's own smoke test -- confirms this baseline's
     output is a drop-in match for the rest of this project's evaluation
     pipeline."""
@@ -145,7 +145,7 @@ def _report_smoke_test_metrics(model, token_freq, final_vocab):
     return {"avg_span_len": avg_span_len, "gini": gini}
 
 
-# A small hand-written multilingual corpus, NOT common.data.make_synthetic_
+# A small hand-written multilingual corpus, NOT common.data.synthetic.make_synthetic_
 # parallel_groups (every other package's own smoke-test corpus) -- that
 # generator deliberately produces possibly-invalid-UTF-8 raw bytes (see its
 # own module docstring), which tokenizers' str-based training API cannot
@@ -172,7 +172,7 @@ def run_smoke_test():
     docstring for the same point.
 
     Uses a small real-text corpus (see _SMOKE_TEST_GROUPS above), not
-    common.data's synthetic byte generator every other package's smoke test
+    common.data.synthetic's synthetic byte generator every other package's smoke test
     reuses -- that generator isn't guaranteed valid UTF-8, and this
     package's whole design leans on tokenizers' str-based API directly (see
     model.py's module docstring), which requires genuinely valid text for

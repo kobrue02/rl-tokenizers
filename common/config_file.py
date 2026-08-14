@@ -2,7 +2,7 @@
 point in this repo (all seven systems/*/cli.py, plus pretraining/cli.py,
 data_prep.py, cli_eval.py, cli_generate.py) -- one place to define "how does
 a YAML file override this command's flags", not eleven copies of the same
-logic (same reuse pattern as common/cli_data.py's load_groups).
+logic (same reuse pattern as common/data/cli_data.py's load_groups).
 
 Precedence, low to high: this command's own argparse defaults < the YAML
 file's values < flags passed explicitly on the command line. So

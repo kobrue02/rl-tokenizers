@@ -9,7 +9,7 @@ Usage:
 
 Held-out data defaults to BOUQuET dev (disjoint from every --data-source train.py
 trains on) -- see fairtok/evaluate.py's module docstring for the full rationale and
-common.eval_common for the shared scoring logic every tokenizer's own evaluate.py uses.
+common.eval.cross_tokenizer for the shared scoring logic every tokenizer's own evaluate.py uses.
 """
 
 import importlib

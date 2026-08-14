@@ -1,10 +1,10 @@
-"""Word n-gram shingle extraction, shared by common.dedup (near-duplicate
+"""Word n-gram shingle extraction, shared by common.data.dedup (near-duplicate
 detection WITHIN a pretraining corpus) and pretraining.contamination
 (overlap BETWEEN a pretraining corpus and an eval benchmark's own text) --
 the same underlying primitive ("does this text share unusual substrings
 with that one"), used two different ways: dedup compares corpus documents
 against each other (both sides large, needs MinHash/LSH -- see
-common/dedup.py), contamination compares corpus documents against a small,
+common/data/dedup.py), contamination compares corpus documents against a small,
 fixed benchmark set (small side fits in memory directly -- see
 pretraining/contamination.py).
 """

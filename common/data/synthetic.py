@@ -47,7 +47,7 @@ def make_synthetic_parallel_groups(
     num_groups, langs=None, min_len=20, max_len=60, seed=0
 ):
     """Each group is one "parallel sentence": a dict {lang: byte_seq} -- the same
-    shape real data (common.oldi_data) produces, and the unit any group-relative
+    shape real data (common.data.oldi_data) produces, and the unit any group-relative
     training signal (e.g. fairtok's GRPO baseline) is computed over."""
     rng = random.Random(seed)
     langs = langs or list(LANG_PROFILES)

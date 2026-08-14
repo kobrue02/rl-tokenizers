@@ -15,7 +15,7 @@ scoped this module for the explicit choice to build DDP now and treat FSDP
 as follow-up work, rather than half-build sharding without a multi-GPU
 machine available to verify it on.
 
-Reuses common.lr_schedule.build_lr_scheduler (the same HF-Trainer-style
+Reuses common.training.lr_schedule.build_lr_scheduler (the same HF-Trainer-style
 warmup+decay every systems/ tokenizer trainer already uses) rather than
 reimplementing a second scheduler -- one real piece of shared infrastructure
 between the tokenizer-training and LLM-pretraining halves of this project.
@@ -30,7 +30,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DataLoader
 
-from common.lr_schedule import build_lr_scheduler
+from common.training.lr_schedule import build_lr_scheduler
 
 from .model import TransformerLM
 from .model_configs import get_preset

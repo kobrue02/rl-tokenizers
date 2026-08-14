@@ -10,7 +10,7 @@ Usage:
 This file does NOT merge the four tokenizers' flags into one giant parser -- each
 tokenizer keeps its own dataclass-driven parser (fairtok.cli.build_arg_parser,
 magnet.cli.build_arg_parser, ...), built from ONLY that tokenizer's own Config
-fields (+ the shared common.cli_data data-loading flags). This dispatcher just
+fields (+ the shared common.data.cli_data data-loading flags). This dispatcher just
 picks which one to hand the remaining argv to. The consequence -- and the actual
 point of keeping it this way rather than one merged parser -- is that passing a
 flag that belongs to a DIFFERENT tokenizer is a hard error, not silently accepted:

@@ -8,7 +8,7 @@ architecture below (embed -> pre_layers -> boundary predictor -> downsample ->
 shortened_layers -> upsample -> post_layers -> byte head) is an independent,
 much smaller reimplementation of that paper's design, scaled to this project's
 compute budget -- but the downsample/upsample segment-pooling step itself
-(common.dynamic_pooling) is DIRECTLY REUSED from src/shortening.py (reused with
+(common.training.dynamic_pooling) is DIRECTLY REUSED from src/shortening.py (reused with
 the project owner's explicit authorization; see also flexitokens/model.py,
 which shares the exact same file -- both papers build on the same "dynamic
 pooling" lineage). Everything else (BoundaryPredictor, TransformerBlock, the
@@ -25,7 +25,7 @@ script before calling this):
      up to and including the position in question, never later ones).
   3. `BoundaryPredictor` (one per SCRIPT, not per language -- languages that
      share a script, e.g. arz_Arab/kas_Arab, share one predictor and one target
-     boundary rate; see common.oldi_data.LANG_SCRIPT, which is where the
+     boundary rate; see common.data.oldi_data.LANG_SCRIPT, which is where the
      lang -> script mapping is read from in train.py): a small MLP maps each
      position's hidden state to a boundary logit, sigmoid to a probability, then
      Gumbel-sigmoid (RelaxedBernoulli) reparameterized sampling gives a *soft*
@@ -36,7 +36,7 @@ script before calling this):
          boundary = hard - soft.detach() + soft
      (Bengio et al. 2013's straight-through trick; this is the exact formula the
      cloned reference implementation's BoundaryPredictor.forward uses too.)
-  4. Downsample (common.dynamic_pooling.downsample, ported directly from the
+  4. Downsample (common.training.dynamic_pooling.downsample, ported directly from the
      reference's shortening.py): mean-pool hidden states within each predicted
      segment via a dense, differentiable (B, T, S) assignment matrix built from
      the straight-through boundary tensor -- gradient flows through the pooling
@@ -44,7 +44,7 @@ script before calling this):
      scatter/gather approach (this module's own earlier version) cannot do.
   5. `shortened_layers`: a few more CAUSAL transformer blocks, now over the much
      shorter per-segment sequence.
-  6. Upsample (common.dynamic_pooling.upsample, same file): broadcast each
+  6. Upsample (common.training.dynamic_pooling.upsample, same file): broadcast each
      pooled segment's (post-shortened-layers) representation back out to its
      member byte positions via the same kind of differentiable assignment
      matrix (transposed), one-segment-shifted for causal safety (see below) +
@@ -60,7 +60,7 @@ segment into predicting the byte immediately after its EARLIER positions (e.g.
 if segment = bytes [3,4,5] with a boundary at 5, giving position 3 that
 segment's pooled representation lets it "see" byte 5 when predicting byte 4 --
 a genuine leak, since byte 5 comes after byte 4). The fix, built into
-common.dynamic_pooling.downsample/upsample directly (see the comment there:
+common.training.dynamic_pooling.downsample/upsample directly (see the comment there:
 "segment i's pooled representation is broadcast only to segment i+1's byte
 positions, never its own"), is a one-segment SHIFT: a position receives the
 pooled representation of the most recently *closed* segment strictly before
@@ -110,7 +110,7 @@ the pooling weights too, matching the reference exactly -- see point 4/6 above.)
 import torch
 import torch.nn as nn
 
-from common.dynamic_pooling import downsample, upsample
+from common.training.dynamic_pooling import downsample, upsample
 
 
 class TransformerBlock(nn.Module):
@@ -214,7 +214,7 @@ def _seg_valid_mask(hard_boundaries, valid, num_pooled_slots):
     """Which of downsample()'s (B, S+1) pooled slots are real segments for each
     batch item, vs. padding slots that exist only because ANOTHER sequence in
     this batch needed more segments. Slot 0 (the null segment, see
-    common.dynamic_pooling.downsample) is always real. A batch item's own real
+    common.training.dynamic_pooling.downsample) is always real. A batch item's own real
     segment count is exactly how many boundaries it fired among its REAL (non-
     padding) positions -- segments are filled in order 0..count-1 with no gaps,
     so "slot index < count" is exactly "slot is real" for that item."""

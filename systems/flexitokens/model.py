@@ -7,7 +7,7 @@ originally built as a from-scratch, clean-room reimplementation from the paper's
 prose/equations alone, with the reference repo deliberately never opened. That has
 since changed: the project owner explicitly authorized reusing code from that repo
 (it's public, intended for research reuse), so the downsample/upsample segment-
-pooling step (common.dynamic_pooling) is now DIRECTLY REUSED from the reference's
+pooling step (common.training.dynamic_pooling) is now DIRECTLY REUSED from the reference's
 src/model/shortening.py -- see that module's own docstring. Everything else here
 (BoundaryPredictor, TransformerStage, boundary_hinge_loss, the per-language band
 derivation in train.py) remains this project's own code, derived from the paper's
@@ -42,7 +42,7 @@ Architecture (U-Net-shaped, byte-in / byte-out):
          boundary = hard - soft.detach() + soft
      At inference (`deterministic=True`, see flexitokens/segment.py) no noise is
      sampled at all -- `soft` is just sigmoid(logit), thresholded the same way.
-  4. Downsample (common.dynamic_pooling.downsample, directly reused from the
+  4. Downsample (common.training.dynamic_pooling.downsample, directly reused from the
      reference implementation): mean-pool the "pre" hidden states within each
      predicted segment via a dense, differentiable (B, T, S) assignment matrix
      built from the straight-through boundary tensor via a cumulative sum --
@@ -51,7 +51,7 @@ Architecture (U-Net-shaped, byte-in / byte-out):
      induced spans behave identically whether they came from fairtok's GRU
      policy or this model.
   5. A "mid" stack of causal transformer layers on the pooled (shorter) sequence.
-  6. Upsample (common.dynamic_pooling.upsample, same source): broadcast each
+  6. Upsample (common.training.dynamic_pooling.upsample, same source): broadcast each
      pooled segment's representation back out to every byte position that
      segment covers, one-segment-shifted for causal safety (see that module's
      docstring), add it as a residual to the ORIGINAL "pre" hidden state (so
@@ -91,7 +91,7 @@ predictor's weights, not just through `boundary_hinge_loss`'s direct use of
 `boundaries`. Both channels shape boundary placement now. (An earlier version of
 this file hardened boundaries into integer scatter/gather indices, which severed
 the pooling-gradient channel and left the hinge loss as the only path -- see
-common.dynamic_pooling's own docstring for why the direct-reuse version doesn't
+common.training.dynamic_pooling's own docstring for why the direct-reuse version doesn't
 have that limitation.)
 """
 
@@ -100,7 +100,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.relaxed_bernoulli import RelaxedBernoulli
 
-from common.dynamic_pooling import downsample, upsample
+from common.training.dynamic_pooling import downsample, upsample
 
 BYTE_VOCAB_SIZE = 256
 
@@ -287,7 +287,7 @@ class FlexiTokensModel(nn.Module):
         )
         self.boundary_predictor = BoundaryPredictor(d_model)
         self.null_group = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)  # segment-0
-        # placeholder for common.dynamic_pooling.downsample/upsample -- see that
+        # placeholder for common.training.dynamic_pooling.downsample/upsample -- see that
         # module's docstring for why upsample needs something to feed the first
         # real segment's own byte positions with, causally.
         self.mid = TransformerStage(

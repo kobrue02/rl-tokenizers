@@ -5,7 +5,7 @@ a fast/Rust-backed tokenizer -- see model.py's own docstring), loaded
 TOKENIZER-ONLY (confirmed directly: AutoTokenizer.from_pretrained never
 requests a repo's model weight files), so a real frontier model's own
 tokenizer can be scored on IDENTICAL held-out data (BOUQuET) with the SAME
-fairness/efficiency metrics (common.eval_common) every from-scratch
+fairness/efficiency metrics (common.eval.cross_tokenizer) every from-scratch
 tokenizer in systems/ already reports -- a direct, apples-to-apples
 comparison against fairtok/magnet/flexitokens/manta/fanta/superbpe/bpe, not
 a separate benchmark.

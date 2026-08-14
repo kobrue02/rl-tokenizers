@@ -47,9 +47,9 @@ class BaseTokenizerConfig:
 
 class BaseTokenizerTrainer(ABC):
     """Construct with args + train_groups (a list of dicts {lang: text}, the
-    shape every data loader in common.oldi_data/common.data produces) and
+    shape every data loader in common.data.oldi_data/common.data.synthetic produces) and
     optionally eval_groups (BOUQuET dev, or None to skip held-out checks
-    during/after fitting -- see common.cli_data.load_bouquet_dev_for_training).
+    during/after fitting -- see common.data.cli_data.load_bouquet_dev_for_training).
     Call .train(), then read .model / .token_freq / .vocab off the instance --
     every subclass's own train() must set these three attributes and return
     them as a (model, token_freq, vocab) tuple, the convention every system's

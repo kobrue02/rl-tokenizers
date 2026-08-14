@@ -1,5 +1,5 @@
 """Command-line entry point for pretraining.contamination: checks whether a
-common.corpora source (the SAME registry pretraining.data_prep tokenizes)
+common.data.corpora source (the SAME registry pretraining.data_prep tokenizes)
 shares n-gram text spans with a pretraining.benchmarks eval benchmark's own
 examples -- see pretraining/contamination.py's own module docstring for the
 detection approach, and pretraining/benchmarks.py's CONTAMINATION section
@@ -31,7 +31,14 @@ import argparse
 import json
 
 from common.config_file import parse_args_with_config
-from common.corpora import ALL_SOURCES, FINEWEB_EDU_CONFIGS, MONOLINGUAL_SOURCES, OLMO_MIX_CONFIGS, stream_groups
+from common.data.corpora import (
+    ALL_SOURCES,
+    BITEXT_SOURCES,
+    FINEWEB_EDU_CONFIGS,
+    MONOLINGUAL_SOURCES,
+    OLMO_MIX_CONFIGS,
+    stream_groups,
+)
 
 from . import benchmarks
 from .contamination import build_benchmark_shingle_index, scan_texts_for_contamination, summarize_contamination
@@ -47,7 +54,7 @@ _BENCHMARK_TEXT_FIELDS = {
 
 
 def _corpus_text_iter(corpus_dataset, corpus_langs, corpus_dataset_config, max_corpus_docs):
-    if corpus_dataset in ("fineweb_edu", "olmo_mix"):
+    if corpus_dataset in ("fineweb_edu", "olmo_mix") or corpus_dataset in BITEXT_SOURCES:
         stream = stream_groups(corpus_dataset, config=corpus_dataset_config)
     else:
         stream = stream_groups(corpus_dataset, langs=corpus_langs)
@@ -76,7 +83,7 @@ def run_contamination_check(
     text_fields_fn: see pretraining.contamination.build_benchmark_shingle_index.
     corpus_dataset/corpus_langs/corpus_dataset_config: same meaning as
     pretraining.data_prep's own --dataset/--langs/--dataset-config, since
-    this streams from the exact same common.corpora.stream_groups. Returns
+    this streams from the exact same common.data.corpora.stream_groups. Returns
     pretraining.contamination.summarize_contamination's own dict shape."""
     examples = list(examples)
     index = build_benchmark_shingle_index(examples, text_fields_fn, n=ngram_size)
@@ -101,13 +108,17 @@ def build_arg_parser():
     parser.add_argument("--corpus-dataset", choices=ALL_SOURCES, required=True)
     parser.add_argument(
         "--corpus-langs", type=str, default=None,
-        help="comma-separated language codes (or 'all' for glot500) -- ignored for fineweb_edu/olmo_mix, "
-        "which use --corpus-dataset-config instead; see common.corpora",
+        help="comma-separated language codes (or 'all' for glot500; an arbitrary subset for "
+        "bible_nlp) -- ignored for fineweb_edu/olmo_mix and every BITEXT_SOURCES entry "
+        "(ccmatrix/un_pc/europarl/tatoeba_mt), which use --corpus-dataset-config instead; "
+        "see common.data.corpora",
     )
     parser.add_argument(
         "--corpus-dataset-config", type=str, default=None,
-        help=f"HF config name, only meaningful for --corpus-dataset fineweb_edu (choices: "
-        f"{FINEWEB_EDU_CONFIGS}) or olmo_mix (choices: {OLMO_MIX_CONFIGS})",
+        help=f"HF config name for --corpus-dataset fineweb_edu (choices: {FINEWEB_EDU_CONFIGS}) or "
+        f"olmo_mix (choices: {OLMO_MIX_CONFIGS}); a native pair name or 'all' for ccmatrix/un_pc/"
+        f"europarl; a '{{split}}/{{pair-or-all}}' string or bare 'all' for tatoeba_mt -- see "
+        f"common.data.corpora.list_bitext_configs/list_tatoeba_mt_pairs",
     )
     parser.add_argument("--ngram-size", type=int, default=13)
     parser.add_argument(
@@ -129,10 +140,12 @@ def build_arg_parser():
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
 
-    if args.corpus_dataset in MONOLINGUAL_SOURCES - {"glot500"} and args.corpus_langs:
+    if (
+        args.corpus_dataset in MONOLINGUAL_SOURCES - {"glot500"} or args.corpus_dataset in BITEXT_SOURCES
+    ) and args.corpus_langs:
         print(
             f"warning: --corpus-langs is ignored for --corpus-dataset {args.corpus_dataset} "
-            "(single-language source, selected via --corpus-dataset-config instead)"
+            "(selected via --corpus-dataset-config instead)"
         )
     corpus_langs = None
     if args.corpus_langs is not None:
@@ -221,7 +234,7 @@ def run_smoke_test():
     unlike a real --corpus-dataset/--benchmark run) -- confirms a
     genuinely shared long span IS detected and an unrelated document is
     NOT flagged, at a small ngram_size so short synthetic sentences still
-    produce meaningful shingles (see common/dedup.py's own docstring for
+    produce meaningful shingles (see common/data/dedup.py's own docstring for
     why shingle_size interacts with document length this way)."""
     from .benchmarks import MultipleChoiceExample
 

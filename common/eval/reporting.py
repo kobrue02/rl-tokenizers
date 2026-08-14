@@ -28,9 +28,9 @@ def report_collapse(token_freq, final_vocab):
 def word_count(text):
     # str.split()/bytes.split() both split on whitespace with no args -- using
     # bytes.split() directly (rather than decoding first) means this works
-    # unchanged on common.data's synthetic placeholder corpus, whose "sentences"
+    # unchanged on common.data.synthetic's synthetic placeholder corpus, whose "sentences"
     # are raw random bytes and not guaranteed to be valid UTF-8. Public (not
-    # underscore-prefixed) since common.eval_common's held-out evaluator reuses
+    # underscore-prefixed) since common.eval.cross_tokenizer's held-out evaluator reuses
     # it too, not just fertility_by_lang below.
     if isinstance(text, str):
         return len(text.split())
@@ -38,14 +38,14 @@ def word_count(text):
 
 
 def fertility_by_lang(token_freq, train_groups):
-    """Per-language fertility (see common.metrics.fertility): total tokens emitted for
+    """Per-language fertility (see common.eval.metrics.fertility): total tokens emitted for
     that language (sum of token_freq[lang]'s span counts) divided by total words in
     that language's raw training text (whitespace-split word count over every group's
     text for that language) -- both aggregated over the WHOLE corpus, not averaged
     per-sentence, matching how the tokenizer-fairness literature reports it. Reuses
     token_freq/train_groups already available at every tokenizer's post-training
     reporting call site -- no re-tokenization needed."""
-    from common.metrics import fertility
+    from common.eval.metrics import fertility
 
     word_counts = defaultdict(int)
     for group in train_groups:

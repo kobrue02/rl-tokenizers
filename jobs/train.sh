@@ -20,7 +20,7 @@
 # All train.py fairtok / fairtok.cli flags are forwarded directly -- see
 # `python train.py fairtok --help`.
 #
-# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/oldi_data.py).
+# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/data/oldi_data.py).
 # If you've already run `huggingface-cli login` on this cluster (not just your laptop --
 # the token lives in $HOME on whichever machine you logged in on), that's picked up
 # automatically below. Otherwise export HF_TOKEN before submitting:

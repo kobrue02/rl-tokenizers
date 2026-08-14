@@ -9,12 +9,12 @@ Two layers, run in order for every document (see Deduplicator.is_duplicate):
   1. EXACT dedup: a hash of the document's normalized (lowercased,
      whitespace-collapsed) full text, checked against a set of every hash
      seen so far. Catches verbatim repeats -- the same page scraped twice,
-     a sentence duplicated across two of common.corpora's sources. Cheap
+     a sentence duplicated across two of common.data.corpora's sources. Cheap
      (one hash + one set lookup) and applied to EVERY document regardless
      of length.
 
   2. NEAR dedup: MinHash (datasketch) over word shingles (see
-     common/text_shingles.py) + LSH banding for approximate Jaccard
+     common/data/text_shingles.py) + LSH banding for approximate Jaccard
      similarity, at a tractable cost -- computing true pairwise Jaccard
      similarity between every pair of documents is O(corpus_size^2) and not
      feasible at real corpus scale; LSH (Broder 1997) is the standard way

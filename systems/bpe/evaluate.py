@@ -8,9 +8,9 @@ either.
 
 import argparse
 
-from common.eval_common import evaluate_on_groups, report_eval
-from common.oldi_data import load_bouquet_dev, load_bouquet_test
-from common.stability import sequences_by_lang_from_groups
+from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
+from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
+from common.eval.stability import sequences_by_lang_from_groups
 
 from .inference import load_checkpoint
 from .segment import induce_spans
@@ -34,7 +34,7 @@ def build_arg_parser():
         help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
         "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
         "reported numbers, not repeated tuning checks; "
-        "'synthetic': a small real-text placeholder (NOT common.data's byte generator -- "
+        "'synthetic': a small real-text placeholder (NOT common.data.synthetic's byte generator -- "
         "see bpe/train.py's module docstring), for a quick sanity check with no network access",
     )
     parser.add_argument(

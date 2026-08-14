@@ -293,6 +293,6 @@ class SuperBPEModel:
         return bpe_encode(list(_to_bytes(raw)), self._merge_info)
 
     def encode_spans(self, raw):
-        """str/bytes -> list[bytes] spans -- what common.eval_common/common.vocab
+        """str/bytes -> list[bytes] spans -- what common.eval.cross_tokenizer/common.vocab
         expect from every tokenizer's induce_spans (see segment.py)."""
         return [self.id_to_bytes[i] for i in self.encode_ids(raw)]

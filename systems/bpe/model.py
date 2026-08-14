@@ -42,7 +42,7 @@ def _to_str(text):
     # leaning on tokenizers' str-based API directly (see module docstring),
     # not a bug to work around. Every REAL text source in this project
     # (oldi_seed/flores_plus/smol/bouquet) is genuinely valid UTF-8 already,
-    # so this only ever matters for common.data's synthetic placeholder
+    # so this only ever matters for common.data.synthetic's synthetic placeholder
     # corpus, which deliberately generates possibly-invalid-UTF-8 bytes --
     # this package's own smoke test therefore uses a small real-text corpus
     # instead of that generator (see train.py's run_smoke_test).
@@ -89,7 +89,7 @@ class BPEModel:
         return self.tokenizer.get_vocab_size()
 
     def encode_spans(self, raw):
-        """str/bytes -> list[bytes] spans -- what common.eval_common/common.vocab
+        """str/bytes -> list[bytes] spans -- what common.eval.cross_tokenizer/common.vocab
         expect from every tokenizer's induce_spans (see segment.py)."""
         encoding = self.tokenizer.encode(_to_str(raw), add_special_tokens=False)
         return [_token_to_bytes(tok) for tok in encoding.tokens]

@@ -182,7 +182,7 @@ def _load_bouquet_split(split, langs):
     distinction matters and is deliberate: training's fairness loss terms
     (fanta.model.fairness_loss, rate_anchor_loss, flexitokens' boundary_hinge_loss)
     compare languages' compression rates WITHIN one forward pass, which needs a
-    group's languages to be genuinely aligned parallel content. common.eval_common.
+    group's languages to be genuinely aligned parallel content. common.eval.cross_tokenizer.
     evaluate_on_groups has no such requirement -- it accumulates each language's
     stats independently across every group containing that language, the same
     way macro-averaged metrics don't require every class to appear in every
@@ -206,7 +206,7 @@ def _load_bouquet_split(split, langs):
     langs="all" discovers and loads every language BOUQuET actually offers for
     this split, keyed by its full lang_Script stem -- same "all" convention
     _load_ngram_parallel (load_oldi_seed/load_flores_plus) already uses.
-    common.eval_common's evaluate_on_groups already skips languages a given
+    common.eval.cross_tokenizer's evaluate_on_groups already skips languages a given
     checkpoint has no entry for, so passing "all" here is always safe.
     """
     import pyarrow.parquet as pq

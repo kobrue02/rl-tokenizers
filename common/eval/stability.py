@@ -24,12 +24,12 @@ from collections import defaultdict
 
 import numpy as np
 
-from common.metrics import boundary_stability
+from common.eval.metrics import boundary_stability
 
 
 def sequences_by_lang_from_groups(train_groups):
     """{lang: [text, text, ...]} pooled across every group -- the same raw text
-    common.parity.compute_lang_parity_ratios reads, just regrouped by language
+    common.eval.parity.compute_lang_parity_ratios reads, just regrouped by language
     instead of by group."""
     sequences_by_lang = defaultdict(list)
     for group in train_groups:
@@ -60,7 +60,7 @@ def sequence_stability(induce_spans_fn, text, rng, delete_frac=0.1):
     """induce_spans_fn: bytes -> list[bytes] spans, already bound by the caller to a
     specific model (+ script/language, if that tokenizer's own induce_spans needs
     one). text: str/bytes for ONE sentence. Returns a single stability score in [0, 1]
-    (see common.metrics.boundary_stability) for that one sequence -- average over many
+    (see common.eval.metrics.boundary_stability) for that one sequence -- average over many
     sequences per language (see stability_by_lang) for a stable per-language reading."""
     original = text.encode("utf-8") if isinstance(text, str) else bytes(text)
     spans_before = induce_spans_fn(original)

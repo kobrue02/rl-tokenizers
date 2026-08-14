@@ -11,7 +11,7 @@ FANTA adds:
      is penalized directly during backprop.
   2. A per-language rate ANCHOR (rate_anchor_loss below) -- pulls each language's
      rate toward its own target, derived the same way fairtok's
-     target_rate_by_lang is (common.parity.compute_lang_parity_ratios), rather
+     target_rate_by_lang is (common.eval.parity.compute_lang_parity_ratios), rather
      than a single global target. This exists because term 1 alone has a
      degenerate solution: every language compressing equally BADLY (all
      collapsed toward ~1 byte/token) also has Gini~=0. Confirmed empirically,
@@ -46,7 +46,7 @@ from systems.manta.model import MantaModel, next_byte_loss  # noqa: F401 -- re-e
 
 
 def differentiable_gini(values):
-    """Differentiable torch port of common.metrics.gini_coefficient's exact closed
+    """Differentiable torch port of common.eval.metrics.gini_coefficient's exact closed
     form (sort + weighted sum) -- that numpy version is fine for periodic
     REPORTING (fairtok's fairness scalar, vocab-stat summaries), but numpy ops
     detach from autograd, so it can't be used inside a loss. `values`: a 1-D torch
@@ -80,11 +80,11 @@ def per_lang_compression_rate(langs, lengths, output, eps=1e-6):
     flow from here back into the frontier predictor.
 
     Returns dict[lang -> 0-d tensor], one differentiable mean compression rate
-    (bytes/expected-block, common.metrics.compression_rate's exact quantity) per
+    (bytes/expected-block, common.eval.metrics.compression_rate's exact quantity) per
     language present in this batch, averaged over however many of that language's
     sequences this batch happened to include.
 
-    Deliberately NOT common.metrics.compression_rate itself: that function's
+    Deliberately NOT common.eval.metrics.compression_rate itself: that function's
     `if num_tokens <= 0` guard assumes a scalar, and raises on a multi-element
     tensor ("the truth value of a tensor with more than one element is
     ambiguous") -- the batched elementwise version here is the vectorized
@@ -122,7 +122,7 @@ def rate_anchor_loss(per_lang_rate, target_rate_by_lang, eps=1e-6):
     rate this batch (per_lang_rate, from fairness_loss/per_lang_compression_rate
     above -- NOT recomputed here) toward that language's own target
     (target_rate_by_lang, derived once at the start of training by
-    fanta.train.FantaTrainer.train via common.parity.compute_lang_parity_ratios
+    fanta.train.FantaTrainer.train via common.eval.parity.compute_lang_parity_ratios
     -- the exact same per-language-target mechanism fairtok.train's
     target_rate_by_lang uses, motivated by the same finding: "Compute Optimal
     Tokenization" (Limisiewicz et al. 2026) shows the compute-optimal

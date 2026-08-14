@@ -1,6 +1,6 @@
 """Loads an arbitrary HuggingFace repo's tokenizer (TOKENIZER ONLY -- see
 HFFrontierTokenizer.load's own docstring) and reconstructs exact BYTE spans
-from it, so it can plug into common.eval_common.evaluate_on_groups exactly
+from it, so it can plug into common.eval.cross_tokenizer.evaluate_on_groups exactly
 like every other systems/*/segment.py's own induce_spans.
 
 SPAN RECONSTRUCTION is the real substance of this module. A frontier
@@ -129,7 +129,7 @@ class HFFrontierTokenizer:
     """Construct via .load(repo_id), not directly. .induce_spans(raw) ->
     list[bytes], the same shape every other systems/*/segment.py's own
     induce_spans returns -- plugs directly into
-    common.eval_common.evaluate_on_groups."""
+    common.eval.cross_tokenizer.evaluate_on_groups."""
 
     def __init__(self, tokenizer, span_method):
         self.tokenizer = tokenizer

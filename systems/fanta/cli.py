@@ -1,6 +1,6 @@
 """Command-line entry point for FantaTrainer, mirroring manta/cli.py's shape:
 every FantaConfig field becomes a `--flag`, generated from the dataclass itself.
-Real-data loading is NOT reimplemented here -- common.cli_data.load_groups already
+Real-data loading is NOT reimplemented here -- common.data.cli_data.load_groups already
 does exactly what's needed, and is shared verbatim by every tokenizer's CLI in this
 repo (fairtok, magnet, flexitokens, manta, fanta).
 """
@@ -8,15 +8,15 @@ repo (fairtok, magnet, flexitokens, manta, fanta).
 import argparse
 import dataclasses
 
-from common.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
+from common.data.cli_data import DATA_SOURCES, load_bouquet_dev_for_training, load_groups
 from common.config_file import parse_args_with_config
-from common.reporting import (
+from common.eval.reporting import (
     fertility_by_lang,
     report_collapse,
     report_fertility,
     report_stability,
 )
-from common.stability import sequences_by_lang_from_groups, stability_by_lang
+from common.eval.stability import sequences_by_lang_from_groups, stability_by_lang
 from common.vocab import save_vocab_json, save_vocab_stats, vocab_with_stats
 
 from .segment import induce_spans

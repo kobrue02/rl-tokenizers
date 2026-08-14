@@ -1,6 +1,6 @@
 """Cross-lingual byte-length parity: how many bytes a language needs, on average, to
 say the same thing an anchor language (English by default) says, computed directly
-from genuinely parallel groups (common.oldi_data's loaders, or any other {lang: text}
+from genuinely parallel groups (common.data.oldi_data's loaders, or any other {lang: text}
 dict list sharing content across languages).
 
 Extracted from flexitokens.train.derive_alpha_beta, which was the first place this
@@ -23,7 +23,7 @@ def _byte_len(text):
 def _short_code(lang):
     """'eng_Latn' -> 'eng', 'apc_Arab_nort3139' -> 'apc', 'eng' -> 'eng'. Language
     keys in this project come in two conventions depending on data source (see
-    common.oldi_data._load_ngram_parallel's docstring): a bare ISO code (smol,
+    common.data.oldi_data._load_ngram_parallel's docstring): a bare ISO code (smol,
     and every curated fixed-langs load) or a full lang_Script[_variant] stem
     (oldi_seed/flores_plus under langs="all"). Splitting on the first
     underscore recovers the ISO code either way, since stems always start with
@@ -34,7 +34,7 @@ def _short_code(lang):
 def _find_anchor_key(group, anchor_lang):
     """Returns whichever key in `group` represents `anchor_lang`, checking an
     exact match first, then a short-code match (see _short_code) -- needed
-    because a single pooled train_groups list (common.oldi_data.
+    because a single pooled train_groups list (common.data.oldi_data.
     load_all_training_groups under langs="all") mixes groups keyed by bare
     code with groups keyed by full stem, and a single group only ever uses
     ONE of the two conventions. Returns None if `anchor_lang` isn't present

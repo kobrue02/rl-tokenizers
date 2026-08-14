@@ -48,11 +48,11 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
-from common.data import LANG_PROFILES, make_synthetic_parallel_groups
-from common.lr_schedule import build_lr_scheduler
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from common.parity import compute_lang_parity_ratios
-from common.reporting import avg_span_length, collapse_stats, report_collapse
+from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
+from common.training.lr_schedule import build_lr_scheduler
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.eval.parity import compute_lang_parity_ratios
+from common.eval.reporting import avg_span_length, collapse_stats, report_collapse
 from common.vocab import top_k_by_frequency, vocab_churn, vocab_snapshot_stats
 
 from .baseline_bpe import encode_with_merges, train_byte_bpe
@@ -116,9 +116,9 @@ class GRPOConfig(BaseTokenizerConfig):
     vocab_size: int = 512
     learning_rate: float = 3e-3
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
-    # common.lr_schedule.build_lr_scheduler.
+    # common.training.lr_schedule.build_lr_scheduler.
     lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
-    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # "cosine" -- see common.training.lr_schedule.build_lr_scheduler. "linear" matches HF
     # Trainer's own default.
     seed: int = 0
     bpe_sample_groups: int = 300  # groups sampled for the plain-BPE target-rate anchor
@@ -132,7 +132,7 @@ class GRPOConfig(BaseTokenizerConfig):
     anchor_lang: str = "eng"  # pivot language for per-language target-rate scaling
     # (see compute_lang_parity_ratios below) -- matches flexitokens.train.FlexiTokensConfig's
     # own anchor_lang field/default, and this project's use of English as the
-    # common.oldi_data reporting pivot elsewhere. _plain_bpe_target_rate's single
+    # common.data.oldi_data reporting pivot elsewhere. _plain_bpe_target_rate's single
     # global target_rate is still computed exactly as before and used as the ANCHOR's
     # own rate; every other language's target_rate_by_lang entry is that anchor rate
     # scaled by its own parity ratio, per "Compute Optimal Tokenization" (Limisiewicz
@@ -334,7 +334,7 @@ class GRPOTrainer(BaseTokenizerTrainer):
     list either way -- evaluate() doesn't need DataLoader (no per-group rotation state
     to carry across calls; it just scores every language in every selected group once).
     Languages are read per-group (group.keys()), not from a fixed global list, since
-    different sources can contribute differently-sized groups (see common.oldi_data).
+    different sources can contribute differently-sized groups (see common.data.oldi_data).
     eval_dataset, if given, is scored by .evaluate() at every epoch boundary
     during .train() (see that method) -- held out, never trained on.
     """
@@ -490,7 +490,7 @@ class GRPOTrainer(BaseTokenizerTrainer):
         # (measured on the anchor language's own text, once parity-scaled below); every
         # other language's entry in target_rate_by_lang is that anchor rate times its
         # own byte-length parity ratio vs the anchor (see GRPOConfig.anchor_lang's
-        # comment for the rationale, and common.parity.compute_lang_parity_ratios for
+        # comment for the rationale, and common.eval.parity.compute_lang_parity_ratios for
         # the ratio formula -- the same one flexitokens.train.derive_alpha_beta already
         # uses for its own per-language alpha_L). A language with no evidence of a
         # disparity (ratio ~= 1.0, e.g. never paired with the anchor in any group, or
@@ -1005,7 +1005,7 @@ def run_real_smoke_test(num_groups=60):
     confirms real UTF-8 multi-byte text flows through the whole pipeline correctly.
     Not a full training run: oldi_seed alone has 6193 groups, plus 562 from smol and
     6193 from flores_plus dev -- scaling this up is a separate, much longer run."""
-    from common.oldi_data import load_oldi_seed
+    from common.data.oldi_data import load_oldi_seed
 
     args = GRPOConfig(
         max_steps=60,

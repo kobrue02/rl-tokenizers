@@ -1,7 +1,7 @@
 """Downstream evaluation benchmark registry: XNLI, XCOPA, FLORES (MT) -- the
 three named in scope for evaluating a PRETRAINED model (pretraining.train),
 as opposed to everything else in this repo, which evaluates a TOKENIZER's
-own intrinsic quality (common.eval_common) or fits one (systems/, this
+own intrinsic quality (common.eval.cross_tokenizer) or fits one (systems/, this
 package's own data_prep.py). Schemas confirmed directly against each source
 before writing this (not assumed):
 
@@ -17,7 +17,7 @@ before writing this (not assumed):
     qu/sw/ta/th/tr/vi/zh) plus "translation-X" machine-translated variants
     (not used here). Row: {premise, choice1, choice2, question ('cause' or
     'effect'), label (0 or 1, index of the correct choice)}.
-  - FLORES (MT): reuses common.oldi_data.load_flores_plus directly rather
+  - FLORES (MT): reuses common.data.oldi_data.load_flores_plus directly rather
     than a separate loader -- flores_plus is already integrated in this
     project (systems/ tokenizer training also draws on it). load_flores_mt
     calls it with langs="all" (not a short list), which VERIFIED LIVE
@@ -31,7 +31,7 @@ before writing this (not assumed):
     any of flores_plus's own lang_Script stems (e.g. "deu_Latn"), plus (for
     backward compatibility with this project's other 9-language-panel
     tooling -- oldi_seed/smol/BOUQuET) the short codes from
-    common.oldi_data.LANG_SCRIPT, auto-resolved to their full stem.
+    common.data.oldi_data.LANG_SCRIPT, auto-resolved to their full stem.
     split="devtest" (confirmed to exist as its own top-level split,
     distinct from "dev") is the standard FLORES held-out MT evaluation
     split -- "dev" is what systems/ tokenizer training itself already
@@ -53,7 +53,7 @@ faithful multilingual prompting. Swap in real localized templates via
 PROMPT_OVERRIDES before running a non-English XNLI/XCOPA eval that matters.
 
 CONTAMINATION: checked, not just described, via pretraining.cli_contamination
--- an n-gram text-overlap scan between any common.corpora source (the SAME
+-- an n-gram text-overlap scan between any common.data.corpora source (the SAME
 sources a pretraining run actually trains on) and any of these three
 benchmarks' own examples (see pretraining/contamination.py for the
 detection approach: shingle the small benchmark side into an index, stream
@@ -73,7 +73,7 @@ import dataclasses
 
 import datasets as hf_datasets
 
-from common.oldi_data import LANG_SCRIPT, load_flores_plus
+from common.data.oldi_data import LANG_SCRIPT, load_flores_plus
 
 XNLI_LANGS = ["ar", "bg", "de", "el", "en", "es", "fr", "hi", "ru", "sw", "th", "tr", "ur", "vi", "zh"]
 XCOPA_LANGS = ["et", "ht", "id", "it", "qu", "sw", "ta", "th", "tr", "vi", "zh"]
@@ -140,7 +140,7 @@ def _xcopa_template(lang, premise, choice1, choice2, question):
 
 def _round_robin(iterables):
     """Cycles through `iterables` one item at a time, dropping any that
-    exhaust, until all are exhausted -- the SAME fix common.corpora.
+    exhaust, until all are exhausted -- the SAME fix common.data.corpora.
     _round_robin applies for Glot500 (see that module's docstring for the
     original incident): every loader below feeds one dataset/language PER
     ITEM lazily, in sequence, so a caller that applies a global cap (like
@@ -196,7 +196,7 @@ def load_xcopa(langs=None, split="test"):
 
 def _resolve_flores_lang(code):
     """Accepts either a short code from this project's own 9-language panel
-    (resolved via common.oldi_data.LANG_SCRIPT, e.g. "eng" -> "eng_Latn" --
+    (resolved via common.data.oldi_data.LANG_SCRIPT, e.g. "eng" -> "eng_Latn" --
     kept for backward compatibility with the rest of this project's
     9-language-panel tooling: oldi_seed/smol/BOUQuET) or a full lang_Script
     stem directly (e.g. "deu_Latn") -- any of flores_plus's ~227 native
@@ -219,7 +219,7 @@ def load_flores_mt(lang_pairs, split="devtest"):
     maps the 9-language short-code panel), and cheaper than the old
     per-pair-reload design once more than one pair is requested for the
     same split. flores_plus's own per-language files are cached locally
-    after the first download (see common.oldi_data._download), so repeated
+    after the first download (see common.data.oldi_data._download), so repeated
     calls don't re-download. Pairs are interleaved round-robin (see
     _round_robin) for the same reason load_xnli/load_xcopa are -- a global
     --max-examples cap should sample every requested pair, not just the

@@ -24,7 +24,7 @@
 # All train.py flexitokens / flexitokens.cli flags are forwarded directly -- see
 # `python train.py flexitokens --help`.
 #
-# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/oldi_data.py,
+# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/data/oldi_data.py,
 # reused here for data loading). Same HF_TOKEN handling as jobs/train.sh -- see below.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster

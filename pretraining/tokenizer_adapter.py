@@ -102,7 +102,7 @@ class _MagnetScriptResolver:
             return self.default
         # Accept either a bare script ("Latn") or a lang_Script stem
         # ("eng_Latn") -- same short-code/full-stem duality every real data
-        # source in this project already produces (see common.oldi_data).
+        # source in this project already produces (see common.data.oldi_data).
         script = lang.rsplit("_", 1)[-1] if "_" in lang else lang
         if script in self.available:
             return script

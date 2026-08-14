@@ -12,7 +12,7 @@ which reports fertility rather than an entropy-based measure.
 Boundary stability: adapted from "Proxy Compression for Language Modeling" (Zheng et
 al. 2026)'s "compressor stability" diagnostic (Sec 3.4) -- there used to explain why
 gzip-compressed training proxies fail to transfer while tokenizer/neural-compressor
-proxies succeed; repurposed here as a per-language fairness check (see common.stability).
+proxies succeed; repurposed here as a per-language fairness check (see common.eval.stability).
 """
 
 import numpy as np
@@ -79,7 +79,7 @@ def boundary_stability(spans_before, spans_after):
     byte-string spans, e.g. from common.bytes_utils.spans_from_boundaries) -- 1.0 means
     an input perturbation left the induced segmentation completely unchanged, 0.0 means
     maximally different. See module docstring for where this is adapted from, and
-    common.stability for the perturb-and-compare machinery that produces
+    common.eval.stability for the perturb-and-compare machinery that produces
     spans_before/spans_after in the first place.
 
     Treats each span as one atomic symbol (two spans are "equal" iff their bytes are

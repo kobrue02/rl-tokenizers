@@ -2,17 +2,17 @@
 
 Runs any trained tokenizer's own existing boundary/span-inducing entry point
 (fairtok.policy.segment_bytes, magnet/flexitokens/manta.segment.induce_spans) over a
-held-out parallel corpus (BOUQuET dev by default -- see common.oldi_data.
+held-out parallel corpus (BOUQuET dev by default -- see common.data.oldi_data.
 load_bouquet_dev, and fairtok/cli.py's _load_eval_groups docstring for why BOUQuET is
 kept disjoint from every training --data-source) and reports the same fairness/
-efficiency metrics common.metrics already defines, so all four tokenizers in this
+efficiency metrics common.eval.metrics already defines, so all four tokenizers in this
 repo can be compared on IDENTICAL held-out data with IDENTICAL scoring code.
 
 Each tokenizer's *.evaluate module supplies an `induce_spans_fn_by_lang` dict (a
 `bytes -> list[bytes] spans` callable per language, already bound to that
 tokenizer's loaded checkpoint + whatever extra argument its own induce_spans needs,
 e.g. magnet's per-script boundary predictor) -- this module stays completely
-agnostic to how that callable was built, the same pattern common.stability already
+agnostic to how that callable was built, the same pattern common.eval.stability already
 uses for the boundary-stability diagnostic.
 """
 
@@ -20,13 +20,13 @@ from collections import Counter, defaultdict
 
 import numpy as np
 
-from common.metrics import compression_rate, fertility, gini_coefficient, renyi_efficiency
-from common.reporting import word_count
+from common.eval.metrics import compression_rate, fertility, gini_coefficient, renyi_efficiency
+from common.eval.reporting import word_count
 
 
 def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups):
     """induce_spans_fn_by_lang: dict[lang -> (bytes -> list[bytes] spans)] callable.
-    eval_groups: list[dict[lang -> text]] (e.g. common.oldi_data.load_bouquet_dev()'s
+    eval_groups: list[dict[lang -> text]] (e.g. common.data.oldi_data.load_bouquet_dev()'s
     return value).
 
     Languages present in eval_groups but missing from induce_spans_fn_by_lang are

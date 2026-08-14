@@ -3,7 +3,7 @@
 MANTa itself never needs discrete boundaries -- the paper's whole point is
 that the soft (byte, block) assignment matrix (see manta.model.MantaModel)
 is enough to train an end-to-end language model without ever materializing
-a hard segmentation. But common.metrics (compression_rate, renyi_efficiency,
+a hard segmentation. But common.eval.metrics (compression_rate, renyi_efficiency,
 gini_coefficient) and common.vocab all expect actual token COUNTS -- there
 is no way to plug a soft assignment matrix into "how many tokens did this
 sentence take," so *something* has to collapse it to hard boundaries for

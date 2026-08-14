@@ -2,10 +2,11 @@
 tokenizers, then evaluate it on downstream benchmarks. Four pieces, run in
 order:
 
-  1. pretraining.data_prep -- stream a corpus from common.corpora's shared
-     registry (the SAME registry common.cli_data.load_groups uses for
+  1. pretraining.data_prep -- stream a corpus from common.data.corpora's shared
+     registry (the SAME registry common.data.cli_data.load_groups uses for
      tokenizer training -- oldi_seed/flores_dev/smol/glot500/fineweb_edu/
-     olmo_mix, no separate pretraining-only source list), tokenize with a
+     olmo_mix/ccmatrix/un_pc/europarl/tatoeba_mt/bible_nlp, no separate
+     pretraining-only source list), tokenize with a
      chosen systems/ checkpoint (pretraining.tokenizer_adapter), pack into
      token shards on disk.
   2. pretraining.cli / pretraining.train -- train a LLaMA-style

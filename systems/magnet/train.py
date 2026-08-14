@@ -25,16 +25,16 @@ import torch.nn.functional as F
 from tqdm.auto import tqdm
 
 from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
-from common.eval_common import (
+from common.eval.cross_tokenizer import (
     eval_wandb_log_dict,
     evaluate_on_groups,
     report_eval,
     sample_eval_groups,
 )
-from common.lr_schedule import build_lr_scheduler
-from common.metrics import compression_rate, gini_coefficient, renyi_efficiency
-from common.oldi_data import LANG_SCRIPT
-from common.reporting import collapse_stats
+from common.training.lr_schedule import build_lr_scheduler
+from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency
+from common.data.oldi_data import LANG_SCRIPT
+from common.eval.reporting import collapse_stats
 from common.vocab import top_k_by_frequency
 
 from .inference import save_checkpoint
@@ -47,11 +47,11 @@ def lang_to_script(lang):
     """Group languages by SCRIPT, not by language, for the per-script boundary
     predictor -- e.g. arz_Arab and kas_Arab share ONE predictor and one target
     boundary rate (see model.py's MagnetModel/BoundaryPredictor).
-    common.oldi_data.LANG_SCRIPT gives the real lang_Script code (e.g.
+    common.data.oldi_data.LANG_SCRIPT gives the real lang_Script code (e.g.
     "arz_Arab" -> the part after the underscore is the ISO 15924 script code:
     Arab, Latn, Beng, Nkoo cover this project's 9-language panel.
 
-    Synthetic placeholder "languages" (common.data.make_synthetic_parallel_groups's
+    Synthetic placeholder "languages" (common.data.synthetic.make_synthetic_parallel_groups's
     profile names, e.g. "high_resource") aren't real language codes and carry no
     script metadata, so each synthetic profile falls back to being its OWN
     one-language "script" bucket. This still exercises the exact same
@@ -67,8 +67,8 @@ def lang_to_script(lang):
 def eval_lang_to_script(lang):
     """Like lang_to_script, but ALSO resolves language keys that are already
     full lang_Script stems (e.g. "arz_Arab", "aar_Latn") -- exactly what
-    common.oldi_data.load_bouquet_dev/load_bouquet_test's langs="all" mode
-    returns (see common.cli_data.load_bouquet_dev_for_training, which always
+    common.data.oldi_data.load_bouquet_dev/load_bouquet_test's langs="all" mode
+    returns (see common.data.cli_data.load_bouquet_dev_for_training, which always
     uses "all"), unlike training data's plain codes (which lang_to_script's own
     LANG_SCRIPT-lookup path already handles). Without this, every BOUQuET
     "all"-mode language silently fails lang_to_script's LANG_SCRIPT lookup,
@@ -85,7 +85,7 @@ def eval_lang_to_script(lang):
     fallback (e.g. "high_resource", which DOES contain an underscore but isn't
     a real stem): eval_groups only ever comes from real BOUQuET data or is
     None (see load_bouquet_dev_for_training's synthetic skip), never from
-    common.data's synthetic profiles, so that collision risk can't occur in
+    common.data.synthetic's synthetic profiles, so that collision risk can't occur in
     practice -- but is called out here since it's the reason this is a
     separate function rather than a change to lang_to_script itself."""
     if lang in LANG_SCRIPT:
@@ -177,16 +177,16 @@ class MagnetConfig(BaseTokenizerConfig):
     # everything -- that one-time cost is fine; paying it every epoch isn't).
 
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
-    # common.lr_schedule.build_lr_scheduler.
+    # common.training.lr_schedule.build_lr_scheduler.
     lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
-    # "cosine" -- see common.lr_schedule.build_lr_scheduler. "linear" matches HF
+    # "cosine" -- see common.training.lr_schedule.build_lr_scheduler. "linear" matches HF
     # Trainer's own default.
 
 
 class MagnetTrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (a plain list of dicts {lang: text},
-    the same shape common.oldi_data.load_all_training_groups /
-    common.data.make_synthetic_parallel_groups both return), call .train(),
+    the same shape common.data.oldi_data.load_all_training_groups /
+    common.data.synthetic.make_synthetic_parallel_groups both return), call .train(),
     then read .model / .token_freq / .vocab off the instance (train() also
     returns them, plus a per-step loss trace and boundary-rate trace, as a
     tuple for convenience -- see run_smoke_test below for the shape)."""
@@ -484,8 +484,8 @@ class MagnetTrainer(BaseTokenizerTrainer):
 
 def run_smoke_test():
     """The plan's own gate, MAGNET-flavored: a small trial run on
-    common.data's synthetic placeholder corpus (fast, no network access
-    needed -- see common.data's module docstring for why this stands in for
+    common.data.synthetic's synthetic placeholder corpus (fast, no network access
+    needed -- see common.data.synthetic's module docstring for why this stands in for
     real OLDI/FLORES+/SMOL data) that checks (1) no crash, (2) the loss trends
     down, (3) the boundary rate hasn't collapsed to ~0% (never cuts -- the
     hierarchical bottleneck becomes a no-op, see model.py's null_segment
@@ -493,13 +493,13 @@ def run_smoke_test():
     no compression at all).
 
     Also prints compression_rate / renyi_efficiency / gini_coefficient (all
-    from common.metrics, completely unmodified) on the induced per-language
+    from common.eval.metrics, completely unmodified) on the induced per-language
     vocabulary, as the sanity check that MAGNET's {lang: Counter(span->count)}
     output shape is consumable by the rest of the fairtok metrics pipeline with
     zero adapter code -- the same shape fairtok.train.GRPOTrainer.train()
     itself produces.
     """
-    from common.data import LANG_PROFILES, make_synthetic_parallel_groups
+    from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
 
     args = MagnetConfig(
         max_steps=80, per_device_train_batch_size=6, vocab_size=256, log_every=10
@@ -522,7 +522,7 @@ def run_smoke_test():
     print(f"final vocab size={len(final_vocab)}")
 
     print(
-        "\nper-language metrics on the induced vocabulary (common.metrics, unmodified):"
+        "\nper-language metrics on the induced vocabulary (common.eval.metrics, unmodified):"
     )
     lang_renyi = {}
     for lang, counter in sorted(token_freq.items()):

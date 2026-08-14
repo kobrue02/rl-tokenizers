@@ -12,7 +12,7 @@
 
 # Held-out BOUQuET evaluation for any trained checkpoint in this repo (fairtok/
 # magnet/flexitokens/manta) -- see evaluate.py's module docstring for the dispatch
-# pattern and common/eval_common.py for the shared scoring logic every tokenizer's
+# pattern and common/eval/cross_tokenizer.py for the shared scoring logic every tokenizer's
 # own evaluate.py uses. No GPU is requested -- cpu_il is this cluster's CPU-only
 # counterpart to jobs/train*.sh's gpu_a100_il partition (same "_il" allocation,
 # confirmed via `sinfo`). evaluate.py's own --device flag defaults to "cpu"
@@ -22,7 +22,7 @@
 # meant the initial curated 6-language subset -- with --eval-data-source
 # bouquet_test and no --num-groups cap, this now scores the FULL test split (259
 # languages, paragraph+sentence level combined, ~272k rows), via
-# common.eval_common.evaluate_on_groups's plain per-sequence loop (no batching,
+# common.eval.cross_tokenizer.evaluate_on_groups's plain per-sequence loop (no batching,
 # unlike training) -- confirmed to time out at 30 minutes on a real FANTA run. 8
 # hours is a generous first estimate, not a benchmarked number. If it's still not
 # enough, the real fix is batching evaluate_on_groups itself (mirror how training
@@ -41,7 +41,7 @@
 # `python evaluate.py <tokenizer> --help`. --checkpoint is required there (no
 # default path is guessed here).
 #
-# PREREQUISITE: bouquet is a gated HF dataset (see common/oldi_data.py). Same
+# PREREQUISITE: bouquet is a gated HF dataset (see common/data/oldi_data.py). Same
 # HF_TOKEN handling as jobs/train.sh -- run `huggingface-cli login` on this cluster
 # (not just your laptop), or export HF_TOKEN before submitting.
 

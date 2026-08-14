@@ -3,7 +3,7 @@ identically by every tokenizer's CLI in this repo (fairtok.cli, magnet.cli,
 flexitokens.cli, manta.cli, fanta.cli, superbpe.cli, bpe.cli) -- extracted
 here so it's implemented exactly once instead of copy-pasted per tokenizer.
 
-Every named source except "all" now goes through common.corpora.stream_groups
+Every named source except "all" now goes through common.data.corpora.stream_groups
 -- the SAME registry pretraining.data_prep draws on for LLM pretraining, not
 a separate tokenizer-training-only list. See that module's own docstring for
 which sources are genuinely cross-lingual PARALLEL (oldi_seed/flores_dev/smol)
@@ -11,17 +11,17 @@ vs. single-language MONOLINGUAL (glot500/fineweb_edu/olmo_mix) -- the latter
 now trains a tokenizer just fine through the plain next-byte CE loss every
 trainer has, it just contributes nothing to any fairness loss term that needs
 genuinely parallel content within a group. "all" stays its own case here
-(common.oldi_data.load_all_training_groups, pooling only the three parallel
+(common.data.oldi_data.load_all_training_groups, pooling only the three parallel
 sources) rather than folding the monolingual sources into it -- that keeps
 "all"'s existing meaning (and every past run's reproducibility) unchanged.
 """
 
 import itertools
 
-from .corpora import ALL_SOURCES, MONOLINGUAL_SOURCES, stream_groups
+from .corpora import ALL_SOURCES, BITEXT_SOURCES, MONOLINGUAL_SOURCES, stream_groups
 from .oldi_data import LANGS, load_all_training_groups
 
-# Derived from common.corpora.ALL_SOURCES (+ "all", this module's own pooling
+# Derived from common.data.corpora.ALL_SOURCES (+ "all", this module's own pooling
 # special-case -- see module docstring) rather than a second hardcoded list:
 # a new source registered in corpora.py becomes selectable here automatically,
 # with no separate list to remember to update in sync.
@@ -40,9 +40,10 @@ def load_groups(args):
     in this repo adds these same four flags (see e.g. fairtok/cli.py's
     build_arg_parser), so this function works unmodified against any of them.
     An optional `.dataset_config` attribute (HF config name) is read too, for
-    --data-source fineweb_edu/olmo_mix specifically -- see common.corpora.
-    stream_groups; every tokenizer's cli.py that wants to expose those two
-    sources adds that flag, the others simply never read it.
+    --data-source fineweb_edu/olmo_mix and every BITEXT_SOURCES entry
+    (ccmatrix/un_pc/europarl/tatoeba_mt) -- see common.data.corpora.stream_groups;
+    every tokenizer's cli.py that wants to expose those sources adds that
+    flag, the others simply never read it.
     """
     if args.langs is None:
         langs = None
@@ -51,12 +52,14 @@ def load_groups(args):
     else:
         langs = args.langs.split(",")
 
-    if langs == "all" and args.data_source in ("synthetic", "smol", "fineweb_edu", "olmo_mix"):
+    if langs == "all" and (
+        args.data_source in ("synthetic", "smol", "fineweb_edu", "olmo_mix") or args.data_source in BITEXT_SOURCES
+    ):
         raise ValueError(
             f"--langs all isn't supported for --data-source {args.data_source} "
             "(synthetic has a fixed toy panel; smol needs a per-language-file rescan; "
-            "fineweb_edu/olmo_mix are single-language sources selected via --dataset-config, "
-            "not --langs -- see common.corpora)"
+            "fineweb_edu/olmo_mix and every BITEXT_SOURCES entry (ccmatrix/un_pc/europarl/"
+            "tatoeba_mt) are selected via --dataset-config, not --langs -- see common.data.corpora)"
         )
 
     if args.data_source == "all":
@@ -68,7 +71,7 @@ def load_groups(args):
             config=getattr(args, "dataset_config", None),
             seed=args.seed,
         )
-        if args.data_source in MONOLINGUAL_SOURCES:
+        if args.data_source in MONOLINGUAL_SOURCES or args.data_source in BITEXT_SOURCES:
             # Lazy/effectively-unbounded source -- bound materialization
             # explicitly rather than draining a live stream to exhaustion.
             limit = args.num_groups or _DEFAULT_MONOLINGUAL_GROUPS_PER_LANG * max(
@@ -84,15 +87,15 @@ def load_groups(args):
 
 
 def load_bouquet_dev_for_training(args):
-    """BOUQuET dev (see common.oldi_data.load_bouquet_dev) -- disjoint from every
+    """BOUQuET dev (see common.data.oldi_data.load_bouquet_dev) -- disjoint from every
     --data-source load_groups above trains on, used for periodic in-training
     evaluation at epoch boundaries (see each tokenizer's own Trainer.train()).
     Skipped (returns None) for --data-source synthetic, which has no real
     BOUQuET counterpart. Loads EVERY language BOUQuET covers ("all"), not just
-    this project's 9-language panel -- common.eval_common.evaluate_on_groups
+    this project's 9-language panel -- common.eval.cross_tokenizer.evaluate_on_groups
     already skips languages the training model has no entry for.
 
-    Reserve BOUQuET's TEST split (common.oldi_data.load_bouquet_test) for final
+    Reserve BOUQuET's TEST split (common.data.oldi_data.load_bouquet_test) for final
     reported numbers, via each tokenizer's own evaluate.py
     --eval-data-source bouquet_test, run once training is done -- using dev
     here, repeatedly, across an entire training run's worth of epoch checks, is

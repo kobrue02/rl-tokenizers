@@ -10,10 +10,11 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# Offline tokenization: stream a corpus from common/corpora.py's shared
-# registry -- the SAME registry common/cli_data.py's tokenizer-training side
-# uses (oldi_seed/flores_dev/smol/glot500/fineweb_edu/olmo_mix, no separate
-# pretraining-only source list) -- tokenize with an already-trained systems/
+# Offline tokenization: stream a corpus from common/data/corpora.py's shared
+# registry -- the SAME registry common/data/cli_data.py's tokenizer-training side
+# uses (oldi_seed/flores_dev/smol/glot500/fineweb_edu/olmo_mix/ccmatrix/
+# un_pc/europarl/tatoeba_mt/bible_nlp, no separate pretraining-only source
+# list) -- tokenize with an already-trained systems/
 # checkpoint, pack into token shards. See pretraining/data_prep.py's own
 # module docstring for the full design and its PERFORMANCE section for a
 # real, stated caveat: the five neural (span-family) tokenizer systems

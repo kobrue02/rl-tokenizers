@@ -16,12 +16,12 @@ step) and checks each document's shingles against that small index. This
 exploits the size asymmetry (index the SMALL side, stream-scan the LARGE
 side) instead of trying to index the entire pretraining corpus, which would
 need far more memory for no benefit here -- see pretraining/cli_contamination.py
-for the CLI that wires this to an actual common.corpora source and a
+for the CLI that wires this to an actual common.data.corpora source and a
 pretraining.benchmarks loader.
 
 This is a TEXT-level exact n-gram MATCH (a shingle either appears in the
 index or it doesn't), not a MinHash/Jaccard SIMILARITY estimate like
-common.dedup's near-dup detection -- the benchmark side is fixed and small
+common.data.dedup's near-dup detection -- the benchmark side is fixed and small
 enough that exact per-shingle indexing is both simpler and more precise
 (no approximation), and what this is actually looking for is "does ANY
 corpus document contain this literal test example's text", not "how
@@ -30,7 +30,7 @@ similar are two whole documents overall."
 
 from collections import defaultdict
 
-from common.text_shingles import shingle_hash, shingles
+from common.data.text_shingles import shingle_hash, shingles
 
 
 def build_benchmark_shingle_index(examples, text_fields_fn, n=13):
