@@ -58,6 +58,19 @@ Each figure comes in two forms:
 \end{figure}
 ```
 
+`fig_resource_level_body.tex` follows the exact same pattern (needs the same
+`pgfplots`/color preamble as the leaderboard and landscape figures, no extra
+packages):
+
+```latex
+\begin{figure}[htbp]
+  \centering
+  \input{figures/tikz/fig_resource_level_body.tex}
+  \caption{...}
+  \label{fig:resource-level-trend}
+\end{figure}
+```
+
 The heatmap is oriented with models down the ROWS (family-grouped, same
 ordering as the leaderboard) and languages across the COLUMNS -- NOT the
 other way around. An earlier version put all 33 models across as columns,
@@ -122,6 +135,15 @@ nothing else is needed for it beyond `tikz`/`xcolor`.)
 - **Family coloring** is a rough grouping by name prefix (see `family_of()`
   in the script) for visual scanning, not a rigorous taxonomy -- edit it if
   you want different groupings.
+- **Resource-level trend**: mean token_parity per tokenizer across Joshi et
+  al. 2020's 6-level linguistic resource taxonomy (see `common/data/lang2tax.py`
+  for the code->level mapping). Uses ALL of each model's language coverage
+  that resolves against that taxonomy (~85% of this project's languages --
+  the script prints exactly which codes don't resolve, and why, each run),
+  not just the heatmap's worst-20 subset. 33 thin lines, colored by family,
+  with only 5 legend entries (one per family, added manually via
+  `\addlegendimage` -- the 33 real `\addplot` calls use `forget plot` so
+  they don't each spam their own legend row).
 - **Color scale matches the online dashboard** (`sqrt(v-1)` normalization),
   so the same visual intuition carries over between the two.
 - No LaTeX was available to compile-test when this was written -- verify with

@@ -3,7 +3,7 @@
 output that also has Claude's entry folded in) -- no LaTeX install needed to RUN this, only
 to compile what it writes.
 
-Three figures, chosen specifically because a straight 33-tokenizer x 259-language dump is
+Four figures, chosen specifically because a straight 33-tokenizer x 259-language dump is
 unreadable in print:
 
   1. Spread leaderboard (fig_spread_leaderboard.tex + bar_*.dat): every tokenizer in the
@@ -23,6 +23,12 @@ unreadable in print:
      "worse" reads as a stronger/darker color, unlike a general perceptual colormap such as
      viridis, which has no inherent good/bad direction) and baked in as literal \\fill commands,
      so there's no pgfplots colormap/meshing step to get subtly wrong.
+  4. Resource-level trend (fig_resource_level.tex + resourcelevel_*.dat): mean token_parity
+     per tokenizer, grouped by Joshi et al. 2020's 6-level linguistic resource taxonomy
+     (see common.data.lang2tax for the code->level mapping -- ~85% of this project's
+     languages resolve against that external taxonomy; the rest genuinely aren't in it).
+     One line per tokenizer (colored by family, no per-tokenizer legend spam), using the
+     FULL per-language token_parity data, not the heatmap's worst-20 subset.
 
 Usage:
     python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --output-dir figures/tikz
@@ -36,10 +42,12 @@ import argparse
 import json
 import math
 import os
+from collections import Counter, defaultdict
 
 import langcodes
 
 from common.config_file import parse_args_with_config
+from common.data.lang2tax import load_resource_levels
 
 # ColorBrewer YlOrRd-9 (published, standard sequential scheme), pure-python
 # piecewise-linear interpolation -- avoids a matplotlib dependency. Chosen
@@ -83,6 +91,17 @@ _ENCODER_ONLY_NAMES = {
     "bert-base-cased", "bert-base-multilingual-cased", "distilbert-base-uncased",
     "roberta-base", "xlm-roberta-base", "microsoft/deberta-base",
     "microsoft/deberta-v3-base", "answerdotai/ModernBERT-base", "google/electra-base-discriminator",
+}
+
+# Joshi et al. 2020's own 6-level names -- see common.data.lang2tax's module
+# docstring for the code->level mapping this project uses.
+_RESOURCE_LEVEL_LABELS = {
+    0: "0 (ultra-low)",
+    1: "1 (low)",
+    2: "2 (medium-low)",
+    3: "3 (medium)",
+    4: "4 (medium-high)",
+    5: "5 (high)",
 }
 
 
@@ -474,6 +493,78 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     return full_tex, top_langs
 
 
+def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
+    """Mean token_parity per tokenizer, grouped by Joshi et al. 2020's 6-level
+    linguistic resource taxonomy (see common.data.lang2tax's own module
+    docstring for the code->level mapping and its ~85% coverage of this
+    project's languages -- the rest aren't in that external taxonomy at
+    all, a real coverage gap in that resource, not something fixable here).
+    Uses the FULL per-language token_parity dict each model already has
+    (not the heatmap's worst-20 subset), so every resolved language
+    contributes to whichever level's mean it belongs to.
+
+    One line per tokenizer (thin, colored by family, `forget plot` so it
+    doesn't spam the legend), plus one legend entry per family added
+    manually via `\\addlegendimage` -- the same pattern as coloring 33
+    tokenizers without a 33-entry legend used elsewhere in this file.
+    """
+    all_codes = set()
+    for m in models.values():
+        all_codes.update(m["token_parity"].keys())
+    levels, unresolved = load_resource_levels(sorted(all_codes))
+    counts = Counter(levels.values())
+    present_levels = sorted(counts)
+
+    for r in rows:
+        tp = models[r["name"]]["token_parity"]
+        by_level = defaultdict(list)
+        for lang, lvl in levels.items():
+            v = tp.get(lang)
+            if v is not None:
+                by_level[lvl].append(v)
+        path = os.path.join(out_dir, f"resourcelevel_{r['idx']}.dat")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("level parity\n")
+            for lvl in present_levels:
+                vals = by_level.get(lvl)
+                if vals:
+                    f.write(f"{lvl} {sum(vals) / len(vals):.4f}\n")
+
+    preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
+    for fam in families:
+        r_, g_, b_ = _FAMILY_RGB.get(fam, _FAMILY_RGB["Other"])
+        preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
+
+    xticklabels = ", ".join(f"{{{_RESOURCE_LEVEL_LABELS.get(l, str(l))}}}" for l in present_levels)
+    body = [
+        r"\begin{tikzpicture}",
+        r"\begin{axis}[",
+        r"    width=13cm, height=8cm,",
+        r"    xlabel={Linguistic resource level (Joshi et al. 2020)},",
+        r"    ylabel={Mean token parity vs English},",
+        r"    xtick={%s}," % ",".join(str(l) for l in present_levels),
+        r"    xticklabels={%s}," % xticklabels,
+        r"    x tick label style={font=\scriptsize},",
+        r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},",
+        r"    grid=both, grid style={gray!15},",
+        r"    axis lines=left,",
+        r"]",
+    ]
+    for r in rows:
+        col = _FAMILY_COLORS.get(r["family"], "otherCol")
+        body.append(
+            r"\addplot+[color=%s, mark=*, mark size=1pt, mark options={fill=%s}, line width=0.5pt, forget plot] "
+            r"table [x=level, y=parity] {%sresourcelevel_%d.dat};" % (col, col, data_prefix, r["idx"])
+        )
+    for fam in families:
+        col = _FAMILY_COLORS.get(fam, "otherCol")
+        body.append(r"\addlegendimage{color=%s, mark=*}" % col)
+        body.append(r"\addlegendentry{%s}" % fam)
+    body += [r"\end{axis}", r"\end{tikzpicture}"]
+    full_tex, _ = _write_standalone_and_body("resource_level", preamble, body, out_dir)
+    return full_tex, dict(counts), unresolved
+
+
 def _assert_well_formed(tex, name):
     for env in ("document", "tikzpicture"):
         assert tex.count(rf"\begin{{{env}}}") == tex.count(rf"\end{{{env}}}") == 1, f"{name}: unbalanced {env}"
@@ -506,14 +597,18 @@ def generate(results_path, out_dir, data_prefix=None):
     tex1 = gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=data_prefix)
     tex2 = gen_landscape_tex(rows, families, out_dir, data_prefix=data_prefix)
     tex3, top_langs = gen_heatmap_tex(rows, models, families, out_dir)
+    tex4, level_counts, unresolved_langs = gen_resource_level_tex(rows, models, families, out_dir, data_prefix=data_prefix)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
     _assert_well_formed(tex2, "fig_landscape.tex")
     _assert_well_formed(tex3, "fig_heatmap.tex")
+    _assert_well_formed(tex4, "fig_resource_level.tex")
 
     print(f"{len(rows)} models, {len(families)} families, heatmap languages: {top_langs}")
-    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap}}.tex (standalone, for test-compiling)")
-    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap}}_body.tex (for \\input from your thesis) to {out_dir}")
+    print(f"resource-level coverage: {sum(level_counts.values())} resolved {dict(sorted(level_counts.items()))}, "
+          f"{len(unresolved_langs)} not in Joshi et al.'s taxonomy: {unresolved_langs}")
+    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap,resource_level}}.tex (standalone, for test-compiling)")
+    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap,resource_level}}_body.tex (for \\input from your thesis) to {out_dir}")
     return rows, families, top_langs
 
 
