@@ -50,7 +50,7 @@ import numpy as np
 from common.config_file import parse_args_with_config
 from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
 from common.eval.metrics import compression_rate, fertility
-from common.eval.parity import _find_anchor_key
+from common.eval.parity import _find_anchor_key, anchor_invariant_parity
 from common.eval.reporting import word_count
 
 from systems.bpe.train import _SMOKE_TEST_GROUPS
@@ -192,8 +192,15 @@ def evaluate_claude_on_groups(
 
     Returns {"per_lang_compression": {...}, "avg_compression": float,
     "fertility": {...}, "token_parity": {...}, "token_parity_anchor": str,
-    "renyi": {} (always empty), "gini": None (always), "num_failed_calls":
-    int, "num_total_calls": int, "num_skipped_via_checkpoint": int}.
+    "token_parity_gm": {...}, "token_parity_spread": float, "renyi": {}
+    (always empty), "gini": None (always), "num_failed_calls": int,
+    "num_total_calls": int, "num_skipped_via_checkpoint": int}.
+    token_parity_gm/token_parity_spread are anchor-invariant (see
+    common.eval.parity.anchor_invariant_parity's own docstring for why a
+    single fixed anchor's ranking can flip depending on which language you
+    pick) -- computed here identically to common.eval.cross_tokenizer.
+    evaluate_on_groups's own, from the SAME token_parity dict below, at zero
+    extra API cost.
     """
     tasks_all = [(gi, lang, text) for gi, group in enumerate(eval_groups) for lang, text in group.items()]
 
@@ -291,6 +298,7 @@ def evaluate_claude_on_groups(
             token_parity[lang] = (sum(l_counts) / len(l_counts)) / (sum(a_counts) / len(a_counts))
         else:
             token_parity[lang] = 1.0
+    token_parity_gm, token_parity_spread = anchor_invariant_parity(token_parity)
 
     return {
         "per_lang_compression": per_lang_compression,
@@ -298,6 +306,8 @@ def evaluate_claude_on_groups(
         "fertility": fertility_by_lang,
         "token_parity": token_parity,
         "token_parity_anchor": token_parity_anchor,
+        "token_parity_gm": token_parity_gm,
+        "token_parity_spread": token_parity_spread,
         "renyi": {},
         "gini": None,
         "num_failed_calls": len(errors),
@@ -315,21 +325,31 @@ def report_claude_eval(results, label=""):
         skipped = results.get("num_skipped_via_checkpoint", 0)
         skipped_note = f", {skipped} resumed from checkpoint" if skipped else ""
         print(f"  count_tokens calls: {results['num_total_calls']} total, {results['num_failed_calls']} failed{skipped_note}")
+    if "token_parity_spread" in results:
+        print(f"  token_parity_spread (anchor-invariant, max/min across languages)={results['token_parity_spread']:.3f}")
     anchor = results.get("token_parity_anchor", "eng")
-    print(f"  per-language compression / fertility / token parity vs {anchor}=1.0:")
+    print(
+        f"  per-language compression / fertility / token parity vs {anchor}=1.0 / "
+        f"anchor-invariant token parity vs the geometric mean=1.0:"
+    )
+    token_parity_gm = results.get("token_parity_gm", {})
     for lang in sorted(results["per_lang_compression"]):
         print(
             f"    {lang}: compression={results['per_lang_compression'][lang]:.2f}  "
             f"fertility={results['fertility'].get(lang, 0.0):.2f}  "
-            f"token_parity={results['token_parity'].get(lang, 1.0):.3f}"
+            f"token_parity={results['token_parity'].get(lang, 1.0):.3f}  "
+            f"token_parity_gm={token_parity_gm.get(lang, 1.0):.3f}"
         )
 
 
 def claude_wandb_log_dict(results, prefix="eval"):
     log_dict = {f"{prefix}/avg_compression": results["avg_compression"]}
+    if "token_parity_spread" in results:
+        log_dict[f"{prefix}/token_parity_spread"] = results["token_parity_spread"]
     log_dict.update({f"{prefix}/compression/{lang}": v for lang, v in results["per_lang_compression"].items()})
     log_dict.update({f"{prefix}/fertility/{lang}": v for lang, v in results["fertility"].items()})
     log_dict.update({f"{prefix}/token_parity/{lang}": v for lang, v in results["token_parity"].items()})
+    log_dict.update({f"{prefix}/token_parity_gm/{lang}": v for lang, v in results.get("token_parity_gm", {}).items()})
     return log_dict
 
 
@@ -471,7 +491,19 @@ def run_smoke_test():
     assert results["token_parity"]["eng"] == 1.0, "anchor's own parity must always be exactly 1.0"
     assert results["num_total_calls"] == 4 and results["num_failed_calls"] == 0
     assert results["num_skipped_via_checkpoint"] == 0, "no checkpoint given -- nothing should be skipped"
+    assert set(results["token_parity_gm"]) == {"eng", "deu"}
+    assert results["token_parity_spread"] >= 1.0
     json.dumps(results, default=str)  # confirms the result dict is actually JSON-serializable
+
+    # Anchor-invariance: re-run with anchor_lang="deu" instead of the default "eng" and
+    # confirm token_parity_gm is identical -- the property the whole feature exists for
+    # (see common.eval.parity.anchor_invariant_parity's own docstring).
+    deu_anchored = evaluate_claude_on_groups(fake_groups, fake_count, anchor_lang="deu", max_workers=4, progress_every=0)
+    for lang in results["token_parity_gm"]:
+        assert abs(results["token_parity_gm"][lang] - deu_anchored["token_parity_gm"][lang]) < 1e-9, (
+            f"token_parity_gm[{lang!r}] must be anchor-invariant"
+        )
+    assert abs(results["token_parity_spread"] - deu_anchored["token_parity_spread"]) < 1e-9
 
     # 3. Checkpoint resume, against the exact same fake_groups/fake_count.
     with tempfile.TemporaryDirectory() as d:

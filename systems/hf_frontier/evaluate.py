@@ -240,6 +240,27 @@ def run_smoke_test():
         out_path = os.path.join(d, "results.json")
         all_results = main(["--hf-repo-id", "gpt2,gpt2", "--eval-data-source", "synthetic", "--output", out_path])
         assert set(all_results) == {"gpt2"}, "comma-separated dupes should collapse to one dict key, as expected"
+        gpt2_result = all_results["gpt2"]
+        assert set(gpt2_result["token_parity_gm"]) == set(gpt2_result["token_parity"])
+        assert gpt2_result["token_parity_spread"] >= 1.0
+
+        # Anchor-invariance, checked directly against a real tokenizer (not just standalone
+        # math): re-run with anchor_lang="deu" instead of the default "eng" and confirm
+        # token_parity_gm ends up identical -- this is the property the whole feature exists
+        # for (see common.eval.parity.anchor_invariant_parity's own docstring).
+        from common.eval.cross_tokenizer import evaluate_on_groups
+        from systems.bpe.train import _SMOKE_TEST_GROUPS
+
+        induce_fn = {"eng": wrapped.induce_spans, "deu": wrapped.induce_spans}
+        eng_anchored = evaluate_on_groups(induce_fn, _SMOKE_TEST_GROUPS, anchor_lang="eng")
+        deu_anchored = evaluate_on_groups(induce_fn, _SMOKE_TEST_GROUPS, anchor_lang="deu")
+        for lang in eng_anchored["token_parity_gm"]:
+            assert abs(eng_anchored["token_parity_gm"][lang] - deu_anchored["token_parity_gm"][lang]) < 1e-9, (
+                f"token_parity_gm[{lang!r}] must be anchor-invariant, "
+                f"got {eng_anchored['token_parity_gm'][lang]} (eng-anchored) vs "
+                f"{deu_anchored['token_parity_gm'][lang]} (deu-anchored)"
+            )
+        assert abs(eng_anchored["token_parity_spread"] - deu_anchored["token_parity_spread"]) < 1e-9
         with open(out_path) as f:
             reloaded = json.load(f)
         assert reloaded == all_results, "the JSON file written to --output must match what main() returned"

@@ -22,7 +22,7 @@ from collections import Counter, defaultdict
 import numpy as np
 
 from common.eval.metrics import compression_rate, fertility, gini_coefficient, renyi_efficiency
-from common.eval.parity import _find_anchor_key
+from common.eval.parity import _find_anchor_key, anchor_invariant_parity
 from common.eval.reporting import word_count
 from common.eval.stability import sequences_by_lang_from_groups
 
@@ -37,6 +37,17 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     trained checkpoints is exactly the situation where language coverage can
     legitimately differ (e.g. a checkpoint trained on fewer languages than BOUQuET
     covers).
+
+    Also computes an ANCHOR-INVARIANT version of the same disparity (token_parity_gm,
+    token_parity_spread) via common.eval.parity.anchor_invariant_parity -- a single
+    fixed anchor silently assumes that language's own cost is the fairness "1.0"
+    baseline, which inverts into every other ratio if a tokenizer happens to be
+    unusually good or bad specifically AT the anchor (confirmed live: re-anchoring
+    this project's own hf_frontier comparison to Mandarin flips Chinese-optimized
+    tokenizers from best to worst and gpt2 from worst to best, with no actual change
+    in any model's per-language token costs -- see that function's own docstring).
+    token_parity_gm and token_parity_spread don't have this problem, at zero extra
+    tokenization cost (derived from token_parity, already computed below).
 
     anchor_lang: also computes TOKEN PARITY against this language (default "eng") --
     the same "how many X does `lang` need vs. the anchor, for the exact same
@@ -59,7 +70,8 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     Returns {"token_freq": {lang: Counter}, "renyi": {lang: float}, "gini": float,
     "per_lang_compression": {lang: float}, "avg_compression": float,
     "fertility": {lang: float}, "token_parity": {lang: float},
-    "token_parity_anchor": str}.
+    "token_parity_anchor": str, "token_parity_gm": {lang: float},
+    "token_parity_spread": float}.
     """
     token_freq = defaultdict(Counter)
     compressions_by_lang = defaultdict(list)
@@ -114,6 +126,7 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
             token_parity[lang] = (sum(l_counts) / len(l_counts)) / (sum(a_counts) / len(a_counts))
         else:
             token_parity[lang] = 1.0
+    token_parity_gm, token_parity_spread = anchor_invariant_parity(token_parity)
     return {
         "token_freq": token_freq,
         "renyi": renyi,
@@ -123,6 +136,8 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
         "fertility": fertility_by_lang,
         "token_parity": token_parity,
         "token_parity_anchor": token_parity_anchor,
+        "token_parity_gm": token_parity_gm,
+        "token_parity_spread": token_parity_spread,
     }
 
 
@@ -130,15 +145,22 @@ def report_eval(results, label=""):
     prefix = f"[{label}] " if label else ""
     print(f"\n{prefix}held-out evaluation:")
     print(f"  avg_compression={results['avg_compression']:.2f}  gini={results['gini']:.4f}")
+    if "token_parity_spread" in results:
+        print(f"  token_parity_spread (anchor-invariant, max/min across languages)={results['token_parity_spread']:.3f}")
     anchor = results.get("token_parity_anchor", "eng")
-    print(f"  per-language compression / renyi efficiency / fertility / token parity vs {anchor}=1.0:")
+    print(
+        f"  per-language compression / renyi efficiency / fertility / token parity vs "
+        f"{anchor}=1.0 / anchor-invariant token parity vs the geometric mean=1.0:"
+    )
     token_parity = results.get("token_parity", {})
+    token_parity_gm = results.get("token_parity_gm", {})
     for lang in sorted(results["renyi"]):
         print(
             f"    {lang}: compression={results['per_lang_compression'].get(lang, 0.0):.2f}  "
             f"renyi={results['renyi'][lang]:.4f}  "
             f"fertility={results['fertility'].get(lang, 0.0):.2f}  "
-            f"token_parity={token_parity.get(lang, 1.0):.3f}"
+            f"token_parity={token_parity.get(lang, 1.0):.3f}  "
+            f"token_parity_gm={token_parity_gm.get(lang, 1.0):.3f}"
         )
 
 
@@ -165,6 +187,8 @@ def eval_wandb_log_dict(results, prefix="eval"):
         f"{prefix}/avg_compression": results["avg_compression"],
         f"{prefix}/gini": results["gini"],
     }
+    if "token_parity_spread" in results:
+        log_dict[f"{prefix}/token_parity_spread"] = results["token_parity_spread"]
     log_dict.update(
         {f"{prefix}/renyi/{lang}": v for lang, v in results["renyi"].items()}
     )
@@ -179,6 +203,9 @@ def eval_wandb_log_dict(results, prefix="eval"):
     )
     log_dict.update(
         {f"{prefix}/token_parity/{lang}": v for lang, v in results.get("token_parity", {}).items()}
+    )
+    log_dict.update(
+        {f"{prefix}/token_parity_gm/{lang}": v for lang, v in results.get("token_parity_gm", {}).items()}
     )
     return log_dict
 

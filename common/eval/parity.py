@@ -20,6 +20,7 @@ token counts, an output-side property that can differ between two tokenizers sco
 the exact same byte-length-parity-matched content).
 """
 
+import math
 from collections import defaultdict
 
 
@@ -118,3 +119,46 @@ def compute_lang_parity_ratios(train_groups, anchor_lang="eng"):
         else:
             ratio_by_lang[lang] = 1.0
     return ratio_by_lang, anchor
+
+
+def anchor_invariant_parity(ratio_by_lang):
+    """Returns (gm_relative: dict[str, float], spread: float), both computed
+    from an existing anchor-relative ratio dict (e.g. this module's own
+    ratio_by_lang, or common.eval.cross_tokenizer.evaluate_on_groups's
+    token_parity) WITHOUT needing to know or care which language was used
+    as that ratio's anchor.
+
+    A single fixed anchor (English, by convention everywhere in this
+    project) silently assumes that language's own cost is fairness's "1.0"
+    baseline. If a tokenizer is unusually good or unusually bad specifically
+    AT the anchor language, that gets inverted into every OTHER language's
+    ratio -- confirmed live on this project's own hf_frontier comparison:
+    Qwen/DeepSeek/Kimi (Chinese-optimized tokenizers, genuinely efficient at
+    Mandarin) rank as the LEAST fair once re-anchored to Mandarin, and gpt2
+    (genuinely inefficient at Mandarin) ranks as the MOST fair -- exactly
+    reversing their English-anchored ranking, purely because Mandarin is
+    each family's best/worst case respectively, not because any model's
+    actual per-language token costs changed.
+
+    gm_relative[lang] = ratio_by_lang[lang] / geometric_mean(ratio_by_lang.values())
+    replaces the single arbitrary anchor with the geometric mean of every
+    language present -- provably anchor-invariant (re-deriving ratio_by_lang
+    from any other anchor and calling this again returns the identical
+    gm_relative dict, up to floating-point noise), since GM-normalizing
+    divides out whatever the original anchor was. spread = max/min needs no
+    GM step at all: a common anchor divides out of both max and min
+    directly, so it's anchor-invariant on the ORIGINAL ratio_by_lang as-is.
+
+    Skips (excludes from both outputs) any non-positive ratio -- log() is
+    undefined there; this shouldn't happen for real token/byte-count data
+    (only reachable from a genuinely empty-content edge case), so silently
+    excluding it rather than raising is safe, not a swept-under-the-rug case.
+    """
+    positive = {lang: r for lang, r in ratio_by_lang.items() if r > 0}
+    if not positive:
+        return {}, 1.0
+
+    gm = math.exp(sum(math.log(r) for r in positive.values()) / len(positive))
+    gm_relative = {lang: r / gm for lang, r in positive.items()}
+    spread = max(positive.values()) / min(positive.values())
+    return gm_relative, spread
