@@ -8,29 +8,61 @@ script instead:
 python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --output-dir figures/tikz
 ```
 
+## Layout
+
+One subdirectory per figure -- each figure's `.tex` + `.dat` files sit
+together, instead of 50+ files flattened into this one directory:
+
+```
+figures/tikz/
+├── spread_leaderboard/
+│   ├── fig_spread_leaderboard.tex        (standalone, for test-compiling)
+│   ├── fig_spread_leaderboard_body.tex   (\input this one from your thesis)
+│   └── bar_*.dat                         (5 files, one per model family)
+├── landscape/
+│   ├── fig_landscape.tex
+│   ├── fig_landscape_body.tex
+│   └── scatter_*.dat                     (5 files)
+├── heatmap/
+│   ├── fig_heatmap.tex
+│   └── fig_heatmap_body.tex              (self-contained, no .dat needed)
+├── resource_level/
+│   ├── fig_resource_level.tex
+│   ├── fig_resource_level_body.tex
+│   └── resourcelevel_*.dat               (33 files, one per tokenizer)
+└── api_cost/
+    ├── fig_api_cost.tex
+    ├── fig_api_cost_body.tex
+    └── apicost_*.dat                     (6 files, one per priced tokenizer)
+```
+
 ## Compiling to test
 
-The `table {...}` references inside `fig_spread_leaderboard.tex`/
-`fig_landscape.tex` are baked in as `figures/tikz/bar_*.dat` etc. (relative to
-`--output-dir`, i.e. relative to wherever your MAIN thesis document
-compiles from) -- NOT bare filenames. That means standalone test-compiles
-need to be run from the project root, not from inside this directory:
+The `table {...}` references inside each figure's `.tex`/`_body.tex` are
+baked in as e.g. `figures/tikz/spread_leaderboard/bar_X.dat` -- a path
+relative to wherever your MAIN thesis document compiles from (i.e.
+`--output-dir`), NOT relative to the figure's own subdirectory. That means
+standalone test-compiles need to be run from the project root:
 
 ```
 cd <project root>
-pdflatex figures/tikz/fig_spread_leaderboard.tex
-pdflatex figures/tikz/fig_landscape.tex
-pdflatex figures/tikz/fig_heatmap.tex
+pdflatex figures/tikz/spread_leaderboard/fig_spread_leaderboard.tex
+pdflatex figures/tikz/landscape/fig_landscape.tex
+pdflatex figures/tikz/heatmap/fig_heatmap.tex
+pdflatex figures/tikz/resource_level/fig_resource_level.tex
+pdflatex figures/tikz/api_cost/fig_api_cost.tex
 ```
 
-(running `pdflatex fig_spread_leaderboard.tex` from *inside* `figures/tikz/`
-will fail with "Could not read table file" -- it needs the same relative
-path the main document sees, not the file's own directory.)
+(running e.g. `pdflatex fig_spread_leaderboard.tex` from *inside*
+`figures/tikz/spread_leaderboard/` will fail with "Could not read table
+file" -- it needs the same relative path the main document sees, not the
+file's own directory.)
 
 If your thesis's main `.tex` compiles from somewhere other than this
-project's root, regenerate with `--data-prefix` set to match:
+project's root, regenerate with `--data-prefix` set to the BASE path (the
+per-figure subdirectory name is appended automatically):
 ```
-python3 generate_tikz_figures.py --output-dir figures/tikz --data-prefix figures/tikz/
+python3 generate_tikz_figures.py --output-dir figures/tikz --data-prefix figures/tikz
 ```
 
 ## Embedding in the thesis
@@ -52,22 +84,30 @@ Each figure comes in two forms:
 ```latex
 \begin{figure}[htbp]
   \centering
-  \input{figures/tikz/fig_spread_leaderboard_body.tex}
+  \input{figures/tikz/spread_leaderboard/fig_spread_leaderboard_body.tex}
   \caption{...}
   \label{fig:spread-leaderboard}
 \end{figure}
-```
 
-`fig_resource_level_body.tex` follows the exact same pattern (needs the same
-`pgfplots`/color preamble as the leaderboard and landscape figures, no extra
-packages):
-
-```latex
 \begin{figure}[htbp]
   \centering
-  \input{figures/tikz/fig_resource_level_body.tex}
+  \input{figures/tikz/landscape/fig_landscape_body.tex}
+  \caption{...}
+  \label{fig:fairness-landscape}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \input{figures/tikz/resource_level/fig_resource_level_body.tex}
   \caption{...}
   \label{fig:resource-level-trend}
+\end{figure}
+
+\begin{figure}[htbp]
+  \centering
+  \input{figures/tikz/api_cost/fig_api_cost_body.tex}
+  \caption{...}
+  \label{fig:api-cost-by-resource-level}
 \end{figure}
 ```
 
@@ -82,7 +122,7 @@ which should fit a normal portrait page directly:
 ```latex
 \begin{figure}[htbp]
   \centering
-  \input{figures/tikz/fig_heatmap_body.tex}
+  \input{figures/tikz/heatmap/fig_heatmap_body.tex}
   \caption{...}
   \label{fig:worst-language-heatmap}
 \end{figure}
@@ -95,17 +135,19 @@ metrics -- if it still doesn't quite fit your page, wrap the `\input` in
 it'll need a much smaller shrink than before, so text should stay legible.
 
 This needs the relevant packages/colors declared ONCE in your thesis's main
-preamble (NOT `\usepackage{standalone}` -- that's no longer needed at all):
+preamble (NOT `\usepackage{standalone}` -- that's no longer needed at all).
+Each figure's own `fig_<name>.tex`/`fig_<name>_body.tex` prints exactly the
+`\usepackage`/`\definecolor` lines it needs at the top -- copy those in
+directly rather than retyping them, since color RGB values can drift as
+figures get regenerated:
 
 ```latex
-% --- for fig_spread_leaderboard_body.tex and fig_landscape_body.tex ---
+% --- for fig_spread_leaderboard_body.tex, fig_landscape_body.tex,
+%     fig_resource_level_body.tex, and fig_api_cost_body.tex ---
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
-\definecolor{openaiCol}{RGB}{16,110,118}
-\definecolor{chinaCol}{RGB}{214,96,42}
-\definecolor{metaCol}{RGB}{74,111,227}
-\definecolor{encCol}{RGB}{140,140,140}
-\definecolor{otherCol}{RGB}{163,79,168}
+% ...plus each figure's own \definecolor lines (family colors for the first
+% three, apicolorN for the cost figure) -- see the top of each fig_*.tex.
 
 % --- for fig_heatmap_body.tex ---
 \usepackage{tikz}
@@ -144,6 +186,18 @@ nothing else is needed for it beyond `tikz`/`xcolor`.)
   with only 5 legend entries (one per family, added manually via
   `\addlegendimage` -- the 33 real `\addplot` calls use `forget plot` so
   they don't each spam their own legend row).
+- **Real API cost by resource level**: dollar cost to tokenize a fixed 1M-word
+  English-equivalent input, per resource level, using REAL pricing fetched
+  live from platform.claude.com, developers.openai.com, and deepseek.ai (see
+  `_API_PRICING`'s own comment in the script for exact source/date and why
+  each included tokenizer was chosen). Most of this project's 33 tokenizers
+  belong to open-weight, self-hosted models with no official metered API
+  price at all, so only ~5 appear here -- deliberately, not an oversight. Log
+  y-axis: input price alone varies ~23x across these 5 models before any
+  token-count effect, which would make the cheaper models' own resource-level
+  trend invisible on a linear axis. Uses lines, not bars, specifically
+  because `ybar` + `ymode=log` is a known pgfplots pitfall (bars can't reach
+  a y=0 baseline on a log axis).
 - **Color scale matches the online dashboard** (`sqrt(v-1)` normalization),
   so the same visual intuition carries over between the two.
 - No LaTeX was available to compile-test when this was written -- verify with

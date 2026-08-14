@@ -1,0 +1,38 @@
+\documentclass{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\definecolor{apicolor0}{RGB}{214,96,42}
+\definecolor{apicolor1}{RGB}{60,150,130}
+\definecolor{apicolor2}{RGB}{16,110,118}
+\definecolor{apicolor3}{RGB}{150,40,40}
+\definecolor{apicolor4}{RGB}{90,130,180}
+\definecolor{apicolor5}{RGB}{120,150,60}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+    width=13cm, height=8cm,
+    ymode=log,
+    ylabel={Cost (USD) to tokenize 1M words of English-equivalent input},
+    xlabel={Linguistic resource level (Joshi et al. 2020)},
+    xtick={0,1,2,3,4,5},
+    xticklabels={{0: Left-Behinds}, {1: Scraping-Bys}, {2: Hopefuls}, {3: Rising Stars}, {4: Underdogs}, {5: Winners}},
+    x tick label style={font=\scriptsize},
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
+    grid=both, grid style={gray!15},
+    axis lines=left,
+]
+\addplot+[color=apicolor0, mark=*, mark size=1.5pt, mark options={fill=apicolor0}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor0.dat};
+\addlegendentry{DeepSeek V4-Pro}
+\addplot+[color=apicolor1, mark=*, mark size=1.5pt, mark options={fill=apicolor1}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor1.dat};
+\addlegendentry{Kimi K3}
+\addplot+[color=apicolor2, mark=*, mark size=1.5pt, mark options={fill=apicolor2}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor2.dat};
+\addlegendentry{GPT-4o}
+\addplot+[color=apicolor3, mark=*, mark size=1.5pt, mark options={fill=apicolor3}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor3.dat};
+\addlegendentry{GPT-4-Turbo}
+\addplot+[color=apicolor4, mark=*, mark size=1.5pt, mark options={fill=apicolor4}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor4.dat};
+\addlegendentry{davinci-002}
+\addplot+[color=apicolor5, mark=*, mark size=1.5pt, mark options={fill=apicolor5}, line width=0.8pt] table [x=level, y=cost] {figures/tikz/api_cost/apicost_apicolor5.dat};
+\addlegendentry{gpt-3.5-turbo-instruct}
+\end{axis}
+\end{tikzpicture}
+\end{document}

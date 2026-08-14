@@ -22,15 +22,15 @@
     legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},
     axis y line*=left, axis x line*=bottom,
 ]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/bar_OpenAI_tiktoken.dat};
+\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_OpenAI_tiktoken.dat};
 \addlegendentry{OpenAI/tiktoken}
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/bar_Chinese_labs.dat};
+\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Chinese_labs.dat};
 \addlegendentry{Chinese labs}
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/bar_Meta_Llama.dat};
+\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Meta_Llama.dat};
 \addlegendentry{Meta/Llama}
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/bar_Encoder-only.dat};
+\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Encoder-only.dat};
 \addlegendentry{Encoder-only}
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/bar_Other.dat};
+\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Other.dat};
 \addlegendentry{Other}
 \end{axis}
 \end{tikzpicture}

@@ -3,7 +3,7 @@
 output that also has Claude's entry folded in) -- no LaTeX install needed to RUN this, only
 to compile what it writes.
 
-Four figures, chosen specifically because a straight 33-tokenizer x 259-language dump is
+Five figures, chosen specifically because a straight 33-tokenizer x 259-language dump is
 unreadable in print:
 
   1. Spread leaderboard (fig_spread_leaderboard.tex + bar_*.dat): every tokenizer in the
@@ -29,6 +29,13 @@ unreadable in print:
      languages resolve against that external taxonomy; the rest genuinely aren't in it).
      One line per tokenizer (colored by family, no per-tokenizer legend spam), using the
      FULL per-language token_parity data, not the heatmap's worst-20 subset.
+  5. Real API cost by resource level (fig_api_cost.tex + apicost_*.dat): dollar cost to
+     tokenize a fixed 1M-word English-equivalent input, per resource level, for the small
+     set of tokenizers with an unambiguous or clearly-flagship priced API model (see
+     _API_PRICING's own comment for exactly which ones and why the rest are excluded --
+     most of this project's 33 tokenizers belong to open-weight, self-hosted models with
+     no official metered price at all). Uses real, live-fetched pricing from
+     platform.claude.com, developers.openai.com, and deepseek.ai.
 
 Usage:
     python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --output-dir figures/tikz
@@ -103,6 +110,34 @@ _RESOURCE_LEVEL_LABELS = {
     3: "3: Rising Stars",
     4: "4: Underdogs",
     5: "5: Winners",
+}
+
+# Real, published input pricing ($/million tokens): DeepSeek/OpenAI entries fetched live
+# from platform.claude.com/docs/en/about-claude/pricing, developers.openai.com/api/docs/pricing,
+# and deepseek.ai/pricing; Kimi-K3 pricing supplied directly by the user from Moonshot AI's
+# own pricing page (cache-miss input rate used, matching the convention already used for
+# DeepSeek V4-Pro's own cache-miss rate -- the standard, non-cached request price). Only
+# tokenizers with an unambiguous or clearly-flagship priced model are included here -- most
+# of this project's 33 evaluated tokenizers belong to open-weight, self-hosted models
+# (Llama, Mistral, Gemma, BLOOM, Falcon, every BERT-family encoder, gpt-oss, Qwen) with NO
+# official metered API price from any of these providers, so they're deliberately absent,
+# not overlooked. Excluded for a real, confirmed reason (not silently dropped):
+#   - deepseek-ai/DeepSeek-R1: confirmed retired (deepseek-reasoner alias no longer
+#     routes anywhere as of 24 July 2026); no current price exists to cite.
+#   - tiktoken:p50k_edit: priced its own edit-mode models (e.g. text-davinci-edit-001),
+#     which have no current successor at all.
+#   - tiktoken:o200k_harmony: used only by the open-weight gpt-oss family, which has
+#     no OpenAI-hosted metered price.
+#   - tiktoken:r50k_base: confirmed identical to tiktoken:gpt2 (same token_parity and
+#     fertility values for every language) -- the same tiktoken encoding under two
+#     names, so only one is kept to avoid a redundant duplicate series.
+_API_PRICING = {
+    "deepseek-ai/DeepSeek-V4-Pro": {"display": "DeepSeek V4-Pro", "input": 0.435, "color": (214, 96, 42)},
+    "moonshotai/Kimi-K3": {"display": "Kimi K3", "input": 3.00, "color": (60, 150, 130)},
+    "tiktoken:o200k_base": {"display": "GPT-4o", "input": 2.50, "color": (16, 110, 118)},
+    "tiktoken:cl100k_base": {"display": "GPT-4-Turbo", "input": 10.00, "color": (150, 40, 40)},
+    "tiktoken:gpt2": {"display": "davinci-002", "input": 2.00, "color": (90, 130, 180)},
+    "tiktoken:p50k_base": {"display": "gpt-3.5-turbo-instruct", "input": 1.50, "color": (120, 150, 60)},
 }
 
 
@@ -200,20 +235,26 @@ def load_rows(results_path):
     return rows, models
 
 
-def write_bar_and_scatter_data(rows, out_dir):
-    families = [f for f in _FAMILY_COLORS if any(r["family"] == f for r in rows)]
+def compute_families(rows):
+    return [f for f in _FAMILY_COLORS if any(r["family"] == f for r in rows)]
+
+
+def write_bar_data(rows, families, out_dir):
     for fam in families:
         with open(os.path.join(out_dir, f"bar_{fam_key(fam)}.dat"), "w", encoding="utf-8") as f:
             f.write("idx spread\n")
             for r in rows:
                 if r["family"] == fam:
                     f.write(f"{r['idx']} {r['spread']:.4f}\n")
+
+
+def write_scatter_data(rows, families, out_dir):
+    for fam in families:
         with open(os.path.join(out_dir, f"scatter_{fam_key(fam)}.dat"), "w", encoding="utf-8") as f:
             f.write("avg_compression spread\n")
             for r in rows:
                 if r["family"] == fam:
                     f.write(f"{r['avg_compression']:.4f} {r['spread']:.4f}\n")
-    return families
 
 
 def _write_standalone_and_body(name, preamble_lines, body_lines, out_dir):
@@ -566,6 +607,95 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
     return full_tex, dict(counts), unresolved
 
 
+def gen_api_cost_tex(models, out_dir, data_prefix="", reference_words=1_000_000):
+    """Real dollar cost to tokenize a fixed reference amount of English-
+    equivalent input text (default: 1M words -- a natural unit, matching how
+    these APIs price themselves), across Joshi et al.'s 6 resource levels,
+    for the handful of tokenizers with an unambiguous or clearly-flagship
+    priced API model -- see _API_PRICING's own comment for exactly which
+    tokenizers qualify and why the rest don't.
+
+    cost(model, level) = fertility(model, eng_Latn) * reference_words *
+    mean_token_parity(model, level) * input_price_per_token(model) -- i.e.
+    the SAME English-anchored token_parity this whole module already uses,
+    converted to an absolute token count via that model's own measured
+    English fertility, then priced at its real per-token rate.
+
+    A LINE chart (not bars): input price alone varies ~23x across these 5
+    models before any token-count effect, so a log y-axis is needed to see
+    each model's OWN resource-level trend at all, not just the gap between
+    models -- and ybar + ymode=log is a known pgfplots pitfall (bars can't
+    reach a y=0 baseline on a log axis), so lines+markers (already used,
+    working, for the resource-level trend figure) avoid that entirely.
+    Only 5 series here (vs. 33 for the trend figure), so each gets a real
+    legend entry -- no need for the forget-plot + addlegendimage workaround.
+    """
+    priced = {name: price for name, price in _API_PRICING.items() if name in models}
+    missing = [name for name in _API_PRICING if name not in models]
+    if missing:
+        print(f"  note: {len(missing)} priced tokenizer(s) not in this results file, skipping: {missing}")
+    if not priced:
+        raise ValueError("none of _API_PRICING's tokenizers are present in this results file -- nothing to plot")
+
+    all_codes = set()
+    for name in priced:
+        all_codes.update(models[name]["token_parity"].keys())
+    levels, unresolved = load_resource_levels(sorted(all_codes))
+    present_levels = sorted(set(levels.values()))
+
+    color_names = {name: f"apicolor{i}" for i, name in enumerate(priced)}
+    for name, price in priced.items():
+        m = models[name]
+        tp = m["token_parity"]
+        eng_tokens = m["fertility"]["eng_Latn"] * reference_words
+        by_level = defaultdict(list)
+        for lang, lvl in levels.items():
+            v = tp.get(lang)
+            if v is not None:
+                by_level[lvl].append(v)
+        path = os.path.join(out_dir, f"apicost_{color_names[name]}.dat")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("level cost\n")
+            for lvl in present_levels:
+                vals = by_level.get(lvl)
+                if vals:
+                    mean_parity = sum(vals) / len(vals)
+                    cost = eng_tokens * mean_parity * price["input"] / 1_000_000
+                    f.write(f"{lvl} {cost:.6f}\n")
+
+    preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
+    for name, price in priced.items():
+        r_, g_, b_ = price["color"]
+        preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (color_names[name], r_, g_, b_))
+
+    xticklabels = ", ".join(f"{{{_RESOURCE_LEVEL_LABELS.get(l, str(l))}}}" for l in present_levels)
+    body = [
+        r"\begin{tikzpicture}",
+        r"\begin{axis}[",
+        r"    width=13cm, height=8cm,",
+        r"    ymode=log,",
+        r"    ylabel={Cost (USD) to tokenize 1M words of English-equivalent input},",
+        r"    xlabel={Linguistic resource level (Joshi et al. 2020)},",
+        r"    xtick={%s}," % ",".join(str(l) for l in present_levels),
+        r"    xticklabels={%s}," % xticklabels,
+        r"    x tick label style={font=\scriptsize},",
+        r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},",
+        r"    grid=both, grid style={gray!15},",
+        r"    axis lines=left,",
+        r"]",
+    ]
+    for name, price in priced.items():
+        col = color_names[name]
+        body.append(
+            r"\addplot+[color=%s, mark=*, mark size=1.5pt, mark options={fill=%s}, line width=0.8pt] "
+            r"table [x=level, y=cost] {%sapicost_%s.dat};" % (col, col, data_prefix, col)
+        )
+        body.append(r"\addlegendentry{%s}" % price["display"])
+    body += [r"\end{axis}", r"\end{tikzpicture}"]
+    full_tex, _ = _write_standalone_and_body("api_cost", preamble, body, out_dir)
+    return full_tex, unresolved
+
+
 def _assert_well_formed(tex, name):
     for env in ("document", "tikzpicture"):
         assert tex.count(rf"\begin{{{env}}}") == tex.count(rf"\end{{{env}}}") == 1, f"{name}: unbalanced {env}"
@@ -574,42 +704,69 @@ def _assert_well_formed(tex, name):
     assert tex.count("{") == tex.count("}"), f"{name}: unbalanced braces"
 
 
+_FIGURE_SUBDIRS = {
+    "spread_leaderboard": "spread_leaderboard",
+    "landscape": "landscape",
+    "heatmap": "heatmap",
+    "resource_level": "resource_level",
+    "api_cost": "api_cost",
+}
+
+
 def generate(results_path, out_dir, data_prefix=None):
-    """data_prefix: path prefix baked into every `table {...}` reference inside
-    fig_spread_leaderboard.tex/fig_landscape.tex, e.g. "figures/tikz/". Needed
-    because \\includestandalone (without shell-escape) runs pgfplots from the
-    HOST document's own directory, not from out_dir -- a bare filename like
-    "bar_X.dat" only resolves when compiling standalone directly inside
-    out_dir, and fails with "Could not read table file" once the figure is
-    included from a thesis's main .tex elsewhere. Defaults to out_dir itself
-    (normalized to forward slashes, trailing slash added), which is correct
-    whenever the main document compiles from the same root this script was
-    run from -- override if your actual include path differs (e.g. the
-    figures live one level up from where the main .tex compiles).
+    """Each figure gets its own subdirectory under out_dir (figures/tikz/spread_leaderboard/,
+    figures/tikz/landscape/, etc.) -- one figure's .tex + .dat files sitting together,
+    rather than 50+ files flattened into one directory. data_prefix: BASE path prefix
+    (before the per-figure subdirectory name gets appended) baked into every
+    `table {...}` reference inside fig_spread_leaderboard.tex/fig_landscape.tex/
+    fig_resource_level.tex/fig_api_cost.tex, e.g. "figures/tikz". Needed because
+    \\includestandalone (without shell-escape) runs pgfplots from the HOST document's
+    own directory, not from out_dir -- a bare filename like "bar_X.dat" only resolves
+    when compiling standalone directly inside that figure's own subdirectory, and
+    fails with "Could not read table file" once the figure is included from a
+    thesis's main .tex elsewhere. Defaults to out_dir itself (normalized to forward
+    slashes), which is correct whenever the main document compiles from the same
+    root this script was run from -- override if your actual include path differs.
     """
     os.makedirs(out_dir, exist_ok=True)
-    if data_prefix is None:
-        data_prefix = out_dir.replace(os.sep, "/")
-        if data_prefix and not data_prefix.endswith("/"):
-            data_prefix += "/"
-    rows, models = load_rows(results_path)
+    base_prefix = out_dir.replace(os.sep, "/") if data_prefix is None else data_prefix
+    if base_prefix and not base_prefix.endswith("/"):
+        base_prefix += "/"
 
-    families = write_bar_and_scatter_data(rows, out_dir)
-    tex1 = gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=data_prefix)
-    tex2 = gen_landscape_tex(rows, families, out_dir, data_prefix=data_prefix)
-    tex3, top_langs = gen_heatmap_tex(rows, models, families, out_dir)
-    tex4, level_counts, unresolved_langs = gen_resource_level_tex(rows, models, families, out_dir, data_prefix=data_prefix)
+    def subdir(key):
+        path = os.path.join(out_dir, _FIGURE_SUBDIRS[key])
+        os.makedirs(path, exist_ok=True)
+        return path, f"{base_prefix}{_FIGURE_SUBDIRS[key]}/"
+
+    leaderboard_dir, leaderboard_prefix = subdir("spread_leaderboard")
+    landscape_dir, landscape_prefix = subdir("landscape")
+    heatmap_dir, _heatmap_prefix = subdir("heatmap")
+    resource_level_dir, resource_level_prefix = subdir("resource_level")
+    api_cost_dir, api_cost_prefix = subdir("api_cost")
+
+    rows, models = load_rows(results_path)
+    families = compute_families(rows)
+
+    write_bar_data(rows, families, leaderboard_dir)
+    write_scatter_data(rows, families, landscape_dir)
+    tex1 = gen_spread_leaderboard_tex(rows, families, leaderboard_dir, data_prefix=leaderboard_prefix)
+    tex2 = gen_landscape_tex(rows, families, landscape_dir, data_prefix=landscape_prefix)
+    tex3, top_langs = gen_heatmap_tex(rows, models, families, heatmap_dir)
+    tex4, level_counts, unresolved_langs = gen_resource_level_tex(
+        rows, models, families, resource_level_dir, data_prefix=resource_level_prefix
+    )
+    tex5, unresolved_cost_langs = gen_api_cost_tex(models, api_cost_dir, data_prefix=api_cost_prefix)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
     _assert_well_formed(tex2, "fig_landscape.tex")
     _assert_well_formed(tex3, "fig_heatmap.tex")
     _assert_well_formed(tex4, "fig_resource_level.tex")
+    _assert_well_formed(tex5, "fig_api_cost.tex")
 
     print(f"{len(rows)} models, {len(families)} families, heatmap languages: {top_langs}")
     print(f"resource-level coverage: {sum(level_counts.values())} resolved {dict(sorted(level_counts.items()))}, "
           f"{len(unresolved_langs)} not in Joshi et al.'s taxonomy: {unresolved_langs}")
-    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap,resource_level}}.tex (standalone, for test-compiling)")
-    print(f"wrote fig_{{spread_leaderboard,landscape,heatmap,resource_level}}_body.tex (for \\input from your thesis) to {out_dir}")
+    print("wrote one subdirectory per figure under", out_dir, "-", ", ".join(_FIGURE_SUBDIRS.values()))
     return rows, families, top_langs
 
 
