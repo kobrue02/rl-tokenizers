@@ -315,15 +315,13 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
     return full_tex
 
 
-def _grouped_model_columns(rows, families, gap=0.7):
+def _grouped_positions(rows, families, gap=0.7):
     """Orders models by family (matching the bar/scatter charts' grouping),
-    sorted by spread within each family, with a `gap`-unit horizontal break
-    between family blocks. This is what visually separates the heatmap into
-    per-family sections -- acting like small-multiple subplots -- WITHOUT
-    needing genuinely separate tikz pictures, which would force repeating
-    the (up to 20) language row labels once per family instead of once
-    total. Returns (ordered_rows, {model_name: x_position}, [(family,
-    x_start, x_end), ...], total_width)."""
+    sorted by spread within each family, with a `gap`-unit break between
+    family blocks. Axis-agnostic -- used for the heatmap's ROW axis (models
+    now go down the page, not across it -- see gen_heatmap_tex's own
+    docstring for why). Returns (ordered_rows, {model_name: position},
+    [(family, start, end), ...], total_extent)."""
     ordered = []
     positions = {}
     blocks = []
@@ -339,18 +337,38 @@ def _grouped_model_columns(rows, families, gap=0.7):
             x += 1.0
         blocks.append((fam, x_start, x))
         x += gap
-    total_width = x - gap if blocks else 0.0
-    return ordered, positions, blocks, total_width
+    total = x - gap if blocks else 0.0
+    return ordered, positions, blocks, total
+
+
+def _estimate_label_width_cm(s, pt_per_char=2.6):
+    """Rough (not exact-metrics) estimate of a \\tiny-font label's rendered
+    width, just to reserve enough left-margin for the row-label column
+    before placing the family indicator bar further left -- generous by
+    design, since underestimating causes real overlap and overestimating
+    just leaves harmless whitespace."""
+    pt_to_cm = 0.03514
+    return len(s) * pt_per_char * pt_to_cm
 
 
 def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42, gap=0.7):
+    """Models go down the ROWS (y-axis, family-grouped, same as the
+    leaderboard's ordering), languages go across the COLUMNS (x-axis, plain
+    left-to-right, worst first) -- confirmed live (a real Overleaf render)
+    that the opposite orientation (33 models across, 20 languages down) came
+    out ~18cm wide, wider than a normal page's text width, forcing either an
+    ugly \\resizebox shrink (which shrinks the already-\\tiny labels into
+    illegibility) or a landscape page. Putting the WIDE axis (33 models) on
+    the TALL dimension of a portrait page and the NARROW axis (20 languages)
+    on its width fits comfortably without shrinking anything."""
     worst_by_lang = {}
     for m in models.values():
         for lang, v in m["token_parity"].items():
             worst_by_lang[lang] = max(worst_by_lang.get(lang, 0), v)
     top_langs = sorted(worst_by_lang, key=lambda l: -worst_by_lang[l])[:n_langs]
+    n_cols = len(top_langs)
 
-    ordered, positions, blocks, total_width = _grouped_model_columns(rows, families, gap=gap)
+    ordered, row_pos, blocks, total_height = _grouped_positions(rows, families, gap=gap)
     all_vals = [models[r["name"]]["token_parity"][l] for r in ordered for l in top_langs]
     vmax = max(all_vals)
 
@@ -358,9 +376,12 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
         t = math.sqrt(max(0.0, v - 1)) / math.sqrt(max(vmax - 1, 1e-9))
         return min(n_buckets - 1, int(t * n_buckets))
 
+    def y_of(pos):
+        """Converts a "rank from top" position into TikZ's bottom-up y."""
+        return total_height - pos - 1
+
     palette = [viridis(i / (n_buckets - 1)) for i in range(n_buckets)]
 
-    n_rows_ = len(top_langs)
     preamble = [r"\documentclass{standalone}", r"\usepackage{tikz}", r"\usepackage{xcolor}"]
     body = [r"\begin{tikzpicture}[x=%.2fcm, y=%.2fcm]" % (cell_cm, cell_cm)]
     for i, (r_, g_, b_) in enumerate(palette):
@@ -370,61 +391,63 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
         body.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
 
     # Cells.
-    for yi, lang in enumerate(top_langs):
-        for r in ordered:
-            xpos = positions[r["name"]]
+    for r in ordered:
+        y = y_of(row_pos[r["name"]])
+        for xi, lang in enumerate(top_langs):
             v = models[r["name"]]["token_parity"][lang]
             b = bucket_of(v)
-            body.append(r"\fill[heat%d] (%.2f,%d) rectangle ++(1,1);" % (b, xpos, n_rows_ - 1 - yi))
+            body.append(r"\fill[heat%d] (%d,%.2f) rectangle ++(1,1);" % (b, xi, y))
 
-    # Gridlines drawn PER BLOCK (not one grid spanning the whole width) so the
-    # gap between families reads as a real visual break, not a filled seam.
-    for _, x0, x1 in blocks:
-        body.append(r"\draw[white, line width=0.3pt] (%.2f,0) grid (%.2f,%d);" % (x0, x1, n_rows_))
+    # Gridlines drawn PER BLOCK (not one grid spanning the whole height) so
+    # the gap between families reads as a real visual break, not a filled seam.
+    for _, y0, y1 in blocks:
+        body.append(r"\draw[white, line width=0.3pt] (0,%.2f) grid (%d,%.2f);" % (y_of(y1) + 1, n_cols, y_of(y0) + 1))
 
-    # Row labels: real language name (via langcodes) + the code in small gray
-    # text, so the figure is legible without the code being the ONLY thing
-    # tying a row back to the underlying data.
-    for yi, lang in enumerate(top_langs):
-        body.append(
-            r"\node[anchor=east, font=\tiny] at (-0.2,%.1f) {%s \textcolor{gray}{\texttt{\tiny(%s)}}};"
-            % (n_rows_ - 1 - yi + 0.5, esc(lang_display_name(lang)), esc(lang))
-        )
-
-    # Column labels, below each block.
+    # Row labels: plain model short names, left of the grid.
     for r in ordered:
-        xpos = positions[r["name"]]
+        y = y_of(row_pos[r["name"]])
+        body.append(r"\node[anchor=east, font=\tiny] at (-0.2,%.2f) {%s};" % (y + 0.5, esc(r["short"])))
+
+    # Column labels: real language name (via langcodes) + the code in small
+    # gray text, rotated, above the grid.
+    for xi, lang in enumerate(top_langs):
         body.append(
-            r"\node[anchor=north east, rotate=45, font=\tiny] at (%.2f,-0.15) {%s};" % (xpos + 0.5, esc(r["short"]))
+            r"\node[anchor=south west, rotate=45, font=\tiny] at (%d,%.2f) {%s \textcolor{gray}{\texttt{\tiny(%s)}}};"
+            % (xi, total_height + 0.15, esc(lang_display_name(lang)), esc(lang))
         )
 
-    # Family header bars + labels, above the grid -- ties this figure's
-    # grouping visually to the same family colors used in the leaderboard
-    # and landscape figures.
-    header_y0 = n_rows_ + 0.15
-    header_y1 = header_y0 + 0.35
-    for fam, x0, x1 in blocks:
+    # Family header: a colored vertical bar + rotated family name, further
+    # left than the row labels -- reserve enough margin (estimated from the
+    # longest actual model short-name string) so the bar never collides with
+    # row-label text.
+    row_label_margin = max((_estimate_label_width_cm(r["short"]) for r in ordered), default=1.0) / cell_cm
+    header_x1 = -(0.3 + row_label_margin + 0.3)
+    header_x0 = header_x1 - 0.4
+    for fam, y0, y1 in blocks:
         col = _FAMILY_COLORS.get(fam, "otherCol")
-        body.append(r"\fill[%s] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (col, x0, header_y0, x1, header_y1))
         body.append(
-            r"\node[anchor=south, font=\tiny\bfseries] at (%.2f,%.3f) {%s};"
-            % ((x0 + x1) / 2, header_y1 + 0.08, esc(fam))
+            r"\fill[%s] (%.2f,%.2f) rectangle (%.2f,%.2f);" % (col, header_x0, y_of(y1) + 1, header_x1, y_of(y0) + 1)
+        )
+        body.append(
+            r"\node[anchor=south, rotate=90, font=\tiny\bfseries] at (%.2f,%.2f) {%s};"
+            % (header_x0 - 0.1, (y_of(y1) + 1 + y_of(y0) + 1) / 2, esc(fam))
         )
 
-    legend_x0 = total_width + 1.2
+    # Legend, to the right of the grid, spanning the full height.
+    legend_x0 = n_cols + 0.8
     legend_steps = 20
     for i in range(legend_steps):
         frac = i / (legend_steps - 1)
         b = min(n_buckets - 1, int(frac * n_buckets))
-        y0 = n_rows_ * i / legend_steps
-        y1 = n_rows_ * (i + 1) / legend_steps
+        y0 = total_height * i / legend_steps
+        y1 = total_height * (i + 1) / legend_steps
         body.append(r"\fill[heat%d] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (b, legend_x0, y0, legend_x0 + 0.8, y1))
-    body.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, n_rows_))
+    body.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, total_height))
     body.append(r"\node[anchor=west, font=\tiny] at (%.2f,0) {1.0$\times$ (parity)};" % (legend_x0 + 0.9))
-    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, n_rows_, vmax))
+    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, total_height, vmax))
     body.append(
         r"\node[anchor=west, font=\tiny, align=left, text width=2.2cm] at (%.2f,%.2f) {color scale: "
-        r"$\sqrt{v-1}$, matching the online dashboard};" % (legend_x0 + 0.9, n_rows_ * 0.5)
+        r"$\sqrt{v-1}$, matching the online dashboard};" % (legend_x0 + 0.9, total_height * 0.5)
     )
     body.append(r"\end{tikzpicture}")
     full_tex, _ = _write_standalone_and_body("heatmap", preamble, body, out_dir)

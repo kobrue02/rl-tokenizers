@@ -58,6 +58,29 @@ Each figure comes in two forms:
 \end{figure}
 ```
 
+The heatmap is oriented with models down the ROWS (family-grouped, same
+ordering as the leaderboard) and languages across the COLUMNS -- NOT the
+other way around. An earlier version put all 33 models across as columns,
+which came out ~18cm wide (wider than a typical page, forcing either an ugly
+`\resizebox` shrink of the already-`\tiny` text, or a landscape page); with
+only ~20 language columns, the natural width comes out closer to ~13cm,
+which should fit a normal portrait page directly:
+
+```latex
+\begin{figure}[htbp]
+  \centering
+  \input{figures/tikz/fig_heatmap_body.tex}
+  \caption{...}
+  \label{fig:worst-language-heatmap}
+\end{figure}
+```
+
+The row-label margin (where the family color bar sits) is sized from an
+ESTIMATE of each model name's rendered width at `\tiny`, not exact TeX
+metrics -- if it still doesn't quite fit your page, wrap the `\input` in
+`\resizebox{\linewidth}{!}{...}` (needs `\usepackage{graphicx}`) as a fallback;
+it'll need a much smaller shrink than before, so text should stay legible.
+
 This needs the relevant packages/colors declared ONCE in your thesis's main
 preamble (NOT `\usepackage{standalone}` -- that's no longer needed at all):
 
