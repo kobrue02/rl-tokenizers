@@ -1,0 +1,15 @@
+# systems/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
+#
+# --trust-remote-code applies to ALL three repos below (harmless no-op for
+# the two that don't need it) -- required for moonshotai/Kimi-K3's own
+# custom tokenizer class. meta-llama/Llama-3.1-8B-Instruct is a GATED repo:
+# it needs its license accepted on huggingface.co AND your own HF_TOKEN to
+# actually have that access granted (see jobs/evaluate_hf_frontier.sh's own
+# prerequisites) -- if you don't have access, drop it from the list below
+# rather than let the whole job fail on one repo.
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct"
+trust_remote_code: true
+eval_data_source: bouquet_test
+output: results/hf_frontier_comparison.json
+use_wandb: true
+run_name: hf_frontier_v1

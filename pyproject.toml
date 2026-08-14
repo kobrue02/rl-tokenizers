@@ -14,9 +14,11 @@ dependencies = [
     "pyarrow>=25.0.0",
     "pyyaml>=6.0.3",
     "sacrebleu>=2.6.0",
+    "tiktoken>=0.13.0",
     "tokenizers>=0.22.2",
     "torch>=2.13.0",
     "tqdm>=4.70.0",
+    "transformers>=5.15.0",
     "wandb>=0.28.1",
 ]
 

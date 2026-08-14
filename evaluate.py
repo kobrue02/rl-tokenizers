@@ -23,6 +23,10 @@ TOKENIZERS = {
     "fanta": "systems.fanta.evaluate",
     "superbpe": "systems.superbpe.evaluate",
     "bpe": "systems.bpe.evaluate",
+    "hf_frontier": "systems.hf_frontier.evaluate",  # not a trained tokenizer
+    # this project fits itself -- an arbitrary HuggingFace repo's own
+    # tokenizer (--hf-repo-id), loaded tokenizer-only, see that module's
+    # own docstring.
 }
 
 
