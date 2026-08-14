@@ -126,7 +126,8 @@ def evaluate_claude_on_groups(eval_groups, count_fn, anchor_lang="eng", max_work
     waiting on network round-trip latency (see model.py's own docstring).
     A single (group, language) call that ultimately fails (exhausted
     retries) is dropped from the aggregate stats, not treated as a fatal
-    error for the whole run -- printed as a count, not silently swallowed.
+    error for the whole run -- printed immediately (group, lang, exception)
+    as it happens, not silently swallowed or only reported as a count later.
 
     Returns {"per_lang_compression": {...}, "avg_compression": float,
     "fertility": {...}, "token_parity": {...}, "token_parity_anchor": str,
@@ -146,14 +147,14 @@ def evaluate_claude_on_groups(eval_groups, count_fn, anchor_lang="eng", max_work
                 counts[(gi, lang)] = fut.result()
             except Exception as e:
                 errors.append((gi, lang, str(e)))
+                print(f"  [FAILED] group={gi} lang={lang}: {type(e).__name__}: {e}", flush=True)
             done += 1
             if progress_every and done % progress_every == 0:
                 print(f"  ...{done}/{len(tasks)} count_tokens calls done ({len(errors)} failed so far)")
 
     if errors:
         print(
-            f"  {len(errors)} of {len(tasks)} count_tokens calls failed and were dropped from "
-            f"aggregate stats -- e.g. {errors[:3]}"
+            f"  {len(errors)} of {len(tasks)} count_tokens calls failed and were dropped from aggregate stats"
         )
 
     compressions_by_lang = defaultdict(list)
