@@ -1,0 +1,26 @@
+{
+  "accuracy": 0.338,
+  "n": 1000,
+  "per_language": {
+    "en": {
+      "accuracy": 0.335,
+      "n": 200
+    },
+    "de": {
+      "accuracy": 0.32,
+      "n": 200
+    },
+    "fr": {
+      "accuracy": 0.365,
+      "n": 200
+    },
+    "ar": {
+      "accuracy": 0.335,
+      "n": 200
+    },
+    "zh": {
+      "accuracy": 0.335,
+      "n": 200
+    }
+  }
+}
