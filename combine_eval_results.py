@@ -45,6 +45,18 @@ def combine_results(paths):
             combined[key] = value
             sources_by_key[key] = path
 
+    # A key can be recorded as "_failed" in one input file (e.g. an earlier,
+    # buggy run) and appear as a real successful entry in another (e.g. a
+    # later re-run of just that one model) -- regardless of which file came
+    # first, a genuine success anywhere must win, or downstream consumers
+    # see the same model listed as both successful and failed at once.
+    stale_failures = [k for k in failed if k in combined]
+    for key in stale_failures:
+        del failed[key]
+    if stale_failures:
+        print(f"note: {len(stale_failures)} entr{'y' if len(stale_failures) == 1 else 'ies'} "
+              f"recorded as failed in one input file but succeeded in another, kept as successful: {stale_failures}")
+
     missing_renyi = [k for k, v in combined.items() if not v.get("renyi")]
     if missing_renyi:
         plural = "y" if len(missing_renyi) == 1 else "ies"
