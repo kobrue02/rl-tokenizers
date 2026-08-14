@@ -15,6 +15,7 @@
     legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
     grid=both, grid style={gray!15},
     axis lines=left,
+    enlarge x limits={abs=0.15}, enlarge y limits={abs=0.6},
 ]
 \addplot+[only marks, mark=*, mark size=2pt, color=openaiCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_OpenAI_tiktoken.dat};
 \addlegendentry{OpenAI/tiktoken}
@@ -26,9 +27,9 @@
 \addlegendentry{Encoder-only}
 \addplot+[only marks, mark=*, mark size=2pt, color=otherCol] table [x=avg_compression, y=spread] {figures/tikz/scatter_Other.dat};
 \addlegendentry{Other}
-\node[font=\scriptsize, anchor=west] at (axis cs:4.099,4.853) {xlm-roberta-base};
-\node[font=\scriptsize, anchor=west] at (axis cs:4.340,20.492) {bert-base-cased};
-\node[font=\scriptsize, anchor=west] at (axis cs:4.404,19.723) {distilbert-base-uncased};
+\node[font=\scriptsize, anchor=south east] at (axis cs:3.989,4.913) {xlm-roberta-base};
+\node[font=\scriptsize, anchor=south east] at (axis cs:4.230,20.552) {bert-base-cased};
+\node[font=\scriptsize, anchor=north east] at (axis cs:4.294,19.663) {distilbert-base-uncased};
 \end{axis}
 \end{tikzpicture}
 \end{document}

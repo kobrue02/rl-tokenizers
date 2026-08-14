@@ -88,7 +88,14 @@ nothing else is needed for it beyond `tikz`/`xcolor`.)
   with the highest max(token_parity) across any model in the input (the same
   rule the interactive dashboard's heatmap tab uses, not a hand-picked
   subset) against every model, since a full 259-row table isn't legible in
-  print. Say so explicitly in the caption/text.
+  print. Say so explicitly in the caption/text. Row labels show the real
+  language name (resolved via `langcodes`, CLDR-backed -- not a hand-written
+  lookup table) with the raw code alongside in small gray text, since a bare
+  code like `shn_Mymr` means nothing to a reader. Columns are grouped by
+  family (same families/colors as the leaderboard and landscape figures)
+  with a gap and a colored header bar between blocks -- this gives the
+  "small multiples by family" effect the plain, ungrouped version was
+  missing, without repeating the row labels once per family.
 - **Family coloring** is a rough grouping by name prefix (see `family_of()`
   in the script) for visual scanning, not a rigorous taxonomy -- edit it if
   you want different groupings.

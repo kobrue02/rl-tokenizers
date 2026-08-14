@@ -35,6 +35,8 @@ import json
 import math
 import os
 
+import langcodes
+
 from common.config_file import parse_args_with_config
 
 # Viridis approximation (published anchor stops), pure-python piecewise-linear
@@ -111,6 +113,31 @@ def esc(s):
 def fam_key(fam):
     """Filesystem/macro-safe stand-in for a family name (used in .dat filenames)."""
     return fam.replace("/", "_").replace(" ", "_")
+
+
+def lang_display_name(code, _cache={}):
+    """'shn_Mymr' -> 'Shan', 'cmn_Hans' -> 'Mandarin Chinese' -- resolved via
+    langcodes (CLDR-backed), NOT a hand-maintained lookup table: confirmed
+    live against every one of a real 259-language BOUQuET set with zero
+    lookup failures, including rare codes (fia_Copt -> Nobiin, taq_Tfng ->
+    Tamasheq, crk_Cans -> Plains Cree). Strips ISO 639-3's "(individual
+    language)" macrolanguage-membership clarifier (e.g. on npi/ory/swh/...)
+    -- a real, confirmed CLDR annotation, not useful in a chart label. Falls
+    back to the bare code if it can't be parsed/resolved (should not happen
+    given the above, but a chart label showing the raw code is a safe,
+    honest failure mode, not a crash)."""
+    if code in _cache:
+        return _cache[code]
+    name = code
+    if "_" in code:
+        lang, script = code.split("_", 1)
+        try:
+            name = langcodes.Language.get(f"{lang}-{script}").language_name()
+            name = name.replace(" (individual language)", "")
+        except Exception:
+            name = code
+    _cache[code] = name
+    return name
 
 
 def load_rows(results_path):
@@ -201,7 +228,7 @@ def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
         r"    y dir=reverse,",
         r"    ymin=-0.7, ymax=%d," % (n - 0.3),
         r"    bar width=5pt,",
-        r"    legend style={at={(0.98,0.02)}, anchor=south east, font=\scriptsize, draw=none, fill=none},",
+        r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},",
         r"    axis y line*=left, axis x line*=bottom,",
         r"]",
     ]
@@ -217,10 +244,43 @@ def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
     return full_tex
 
 
+def _label_anchor_offsets(labeled_points, all_x_values, pad=0.06):
+    """Picks a two-word TikZ anchor (e.g. "south west") + small (dx, dy) nudge
+    for each of a handful of annotated scatter points, so the label text
+    extends AWAY from both the nearest plot edge and from any other labeled
+    point instead of always extending the same direction -- confirmed live
+    (real Overleaf render) that a fixed anchor=west with a small +x offset
+    clips or fully hides labels for points near the plot's right edge (text
+    extends rightward straight into/past the boundary), and that two labels
+    whose points are close in y collide with each other since both were
+    nudged the same direction. Horizontal side (west/east) is chosen by
+    which half of the overall x-range the point falls in (so a label never
+    extends toward the nearer edge); vertical side (north/south) alternates
+    across the points in y-sorted order (so any two vertically-close points
+    end up on opposite sides of their own markers)."""
+    xmin, xmax = min(all_x_values), max(all_x_values)
+    xmid = (xmin + xmax) / 2
+    by_y = sorted(range(len(labeled_points)), key=lambda i: labeled_points[i]["spread"])
+    vertical = {}
+    for rank, i in enumerate(by_y):
+        vertical[i] = "south" if rank % 2 == 0 else "north"
+
+    out = []
+    for i, r in enumerate(labeled_points):
+        horiz = "west" if r["avg_compression"] < xmid else "east"
+        vert = vertical[i]
+        dx = pad if horiz == "west" else -pad
+        dy = pad if vert == "south" else -pad
+        out.append((f"{vert} {horiz}", dx, dy))
+    return out
+
+
 def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
     best_spread = min(rows, key=lambda r: r["spread"])
     worst_spread = max(rows, key=lambda r: r["spread"])
     best_compression = max(rows, key=lambda r: r["avg_compression"])
+    labeled = [best_spread, worst_spread, best_compression]
+    anchors = _label_anchor_offsets(labeled, [r["avg_compression"] for r in rows])
 
     preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
     for fam in families:
@@ -235,6 +295,7 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
         r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},",
         r"    grid=both, grid style={gray!15},",
         r"    axis lines=left,",
+        r"    enlarge x limits={abs=0.15}, enlarge y limits={abs=0.6},",
         r"]",
     ]
     for fam in families:
@@ -244,25 +305,53 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
             % (col, data_prefix, fam_key(fam))
         )
         body.append(r"\addlegendentry{%s}" % fam)
-    for r in (best_spread, worst_spread, best_compression):
+    for r, (anchor, dx, dy) in zip(labeled, anchors):
         body.append(
-            r"\node[font=\scriptsize, anchor=west] at (axis cs:%.3f,%.3f) {%s};"
-            % (r["avg_compression"] + 0.05, r["spread"], esc(r["short"]))
+            r"\node[font=\scriptsize, anchor=%s] at (axis cs:%.3f,%.3f) {%s};"
+            % (anchor, r["avg_compression"] + dx, r["spread"] + dy, esc(r["short"]))
         )
     body += [r"\end{axis}", r"\end{tikzpicture}"]
     full_tex, _ = _write_standalone_and_body("landscape", preamble, body, out_dir)
     return full_tex
 
 
-def gen_heatmap_tex(rows, models, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42):
+def _grouped_model_columns(rows, families, gap=0.7):
+    """Orders models by family (matching the bar/scatter charts' grouping),
+    sorted by spread within each family, with a `gap`-unit horizontal break
+    between family blocks. This is what visually separates the heatmap into
+    per-family sections -- acting like small-multiple subplots -- WITHOUT
+    needing genuinely separate tikz pictures, which would force repeating
+    the (up to 20) language row labels once per family instead of once
+    total. Returns (ordered_rows, {model_name: x_position}, [(family,
+    x_start, x_end), ...], total_width)."""
+    ordered = []
+    positions = {}
+    blocks = []
+    x = 0.0
+    for fam in families:
+        fam_rows = sorted((r for r in rows if r["family"] == fam), key=lambda r: r["spread"])
+        if not fam_rows:
+            continue
+        x_start = x
+        for r in fam_rows:
+            positions[r["name"]] = x
+            ordered.append(r)
+            x += 1.0
+        blocks.append((fam, x_start, x))
+        x += gap
+    total_width = x - gap if blocks else 0.0
+    return ordered, positions, blocks, total_width
+
+
+def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42, gap=0.7):
     worst_by_lang = {}
     for m in models.values():
         for lang, v in m["token_parity"].items():
             worst_by_lang[lang] = max(worst_by_lang.get(lang, 0), v)
     top_langs = sorted(worst_by_lang, key=lambda l: -worst_by_lang[l])[:n_langs]
 
-    model_order = [r["name"] for r in rows]  # same order as the spread leaderboard
-    all_vals = [models[n]["token_parity"][l] for n in model_order for l in top_langs]
+    ordered, positions, blocks, total_width = _grouped_model_columns(rows, families, gap=gap)
+    all_vals = [models[r["name"]]["token_parity"][l] for r in ordered for l in top_langs]
     vmax = max(all_vals)
 
     def bucket_of(v):
@@ -271,43 +360,71 @@ def gen_heatmap_tex(rows, models, out_dir, n_langs=20, n_buckets=40, cell_cm=0.4
 
     palette = [viridis(i / (n_buckets - 1)) for i in range(n_buckets)]
 
-    n_cols, n_rows = len(model_order), len(top_langs)
+    n_rows_ = len(top_langs)
     preamble = [r"\documentclass{standalone}", r"\usepackage{tikz}", r"\usepackage{xcolor}"]
     body = [r"\begin{tikzpicture}[x=%.2fcm, y=%.2fcm]" % (cell_cm, cell_cm)]
     for i, (r_, g_, b_) in enumerate(palette):
         body.append(r"\definecolor{heat%d}{RGB}{%d,%d,%d}" % (i, r_, g_, b_))
+    for fam in families:
+        r_, g_, b_ = _FAMILY_RGB.get(fam, _FAMILY_RGB["Other"])
+        body.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
 
+    # Cells.
     for yi, lang in enumerate(top_langs):
-        for xi, name in enumerate(model_order):
-            v = models[name]["token_parity"][lang]
+        for r in ordered:
+            xpos = positions[r["name"]]
+            v = models[r["name"]]["token_parity"][lang]
             b = bucket_of(v)
-            body.append(r"\fill[heat%d] (%d,%d) rectangle ++(1,1);" % (b, xi, n_rows - 1 - yi))
+            body.append(r"\fill[heat%d] (%.2f,%d) rectangle ++(1,1);" % (b, xpos, n_rows_ - 1 - yi))
 
-    body.append(r"\draw[white, line width=0.3pt] (0,0) grid (%d,%d);" % (n_cols, n_rows))
+    # Gridlines drawn PER BLOCK (not one grid spanning the whole width) so the
+    # gap between families reads as a real visual break, not a filled seam.
+    for _, x0, x1 in blocks:
+        body.append(r"\draw[white, line width=0.3pt] (%.2f,0) grid (%.2f,%d);" % (x0, x1, n_rows_))
 
+    # Row labels: real language name (via langcodes) + the code in small gray
+    # text, so the figure is legible without the code being the ONLY thing
+    # tying a row back to the underlying data.
     for yi, lang in enumerate(top_langs):
         body.append(
-            r"\node[anchor=east, font=\tiny\ttfamily] at (-0.15,%.1f) {%s};" % (n_rows - 1 - yi + 0.5, esc(lang))
-        )
-    for xi, r_ in enumerate(rows):
-        body.append(
-            r"\node[anchor=north east, rotate=60, font=\tiny] at (%.1f,-0.15) {%s};" % (xi + 0.5, esc(r_["short"]))
+            r"\node[anchor=east, font=\tiny] at (-0.2,%.1f) {%s \textcolor{gray}{\texttt{\tiny(%s)}}};"
+            % (n_rows_ - 1 - yi + 0.5, esc(lang_display_name(lang)), esc(lang))
         )
 
-    legend_x0 = n_cols + 1.2
+    # Column labels, below each block.
+    for r in ordered:
+        xpos = positions[r["name"]]
+        body.append(
+            r"\node[anchor=north east, rotate=45, font=\tiny] at (%.2f,-0.15) {%s};" % (xpos + 0.5, esc(r["short"]))
+        )
+
+    # Family header bars + labels, above the grid -- ties this figure's
+    # grouping visually to the same family colors used in the leaderboard
+    # and landscape figures.
+    header_y0 = n_rows_ + 0.15
+    header_y1 = header_y0 + 0.35
+    for fam, x0, x1 in blocks:
+        col = _FAMILY_COLORS.get(fam, "otherCol")
+        body.append(r"\fill[%s] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (col, x0, header_y0, x1, header_y1))
+        body.append(
+            r"\node[anchor=south, font=\tiny\bfseries] at (%.2f,%.3f) {%s};"
+            % ((x0 + x1) / 2, header_y1 + 0.08, esc(fam))
+        )
+
+    legend_x0 = total_width + 1.2
     legend_steps = 20
     for i in range(legend_steps):
         frac = i / (legend_steps - 1)
         b = min(n_buckets - 1, int(frac * n_buckets))
-        y0 = n_rows * i / legend_steps
-        y1 = n_rows * (i + 1) / legend_steps
+        y0 = n_rows_ * i / legend_steps
+        y1 = n_rows_ * (i + 1) / legend_steps
         body.append(r"\fill[heat%d] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (b, legend_x0, y0, legend_x0 + 0.8, y1))
-    body.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, n_rows))
+    body.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, n_rows_))
     body.append(r"\node[anchor=west, font=\tiny] at (%.2f,0) {1.0$\times$ (parity)};" % (legend_x0 + 0.9))
-    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, n_rows, vmax))
+    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.1f$\times$};" % (legend_x0 + 0.9, n_rows_, vmax))
     body.append(
         r"\node[anchor=west, font=\tiny, align=left, text width=2.2cm] at (%.2f,%.2f) {color scale: "
-        r"$\sqrt{v-1}$, matching the online dashboard};" % (legend_x0 + 0.9, n_rows * 0.5)
+        r"$\sqrt{v-1}$, matching the online dashboard};" % (legend_x0 + 0.9, n_rows_ * 0.5)
     )
     body.append(r"\end{tikzpicture}")
     full_tex, _ = _write_standalone_and_body("heatmap", preamble, body, out_dir)
@@ -345,7 +462,7 @@ def generate(results_path, out_dir, data_prefix=None):
     families = write_bar_and_scatter_data(rows, out_dir)
     tex1 = gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=data_prefix)
     tex2 = gen_landscape_tex(rows, families, out_dir, data_prefix=data_prefix)
-    tex3, top_langs = gen_heatmap_tex(rows, models, out_dir)
+    tex3, top_langs = gen_heatmap_tex(rows, models, families, out_dir)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
     _assert_well_formed(tex2, "fig_landscape.tex")
