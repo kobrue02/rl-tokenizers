@@ -27,6 +27,11 @@ TOKENIZERS = {
     # this project fits itself -- an arbitrary HuggingFace repo's own
     # tokenizer (--hf-repo-id), loaded tokenizer-only, see that module's
     # own docstring.
+    "claude_tokenizer": "systems.claude_tokenizer.evaluate",  # also not a
+    # trained tokenizer this project fits, and not even a local one --
+    # token COUNTS only, via Anthropic's own count_tokens API, so it can't
+    # report renyi/gini the way every other tokenizer here can (see that
+    # module's own docstring for why).
 }
 
 

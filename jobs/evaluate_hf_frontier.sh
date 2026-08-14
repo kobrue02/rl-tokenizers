@@ -3,7 +3,7 @@
 #SBATCH --partition=cpu_il
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --time=08:00:00
+#SBATCH --time=11:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
@@ -17,20 +17,24 @@
 # all -- see model.py's own docstring confirming NO model weights are ever
 # downloaded), same cpu_il reasoning as jobs/evaluate.sh.
 #
-# --time=08:00:00: a CONSERVATIVE guess, not a benchmarked number at this
-# scale (configs/eval_hf_frontier.yml currently lists 16 repos) -- unlike
-# jobs/evaluate.sh's own from-scratch checkpoints, a frontier tokenizer's
-# encode() is plain BPE/SentencePiece merge application with no neural net
-# at all, so per-row tokenization cost over BOUQuET test's ~272k rows should
-# be genuinely fast; the real per-repo cost is mostly download/load overhead
-# (fetching each repo's own vocab/merges files, then building the tokenizer
-# object) repeated 16 times, not compute that scales with row count the way
-# jobs/evaluate.sh's own neural forward-pass cost does. Widen this if you add
-# even more repos, or narrow a run with --num-groups / --eval-data-source
-# bouquet (dev, not test) for a quicker exploratory pass. One repo failing
-# (see systems/hf_frontier/evaluate.py's own per-repo error isolation)
-# doesn't abort the rest of the list, so a bad/gated-without-access repo in
-# the list costs time on just that one repo, not the whole job.
+# --time=11:00:00: widened again now that configs/eval_hf_frontier.yml lists
+# 33 repos (a prior real run at 16 repos completed inside 8h; the 25-repo
+# widening to 10h was never itself tested against a real run) -- still not a
+# benchmarked number at this exact scale. The 7 new tiktoken: entries add
+# close to NO extra cost (no HF Hub download at all -- tiktoken.get_encoding()
+# loads its own small bundled encoding data), and meta-models/Muse-Glimmer-30B
+# is one more ordinary tokenizer-only load, same cost class as the existing
+# frontier repos. Unlike jobs/evaluate.sh's own from-scratch checkpoints, a
+# frontier tokenizer's encode() is plain BPE/SentencePiece/WordPiece merge
+# application with no neural net at all, so per-row tokenization cost over
+# BOUQuET test's ~272k rows should be genuinely fast; the real per-repo cost
+# is mostly download/load overhead, not compute that scales with row count
+# the way jobs/evaluate.sh's own neural forward-pass cost does. Widen this
+# further if you add even more repos, or narrow a run with --num-groups /
+# --eval-data-source bouquet (dev, not test) for a quicker exploratory pass.
+# One repo failing (see systems/hf_frontier/evaluate.py's own per-repo error
+# isolation) doesn't abort the rest of the list, so a bad/gated-without-access
+# repo in the list costs time on just that one repo, not the whole job.
 #
 # Usage:
 #   sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
@@ -55,8 +59,18 @@
 #     without accepted access fails to load just that one repo's tokenizer,
 #     even though BOUQuET's own access is fine, and now doesn't abort the
 #     rest of the list either): in configs/eval_hf_frontier.yml's current
-#     16-repo list, that's meta-llama/Llama-3.1-8B-Instruct, meta-llama/
-#     Llama-3.3-70B-Instruct, and google/gemma-7b.
+#     33-repo list, that's meta-llama/Llama-3.1-8B-Instruct, meta-llama/
+#     Llama-3.3-70B-Instruct, and google/gemma-7b -- nothing else (the 9
+#     encoder repos, meta-models/Muse-Glimmer-30B, and the 7 tiktoken:
+#     entries) is gated.
+#   - microsoft/deberta-v3-base's tokenizer needs the `sentencepiece`
+#     package (a real pyproject.toml dependency, installed via `uv sync`
+#     below -- not an extra manual step).
+#   - The 7 "tiktoken:{name}" entries (e.g. "tiktoken:cl100k_base") aren't
+#     HF Hub repos at all -- see systems/hf_frontier/model.py's own module
+#     docstring, scheme 3 -- loaded directly via the `tiktoken` package
+#     (also a real pyproject.toml dependency), no HF_TOKEN/--trust-remote-code
+#     relevance for them.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers

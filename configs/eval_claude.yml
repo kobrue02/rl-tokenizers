@@ -1,0 +1,24 @@
+# systems/claude_tokenizer/evaluate.py -- sbatch jobs/evaluate_claude.sh -c configs/eval_claude.yml
+#
+# The FULL BOUQuET test split (no --num-groups cap -- an explicit choice,
+# not an oversight, see systems/claude_tokenizer/evaluate.py's own --num-groups
+# help): ~272k (group, language) pairs, each one real count_tokens API call
+# (no batch endpoint exists). --rpm 2000 matches the "Start" usage tier's
+# published limit -- raise this if you're actually on Build (4000) or Scale
+# (8000), since --rpm is a real cap this run paces itself against, not just
+# documentation.
+#
+# renyi/gini are NOT reported for this entry (see model.py's own module
+# docstring): Anthropic's public count_tokens API returns only a total
+# token count, never the per-token identities Rényi efficiency/Gini need --
+# a genuine limitation of the API, not a bug. This was an explicit decision
+# (report compression/fertility/token_parity honestly rather than fake
+# placeholder token identities to force renyi/gini to compute a
+# meaningless, misleadingly-perfect result).
+model: "claude-opus-5"
+rpm: 2000
+max_workers: 25
+eval_data_source: bouquet_test
+output: results/claude_comparison.json
+use_wandb: true
+run_name: claude_tokenizer_v1

@@ -1,32 +1,66 @@
 # systems/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
 #
-# 16 repos, verified live (HfApi().model_info + a real tokenizer-only load +
+# 33 repos, verified live (HfApi().model_info + a real tokenizer-only load +
 # span-reconstruction round-trip via systems/hf_frontier/model.py, confirmed
 # for every one of these before adding it here -- none guessed):
+#   - meta-models/Muse-Glimmer-30B: a genuinely real, very recently released
+#     repo (confirmed live via HfApi -- created 2026-08-09, real safetensors
+#     weights, 165k+ downloads already) that simply postdates this
+#     assistant's own training-data cutoff, hence not recognized offhand;
+#     verified rather than assumed to be real OR fabricated either way, per
+#     this project's own "never guess a repo exists" discipline. Byte-level
+#     BPE, 200k vocab, round-trips cleanly, no fix needed.
+#   - 7 tiktoken-native encodings (OpenAI's own tiktoken package, NOT HF Hub
+#     repos at all -- see systems/hf_frontier/model.py's own module
+#     docstring, scheme 3): gpt2, r50k_base, p50k_base, p50k_edit,
+#     cl100k_base, o200k_base, o200k_harmony -- every encoding tiktoken
+#     0.13.0 ships (confirmed live via tiktoken.list_encoding_names(), not
+#     hardcoded from memory). Selected via a "tiktoken:{name}" pseudo-repo-id
+#     (e.g. "tiktoken:cl100k_base") rather than a real HF repo_id, since
+#     these aren't fetched from the HF Hub at all -- tiktoken.get_encoding()
+#     directly, no AutoTokenizer involved, no --trust-remote-code/--hf-token
+#     relevance for these 7 specifically (harmless no-ops for them, same as
+#     always). Always byte-level BPE by construction (tiktoken's own design
+#     guarantee), verified via the same canary round-trip check as every
+#     other repo anyway, not assumed.
 #   - The original 3: deepseek-ai/DeepSeek-V4-Pro, moonshotai/Kimi-K3,
 #     meta-llama/Llama-3.1-8B-Instruct.
 #   - 8 more frontier/production models: Qwen/Qwen3.8-2.4T-A95B,
 #     meta-llama/Llama-3.3-70B-Instruct, openai-community/gpt2,
 #     openai/gpt-oss-20b, deepseek-ai/DeepSeek-R1, openai/gpt-oss-120b,
 #     facebook/opt-125m, Qwen/Qwen3-8B.
-#   - 5 "standard open-source era" models added for genuine TOKENIZER-FAMILY
-#     diversity, not just more of the same byte-level BPE the other 11
-#     already are: mistralai/Mistral-7B-v0.1, NousResearch/Llama-2-7b-hf,
-#     google/gemma-7b (all SentencePiece, span_method="offset_mapping" --
-#     confirmed live these three round-trip correctly, unlike e.g.
-#     bert-base-multilingual-cased/xlm-roberta-base, which were tried and
-#     REJECTED: neither WordPiece nor SentencePiece-unigram round-trips
-#     under model.py's own two supported schemes, so including them would
-#     just fail that one repo -- see systems/hf_frontier/evaluate.py's own
-#     per-repo error isolation for what happens if a FUTURE addition hits
-#     the same wall), plus bigscience/bloom and tiiuae/falcon-7b (more
+#   - 5 "standard open-source era" decoder models added for genuine
+#     TOKENIZER-FAMILY diversity, not just more of the same byte-level BPE
+#     the other 11 already are: mistralai/Mistral-7B-v0.1, NousResearch/
+#     Llama-2-7b-hf, google/gemma-7b (SentencePiece, span_method=
+#     "offset_mapping"), plus bigscience/bloom and tiiuae/falcon-7b (more
 #     byte-level BPE, but genuinely distinct vocab sizes/eras).
+#   - 9 popular ENCODER tokenizers, added after fixing a real gap in
+#     systems/hf_frontier/model.py's own span reconstruction: bert-base-
+#     cased, bert-base-multilingual-cased, distilbert-base-uncased, google/
+#     electra-base-discriminator (WordPiece), xlm-roberta-base (SentencePiece
+#     unigram) -- ALL FIVE originally failed model.py's round-trip check
+#     (confirmed live: WordPiece discards whitespace entirely during
+#     tokenization -- it's a word-boundary signal, never encoded in any
+#     token -- and xlm-roberta-base's SentencePiece tokenizer emits a
+#     standalone metaspace-only token whose reported offset overlaps the
+#     following token's own start; naive per-token offset slicing either
+#     drops those bytes or duplicates them). Fixed properly, not worked
+#     around: _spans_via_offsets now tracks a running character high-water
+#     mark and always starts the next span exactly where the last one left
+#     off rather than trusting each token's own reported start -- see that
+#     function's own docstring. roberta-base, microsoft/deberta-base, and
+#     answerdotai/ModernBERT-base (byte-level BPE) and microsoft/
+#     deberta-v3-base (SentencePiece, needed the `sentencepiece` package
+#     installed -- see pyproject.toml) already worked under the two
+#     existing schemes, no fix needed.
 #
 # GATED repos in this list (need their license accepted on huggingface.co
 # AND your own HF_TOKEN to actually have that access granted -- a plain
 # HF_TOKEN without accepted access fails to load just that one repo, same
 # as before): meta-llama/Llama-3.1-8B-Instruct, meta-llama/
-# Llama-3.3-70B-Instruct, google/gemma-7b.
+# Llama-3.3-70B-Instruct, google/gemma-7b. None of the 9 encoder repos,
+# meta-models/Muse-Glimmer-30B, or the 7 tiktoken: entries are gated.
 #
 # --trust-remote-code applies to ALL repos below uniformly (harmless no-op
 # for the ones that don't need it) -- required for moonshotai/Kimi-K3's own
@@ -38,9 +72,9 @@
 # enough that losing every other repo's result over one bad one would waste
 # real cluster time; failures land under a "_failed" key in the output JSON
 # instead.
-hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b"
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony"
 trust_remote_code: true
 eval_data_source: bouquet_test
 output: results/hf_frontier_comparison.json
 use_wandb: true
-run_name: hf_frontier_v2_16models
+run_name: hf_frontier_v4_33models
