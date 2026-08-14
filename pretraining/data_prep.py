@@ -109,6 +109,39 @@ systems/manta/segment.py's own induce_spans_batch docstring. --max-doc-bytes
 still makes that worst case correspondingly larger; the two settings
 interact and should be tuned together, not independently, especially for
 the neural systems this batching actually speeds up.
+
+BUCKETING (--bucket-pool-multiplier, default BUCKET_POOL_MULTIPLIER=8): the
+padding cost above isn't just a memory risk, it's a real THROUGHPUT
+regression the first version of ENCODE_BATCH_SIZE actually shipped with
+and hit on a real cluster run -- forming batches straight from stream
+order (as they arrive) means a batch can mix very-short and very-long
+documents, and the whole batch then pays the long member's O(T^2) cost.
+This is WORSE than it sounds for common.corpora's monolingual sources
+specifically: glot500 "all" round-robins across ~411 different language
+configs (see common/corpora.py), so CONSECUTIVE stream documents come from
+alternating sources with very different typical lengths -- almost
+maximizing the length heterogeneity any small window of consecutive
+documents sees. Confirmed empirically (not just reasoned about): a
+CPU microbenchmark with alternating short/long synthetic documents showed
+stream-order batching taking ~2.75x longer than the same documents grouped
+by length first, and the effect gets WORSE as documents get longer relative
+to each other -- consistent with the real run's throughput collapsing to
+roughly 1/1000th of its pre-batching rate.
+
+The fix: documents accumulate into a POOL of encode_batch_size *
+bucket_pool_multiplier before any encoding happens, the pool is sorted by
+byte length, then sliced into encode_batch_size-sized chunks and encoded in
+that order -- each chunk now contains similarly-sized documents, so padding
+waste stays small. This REORDERS documents relative to the original corpus
+stream (a document's position in the packed shard stream no longer matches
+its position in the source stream) -- harmless for pretraining.
+shard_dataset.ShardedTokenDataset, which samples random windows regardless
+of corpus order anyway, but stated plainly as a real behavior change, not
+hidden. max_tokens/max_docs are checked at POOL granularity now (every
+encode_batch_size * bucket_pool_multiplier documents), a coarser version of
+the same batch-granularity tradeoff ENCODE_BATCH_SIZE already introduced.
+bucket_pool_multiplier=1 degrades to plain (unbucketed) batching -- useful
+for reproducing the original bug directly, not recommended for real runs.
 """
 
 import argparse
@@ -150,6 +183,10 @@ ENCODE_BATCH_SIZE = 32  # default --encode-batch-size -- see this module's
 # bottleneck this fixes and the MEMORY CAVEAT section for how this
 # interacts with MAX_DOC_BYTES.
 
+BUCKET_POOL_MULTIPLIER = 8  # default --bucket-pool-multiplier -- see this
+# module's own BUCKETING docstring section for the real throughput
+# regression (not just a memory risk) this fixes.
+
 
 def _dtype_for_vocab(vocab_size):
     return "uint16" if vocab_size <= 65536 else "uint32"
@@ -174,6 +211,7 @@ def prep_dataset(
     dedup_min_words_for_near_dup=50,
     max_doc_bytes=MAX_DOC_BYTES,
     encode_batch_size=ENCODE_BATCH_SIZE,
+    bucket_pool_multiplier=BUCKET_POOL_MULTIPLIER,
 ):
     """dataset_name: one of common.corpora.ALL_SOURCES. langs: language
     codes for the language-selectable sources (synthetic/oldi_seed/
@@ -195,12 +233,13 @@ def prep_dataset(
     every document BEFORE encode() regardless of system (harmless for
     bpe/superbpe, which have no length-driven memory cost at all). 0 or
     None disables entirely (truncate_to_max_bytes treats both as "off").
-    encode_batch_size: see this module's own PERFORMANCE / ENCODE_BATCH_SIZE
-    docstring section -- max_tokens/max_docs are checked at BATCH
-    granularity (every encode_batch_size documents), not per document, so a
-    capped run may overshoot the exact target by up to one batch's worth of
-    tokens/documents -- a deliberate, minor tradeoff for the throughput
-    gain from batched encoding, not an oversight.
+    encode_batch_size/bucket_pool_multiplier: see this module's own
+    PERFORMANCE / ENCODE_BATCH_SIZE and BUCKETING docstring sections --
+    max_tokens/max_docs are checked at POOL granularity (every
+    encode_batch_size * bucket_pool_multiplier documents), not per
+    document, so a capped run may overshoot the exact target by up to one
+    pool's worth of tokens/documents -- a deliberate, minor tradeoff for
+    the throughput gain from bucketed batched encoding, not an oversight.
 
     Returns the shards_meta.json dict this also writes to output_dir.
     """
@@ -259,39 +298,49 @@ def prep_dataset(
         shard_idx += 1
         buffer_pos = 0
 
-    # (lang, encode_bytes, raw_byte_len) tuples awaiting a batched encode()
-    # call -- see this module's own PERFORMANCE / ENCODE_BATCH_SIZE
-    # docstring section. Kept/truncated documents ACCUMULATE here instead
-    # of being encoded immediately; dedup/truncation themselves stay
-    # per-document (cheap, no GPU cost) since they only need to run once
-    # each regardless of batching.
+    # (lang, encode_bytes, raw_byte_len) tuples awaiting a bucketed, batched
+    # encode() call -- see this module's own PERFORMANCE / ENCODE_BATCH_SIZE
+    # and BUCKETING docstring sections. Kept/truncated documents ACCUMULATE
+    # here instead of being encoded immediately; dedup/truncation
+    # themselves stay per-document (cheap, no GPU cost) since they only
+    # need to run once each regardless of batching.
     pending = []
+    pool_size = encode_batch_size * max(bucket_pool_multiplier, 1)
 
-    def process_pending():
+    def process_pending(final=False):
         nonlocal buffer_pos, shard_idx, total_tokens, num_docs
         if not pending:
             return
-        langs_batch = [p[0] for p in pending]
-        bytes_batch = [p[1] for p in pending]
-        ids_list = adapter.encode_batch(bytes_batch, langs_batch)
-        for (lang, _, raw_len), ids in zip(pending, ids_list):
-            ids = list(ids)
-            ids.append(adapter.eos_id)
-            num_docs += 1
-            lang_counts[lang]["docs"] += 1
-            lang_counts[lang]["tokens"] += len(ids)
-            lang_counts[lang]["bytes"] += raw_len
+        if not final and len(pending) < pool_size:
+            return  # keep accumulating until the pool is full (or the stream ends)
+        # Sorted by length so each encode_batch_size-sized chunk below
+        # contains similarly-sized documents -- see BUCKETING docstring
+        # section for why unsorted chunks pay a real, confirmed throughput
+        # penalty, not just a memory risk.
+        pending.sort(key=lambda p: len(p[1]))
+        for start in range(0, len(pending), encode_batch_size):
+            chunk = pending[start : start + encode_batch_size]
+            langs_batch = [p[0] for p in chunk]
+            bytes_batch = [p[1] for p in chunk]
+            ids_list = adapter.encode_batch(bytes_batch, langs_batch)
+            for (lang, _, raw_len), ids in zip(chunk, ids_list):
+                ids = list(ids)
+                ids.append(adapter.eos_id)
+                num_docs += 1
+                lang_counts[lang]["docs"] += 1
+                lang_counts[lang]["tokens"] += len(ids)
+                lang_counts[lang]["bytes"] += raw_len
 
-            i = 0
-            while i < len(ids):
-                n = min(len(ids) - i, shard_size - buffer_pos)
-                buffer[buffer_pos : buffer_pos + n] = ids[i : i + n]
-                buffer_pos += n
-                i += n
-                total_tokens += n
-                pbar.update(n)
-                if buffer_pos == shard_size:
-                    flush()
+                i = 0
+                while i < len(ids):
+                    n = min(len(ids) - i, shard_size - buffer_pos)
+                    buffer[buffer_pos : buffer_pos + n] = ids[i : i + n]
+                    buffer_pos += n
+                    i += n
+                    total_tokens += n
+                    pbar.update(n)
+                    if buffer_pos == shard_size:
+                        flush()
         pending.clear()
 
     pbar = tqdm(desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True)
@@ -332,15 +381,14 @@ def prep_dataset(
                 num_truncated_docs += 1
                 num_truncated_by_lang[lang] += 1
             pending.append((lang, encode_bytes, len(raw_bytes)))
-            if len(pending) >= encode_batch_size:
-                process_pending()
+            process_pending()  # no-op unless the pool has reached pool_size
 
             if (max_tokens and total_tokens >= max_tokens) or (max_docs and num_docs >= max_docs):
                 done = True
                 break
         if done:
             break
-    process_pending()  # flush any partial batch smaller than encode_batch_size
+    process_pending(final=True)  # flush any partial pool smaller than pool_size
     flush()
     pbar.close()
 
@@ -484,6 +532,12 @@ def build_arg_parser():
         "ENCODE_BATCH_SIZE docstring section); interacts with --max-doc-bytes, see the "
         "MEMORY CAVEAT section before raising this",
     )
+    parser.add_argument(
+        "--bucket-pool-multiplier", type=int, default=BUCKET_POOL_MULTIPLIER,
+        help="sort a pool of encode-batch-size * this-many documents by length before batching -- "
+        "a real, confirmed fix for a padding-waste throughput regression (see this module's own "
+        "BUCKETING docstring section), not just a memory optimization; 1 disables bucketing",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -524,6 +578,7 @@ def main(argv=None):
         dedup_min_words_for_near_dup=args.dedup_min_words_for_near_dup,
         max_doc_bytes=args.max_doc_bytes,
         encode_batch_size=args.encode_batch_size,
+        bucket_pool_multiplier=args.bucket_pool_multiplier,
     )
 
     if args.use_wandb:
@@ -549,6 +604,7 @@ def main(argv=None):
                 "dedup_min_words_for_near_dup": args.dedup_min_words_for_near_dup,
                 "max_doc_bytes": args.max_doc_bytes,
                 "encode_batch_size": args.encode_batch_size,
+                "bucket_pool_multiplier": args.bucket_pool_multiplier,
             },
         )
         lang_rows = [
