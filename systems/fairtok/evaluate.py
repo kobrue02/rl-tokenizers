@@ -11,8 +11,8 @@ paragraph_level/dev split actually offers (259, not just this project's own
 languages a given checkpoint has no entry for, so this scores whatever the
 checkpoint covers, out of everything BOUQuET has, with no manual language list
 needed. kas/mni/nqo (3 of the 9-language panel) still aren't in BOUQuET at all --
-see common.data.oldi_data.load_flores_devtest_fallback for a fallback covering those,
-not wired in here.
+no fallback for them is wired in here, so a checkpoint trained on those 3 simply
+gets no reported numbers for them from this evaluator.
 
 Scoring itself (Rényi efficiency, Gini, compression rate, fertility) is
 common.eval.cross_tokenizer.evaluate_on_groups, shared verbatim with magnet/flexitokens/

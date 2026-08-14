@@ -25,6 +25,30 @@ validated against that stage's own flags, so a file with `--benchmark`'s
 flag) — an experiment spanning multiple stages is multiple files, one per
 stage, as in the example below.
 
+## Picking training corpora: `data_source`
+
+`data_source` (every `systems/*/cli.py`, plus `pretraining/data_prep.py`'s
+`dataset`) is where a config file decides WHICH corpora feed a given run —
+see `common/data/corpora.py`'s own module docstring for the full registry
+(`oldi_seed`/`flores_dev`, `glot500`/`fineweb_edu`/`olmo_mix`,
+`smol`/`ccmatrix`/`un_pc`/`europarl`/`tatoeba_mt`, `bible_nlp`, `synthetic`).
+Every source now defaults to loading EVERY language/pair it natively offers
+— there's no built-in curated panel any more, so `langs`/`dataset_config`
+are rarely needed at all (`bible_nlp` is the one exception: it always needs
+an explicit, small `langs` list, and needs `common.data.prepare_bible_nlp`
+run once first — see that module's own docstring).
+
+`data_source` takes:
+- one source name (e.g. `data_source: ccmatrix`),
+- the literal `all` (the original oldi_seed+flores_dev+smol pool, kept for
+  backward compatibility — each of the three now loads everything it has,
+  not the old 9-language panel),
+- or a comma-separated list of several source names to pool for one run
+  (e.g. `data_source: "oldi_seed,ccmatrix,europarl"`) — `langs`/
+  `dataset_config` aren't supported alongside a multi-source list (they
+  aren't source-specific); train on a single source at a time to override
+  either.
+
 ## Example: the `bpe_50k` experiment (bpe/superbpe -- CPU-only tokenizer)
 
 ```bash

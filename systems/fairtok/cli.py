@@ -24,19 +24,12 @@ _HELP_OVERRIDES = {
     "steps that takes given per_device_train_batch_size -- not a fixed step count",
 }
 
-_LANGS_HELP = (
-    "comma-separated language codes; 'all' to use every language oldi_seed/flores_dev "
-    "natively offer (smol stays on the 9-language panel regardless); "
-    "defaults to the 9-language panel for the chosen data source"
-)
-
-
 def build_arg_parser():
     parser = argparse.ArgumentParser(
         description="Train the fairness-aware byte-boundary policy."
     )
     add_dataclass_fields(parser, GRPOConfig, help_overrides=_HELP_OVERRIDES)
-    add_data_source_args(parser, langs_help=_LANGS_HELP)
+    add_data_source_args(parser)
     add_vocab_output_args(
         parser,
         vocab_prefix="",

@@ -10,8 +10,10 @@ would be both slower and non-reproducible run to run (HF streaming order and
 network conditions vary).
 
 common.data.corpora.stream_groups yields {lang: text} dicts, not bare text rows --
-multi-key for the genuinely parallel sources (oldi_seed/flores_dev/smol),
-single-key for the monolingual ones (glot500/fineweb_edu/olmo_mix). This
+multi-key for the genuinely N-way parallel sources (oldi_seed/flores_dev),
+2-key for the bitext sources (smol/ccmatrix/un_pc/europarl/tatoeba_mt, one
+language pair per group), single-key for the monolingual ones (glot500/
+fineweb_edu/olmo_mix). This
 module flattens every group into its constituent (lang, text) documents and
 tokenizes each independently, passing that document's OWN language as
 encode()'s `lang` hint -- which is what lets MAGNET's per-script boundary
@@ -222,11 +224,12 @@ def prep_dataset(
 ):
     """dataset_name: one of common.data.corpora.ALL_SOURCES. langs: language
     codes for the language-selectable sources (synthetic/oldi_seed/
-    flores_dev/smol/glot500 -- "all" is valid for glot500; bible_nlp takes
-    an arbitrary language subset here too, with no built-in default panel);
-    ignored for fineweb_edu/olmo_mix and every BITEXT_SOURCES entry
-    (ccmatrix/un_pc/europarl/tatoeba_mt), which use `dataset_config`
-    instead -- see common.data.corpora.stream_groups. max_tokens/max_docs: stop
+    flores_dev/glot500 -- all default to "all", every language natively
+    offered, unless overridden; bible_nlp takes an arbitrary language subset
+    here too, with no built-in default panel); ignored for fineweb_edu/
+    olmo_mix and every BITEXT_SOURCES entry (smol/ccmatrix/un_pc/europarl/
+    tatoeba_mt), which use `dataset_config` instead -- see common.data.
+    corpora.stream_groups. max_tokens/max_docs: stop
     once either is reached (None disables that particular cap) -- both None
     together streams until the source itself is exhausted, only realistic
     for a genuinely bounded request (e.g. one small Glot500 language, or any
@@ -495,9 +498,10 @@ def build_arg_parser():
         "--langs",
         type=str,
         default=None,
-        help="comma-separated language codes (or 'all' for glot500; an arbitrary subset for "
+        help="comma-separated language codes -- defaults to 'all' (every language natively "
+        "offered) for oldi_seed/flores_dev/glot500 if omitted; an arbitrary subset for "
         "bible_nlp, no default panel) -- ignored for fineweb_edu/olmo_mix and every "
-        "BITEXT_SOURCES entry (ccmatrix/un_pc/europarl/tatoeba_mt), which use "
+        "BITEXT_SOURCES entry (smol/ccmatrix/un_pc/europarl/tatoeba_mt), which use "
         "--dataset-config instead; see common.data.corpora",
     )
     parser.add_argument(

@@ -20,7 +20,8 @@ from .train import BPEConfig, BPETrainer
 _DATA_SOURCE_HELP = (
     "'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus "
     "(NOTE: synthetic isn't guaranteed valid UTF-8 -- see bpe/model.py's module docstring; "
-    "prefer a real --data-source for anything beyond a quick sanity check)"
+    "prefer a real --data-source for anything beyond a quick sanity check); a comma-separated "
+    "list (e.g. 'oldi_seed,ccmatrix') pools several sources for one run"
 )
 
 

@@ -5,11 +5,21 @@ Shared by every tokenizer in this repo (fairtok's RL policy, and the
 magnet/flexitokens/manta baselines) -- comparing them meaningfully requires
 training/evaluating them all on the same real multilingual data.
 
-Language panel (see conversation for how this was derived): the strict intersection of
-flores_plus / oldi_seed / smol_sent's language coverage is just {eng} once wmt24pp is
-included, because wmt24pp is a high/mid-resource-only benchmark unrelated to OLDI's
-low-resource focus. Dropping wmt24pp, the 3-way intersection of the OLDI-native sources
-gives a real 9-language panel spanning both resource levels:
+TRAINING (load_oldi_seed/load_flores_plus below) now defaults to `langs="all"`
+-- every language the source natively offers -- rather than a curated panel;
+see common.data.corpora's own module docstring for why (and for smol, which
+moved out of this module entirely into corpora.py's BITEXT_SOURCES pattern,
+since it's English/Russian-pivot bilingual pairs, not true N-way parallel
+content the way oldi_seed/flores_plus are).
+
+LANGS below is NOT a training default any more -- it survives as a genuinely
+useful reference: the strict cross-lingual intersection of flores_plus/
+oldi_seed/smol_sent's language coverage once wmt24pp is dropped (wmt24pp is a
+high/mid-resource-only benchmark unrelated to OLDI's low-resource focus, and
+including it collapses the intersection to just {eng}). Still used directly
+by systems/fairtok/train_morfessor_cli.py's own default panel, and it's the
+9-language set this project's own EVAL side (BOUQuET, mostly) still centers
+its held-out comparisons on:
 
     arz (Egyptian Arabic), bam (Bambara), ben (Bengali), eng (English), kas (Kashmiri),
     lij (Ligurian), mni (Manipuri), nqo (N'Ko), spa (Spanish)
@@ -17,20 +27,15 @@ gives a real 9-language panel spanning both resource levels:
 One canonical script is picked per language where a dataset offers more than one
 (e.g. kas_Arab over kas_Deva, ben_Beng over ben_Latn) -- see LANG_SCRIPT below.
 
-Three source datasets, three different join strategies, because they're structured
-differently:
-  - oldi_seed, flores_plus: one file per language, aligned by an explicit `id` field
-    (true N-way parallel -- one group has all 9 languages).
-  - smol (smolsent only, never GATITOS): English-pivot bilingual pairs, {code}_en.jsonl,
-    joined by a shared `id` -- empirically confirmed 562 ids common across all 8
-    non-English languages in this panel, so groups here also end up 9-wide, not just
-    pairwise, though only over that 562-sentence subset.
+oldi_seed/flores_plus: one file per language, aligned by an explicit `id` field
+(true N-way parallel -- a `langs="all"` group can have every language both
+datasets offer, ~46/~227 respectively at last count, not just LANGS's 9).
 
-Eval: BOUQuET dev covers 6 of the 9 panel languages (arz, bam, ben, eng, lij, spa) via
-data/paragraph_level/dev/{lang}.parquet, joined by `par_id`, value column `tgt_text`.
-kas/mni/nqo aren't in BOUQuET at all, so FLORES+ devtest is used as their eval fallback
-(devtest is disjoint from the `dev` split used for training, per FLORES' own train/eval
-split convention). BOUQuET test is never touched, per the plan's evaluation gate.
+Eval: BOUQuET dev/test (load_bouquet_dev/load_bouquet_test below) default to
+`langs="all"` too (every one of BOUQuET's 259 languages) -- common.eval.
+cross_tokenizer.evaluate_on_groups already skips languages a given checkpoint
+has no entry for, so this is always safe, and every real call site in this
+repo already passes "all" explicitly regardless of this module's own default.
 """
 
 import json
@@ -51,24 +56,6 @@ LANG_SCRIPT = {
     "nqo": "nqo_Nkoo",
     "spa": "spa_Latn",
 }
-
-SMOL_CODE = {  # smolsent's own bare-code naming, only for the 8 non-English languages
-    "arz": "arz",
-    "bam": "bm",
-    "ben": "bn",
-    "kas": "ks",
-    "lij": "lij",
-    "mni": "mni-Mtei",
-    "nqo": "nqo",
-    "spa": "es",
-}
-
-BOUQUET_LANGS = ["arz", "bam", "ben", "eng", "lij", "spa"]
-FLORES_FALLBACK_LANGS = [
-    "kas",
-    "mni",
-    "nqo",
-]  # not in BOUQuET -- eval via FLORES+ devtest
 
 
 def _download(repo_id, filename):
@@ -125,35 +112,12 @@ def _load_ngram_parallel(repo_id, dir_prefix, langs):
     return [{lang: per_lang[lang][i] for lang in lang_to_stem} for i in common_ids]
 
 
-def load_oldi_seed(langs=LANGS):
+def load_oldi_seed(langs="all"):
     return _load_ngram_parallel("openlanguagedata/oldi_seed", "seed", langs)
 
 
-def load_flores_plus(split="dev", langs=LANGS):
+def load_flores_plus(split="dev", langs="all"):
     return _load_ngram_parallel("openlanguagedata/flores_plus", split, langs)
-
-
-def load_smol_groups(langs=None):
-    """smolsent English-pivot pairs, joined by shared `id` across all requested
-    non-English languages. English text is read off any one file's `trg` field."""
-    langs = langs or [l for l in LANGS if l != "eng"]
-    per_lang_text = {}
-    per_lang_eng = {}
-    for lang in langs:
-        path = _download("google/smol", f"smolsent/{SMOL_CODE[lang]}_en.jsonl")
-        rows = _load_jsonl(path)
-        per_lang_text[lang] = {r["id"]: r["src"] for r in rows}
-        per_lang_eng[lang] = {r["id"]: r["trg"] for r in rows}
-
-    common_ids = sorted(set.intersection(*(set(d) for d in per_lang_text.values())))
-    groups = []
-    for i in common_ids:
-        group = {lang: per_lang_text[lang][i] for lang in langs}
-        group["eng"] = per_lang_eng[langs[0]][
-            i
-        ]  # same shared English source for every lang
-        groups.append(group)
-    return groups
 
 
 def _load_bouquet_split(split, langs):
@@ -200,14 +164,14 @@ def _load_bouquet_split(split, langs):
     language's file for a given uniq_id, which is NOT the per-language sentence
     -- easy bug to make, caught by comparing files directly).
 
-    BOUQUET_LANGS (the default) is NOT "BOUQuET's native language scope" -- the
-    real dataset covers 259 languages (confirmed via list_repo_files); it's just
-    the subset overlapping this project's own 9-language training panel.
-    langs="all" discovers and loads every language BOUQuET actually offers for
-    this split, keyed by its full lang_Script stem -- same "all" convention
-    _load_ngram_parallel (load_oldi_seed/load_flores_plus) already uses.
-    common.eval.cross_tokenizer's evaluate_on_groups already skips languages a given
-    checkpoint has no entry for, so passing "all" here is always safe.
+    Defaults to langs="all" (every one of BOUQuET's real 259 languages,
+    confirmed via list_repo_files, keyed by its full lang_Script stem) --
+    same "all" convention _load_ngram_parallel (load_oldi_seed/
+    load_flores_plus) already uses. common.eval.cross_tokenizer's
+    evaluate_on_groups already skips languages a given checkpoint has no
+    entry for, so passing "all" here is always safe -- and every real call
+    site in this repo already does, explicitly, regardless of this
+    function's own default.
     """
     import pyarrow.parquet as pq
 
@@ -240,41 +204,14 @@ def _load_bouquet_split(split, langs):
     ]
 
 
-def load_bouquet_dev(langs=BOUQUET_LANGS):
+def load_bouquet_dev(langs="all"):
     return _load_bouquet_split("dev", langs)
 
 
-def load_bouquet_test(langs=BOUQUET_LANGS):
+def load_bouquet_test(langs="all"):
     """The genuinely held-out counterpart to load_bouquet_dev -- reserve this for
     FINAL reported numbers; use load_bouquet_dev for any hyperparameter tuning or
     exploratory comparison, to avoid the equivalent of test-set leakage from
     repeatedly checking results against the same held-out data decisions get
     tuned against."""
     return _load_bouquet_split("test", langs)
-
-
-def load_flores_devtest_fallback(langs=FLORES_FALLBACK_LANGS):
-    return load_flores_plus(split="devtest", langs=langs)
-
-
-def load_all_training_groups(langs=LANGS):
-    """Every training group from all three sources, pooled. Groups from different
-    sources are NOT the same underlying sentence, so they're independent groups --
-    only rows *within* one source's join are the same parallel content.
-
-    langs="all" expands oldi_seed and flores_plus to every language they
-    natively offer. smol stays on the explicit 9-language panel regardless --
-    "all" isn't supported there yet, since (unlike the other two) knowing which
-    of its ~115 languages share a given sentence id requires rescanning every
-    one of its per-language pair files, not just listing them (see module
-    docstring)."""
-    groups = []
-    groups.extend(load_oldi_seed(langs))
-    groups.extend(load_flores_plus("dev", langs))
-    smol_langs = (
-        [l for l in LANGS if l != "eng"]
-        if langs == "all"
-        else [l for l in langs if l != "eng"]
-    )
-    groups.extend(load_smol_groups(smol_langs))
-    return groups

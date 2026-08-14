@@ -24,13 +24,20 @@ Usage:
     python3 -m pretraining.cli_eval --checkpoint checkpoints/pretrain/final.pt \\
         --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \\
         --benchmark xnli,xcopa,flores_mt \\
-        --langs en,de,fr --lang-pairs eng:spa,eng:arz --max-examples 500 \\
+        --langs sw,tr,zh --lang-pairs eng:spa,eng:arz --max-examples 500 \\
         --output results/all_bpe.json
         # --benchmark takes a COMMA-SEPARATED list -- one job, one combined
         # results file keyed by benchmark name, instead of one sbatch call
         # per benchmark. --langs only applies to xnli/xcopa in the list,
         # --lang-pairs only to flores_mt -- each benchmark just ignores the
-        # flag it has no use for (see run_evaluation).
+        # flag it has no use for (see run_evaluation). --langs codes not
+        # valid for one particular benchmark in the list (e.g. "en" is
+        # valid for xnli but not xcopa, which has no English config at all)
+        # get dropped for just that benchmark with a printed warning, not a
+        # crash -- see _resolve_multiple_choice_langs; sw/tr/zh above are
+        # deliberately chosen to be valid for BOTH xnli and xcopa, so this
+        # exact example scores every requested language on every benchmark
+        # with no drops at all.
 
 Infrastructure only (see eval_harness.py's own docstring) -- this module is
 verified via run_smoke_test below, against a tiny freshly-initialized model,
@@ -53,6 +60,41 @@ from .tokenizer_adapter import ALL_SYSTEMS, TokenizerAdapter
 from .train import TrainConfig
 
 _MULTIPLE_CHOICE_BENCHMARKS = {"xnli", "xcopa"}
+_MULTIPLE_CHOICE_LANGS = {"xnli": benchmarks.XNLI_LANGS, "xcopa": benchmarks.XCOPA_LANGS}
+
+
+def _resolve_multiple_choice_langs(benchmark, langs):
+    """A shared --langs list applied across an entire --benchmark list (see
+    run_evaluation's own docstring for why that's normal, not redundant) can
+    legitimately include codes one SPECIFIC benchmark doesn't support --
+    e.g. "en" is valid for xnli but cambridgeltl/xcopa has no English config
+    at all (confirmed live on a real cluster run: it raises `ValueError:
+    BuilderConfig 'en' not found` the instant it's requested -- XCOPA is the
+    cross-lingual EXTENSION of English-only COPA, so it was never given its
+    own English translation to begin with). Filters `langs` down to the
+    intersection with this benchmark's own valid set, printing which
+    requested codes got dropped and why, rather than either crashing the
+    whole multi-benchmark run over one benchmark's narrower language
+    coverage, or silently scoring nothing for the codes it can't handle.
+    Raises if NOTHING requested is valid for this benchmark -- an empty
+    result would silently look like a real "0 examples" finding otherwise."""
+    if langs is None:
+        return None
+    valid = _MULTIPLE_CHOICE_LANGS[benchmark]
+    resolved = [l for l in langs if l in valid]
+    dropped = [l for l in langs if l not in valid]
+    if dropped:
+        print(
+            f"warning: --benchmark {benchmark} doesn't support language(s) {dropped} "
+            f"(its own valid set: {valid}) -- skipping just those for this benchmark, "
+            "scoring the rest of --langs normally"
+        )
+    if not resolved:
+        raise ValueError(
+            f"--benchmark {benchmark}: none of the requested --langs {langs} are valid for it "
+            f"-- choose from {valid}"
+        )
+    return resolved
 _TRANSLATION_BENCHMARKS = {"flores_mt"}
 
 
@@ -137,7 +179,7 @@ def _run_single_benchmark(
 
     if benchmark in _MULTIPLE_CHOICE_BENCHMARKS:
         loader = benchmarks.BENCHMARKS[benchmark]
-        kwargs = {"langs": langs}
+        kwargs = {"langs": _resolve_multiple_choice_langs(benchmark, langs)}
         if split is not None:
             kwargs["split"] = split
         examples = loader(**kwargs)

@@ -141,7 +141,7 @@ def _pad_batch(tensors, device):
 
 class MantaTrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (a list of dicts {lang: text}, the
-    same shape common.data.oldi_data.load_all_training_groups / common.data.synthetic's
+    same shape common.data.cli_data.load_groups / common.data.synthetic's
     make_synthetic_parallel_groups produce -- reused unmodified), call
     .train(), then read .model / .token_freq / .vocab off the instance
     (train() also returns them as a tuple, mirroring GRPOTrainer's

@@ -34,8 +34,9 @@ def _short_code(lang):
 def _find_anchor_key(group, anchor_lang):
     """Returns whichever key in `group` represents `anchor_lang`, checking an
     exact match first, then a short-code match (see _short_code) -- needed
-    because a single pooled train_groups list (common.data.oldi_data.
-    load_all_training_groups under langs="all") mixes groups keyed by bare
+    because a single pooled train_groups list (common.data.cli_data.
+    load_groups, e.g. --data-source all or a single oldi_seed/flores_dev
+    source, both now defaulting to langs="all") mixes groups keyed by bare
     code with groups keyed by full stem, and a single group only ever uses
     ONE of the two conventions. Returns None if `anchor_lang` isn't present
     in this group under either convention."""
