@@ -23,6 +23,8 @@
 \addlegendentry{Meta/Llama}
 \addplot+[ybar, fill=encCol, draw=encCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Encoder-only.dat};
 \addlegendentry{Encoder-only}
+\addplot+[ybar, fill=anthropicCol, draw=anthropicCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Anthropic.dat};
+\addlegendentry{Anthropic}
 \addplot+[ybar, fill=otherCol, draw=otherCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Other.dat};
 \addlegendentry{Other}
 \end{axis}
