@@ -7,13 +7,12 @@
 \definecolor{encCol}{RGB}{140,140,140}
 \definecolor{otherCol}{RGB}{163,79,168}
 \begin{document}
-\begin{minipage}{0.480\textwidth}
+\begin{minipage}{0.470\textwidth}
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    xbar, width=5.5cm, height=8.0cm,
-    title={\small crk (crk)},
-    xlabel={\tiny token parity vs en},
+    xbar, width=\linewidth, height=8.0cm,
+    title={\small Plains Cree},
     xmin=0,
     ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,30.799999999999997,31.799999999999997,32.8,33.8,34.8},
     yticklabels={{gpt2}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Qwen3-8B}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {Qwen3.8-2.4T-A95B}, {Llama-2-7b-hf}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {roberta-base}, {deberta-base}, {ModernBERT-base}, {gemma-7b}, {opt-125m}, {falcon-7b}, {Mistral-7B-v0.1}, {Muse-Glimmer-30B}, {bloom}},
@@ -28,17 +27,17 @@
 \addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_crk_Meta_Llama.dat};
 \addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_crk_Encoder-only.dat};
 \addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_crk_Other.dat};
+\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,43)};
 \end{axis}
 \end{tikzpicture}
 \end{minipage}
 \hfill
-\begin{minipage}{0.480\textwidth}
+\begin{minipage}{0.470\textwidth}
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    xbar, width=5.5cm, height=8.0cm,
-    title={\small iu (iu)},
-    xlabel={\tiny token parity vs en},
+    xbar, width=\linewidth, height=8.0cm,
+    title={\small Inuktitut},
     xmin=0,
     ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,30.799999999999997,31.799999999999997,32.8,33.8,34.8},
     yticklabels={},
@@ -52,6 +51,7 @@
 \addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_iu_Meta_Llama.dat};
 \addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_iu_Encoder-only.dat};
 \addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_iu_Other.dat};
+\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,43)};
 \end{axis}
 \end{tikzpicture}
 \end{minipage}

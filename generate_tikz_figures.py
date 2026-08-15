@@ -182,20 +182,28 @@ def lang_display_name(code, _cache={}):
     lookup failures, including rare codes (fia_Copt -> Nobiin, taq_Tfng ->
     Tamasheq, crk_Cans -> Plains Cree). Strips ISO 639-3's "(individual
     language)" macrolanguage-membership clarifier (e.g. on npi/ory/swh/...)
-    -- a real, confirmed CLDR annotation, not useful in a chart label. Falls
-    back to the bare code if it can't be parsed/resolved (should not happen
-    given the above, but a chart label showing the raw code is a safe,
-    honest failure mode, not a crash)."""
+    -- a real, confirmed CLDR annotation, not useful in a chart label.
+
+    Also resolves BARE codes with no script suffix at all (e.g.
+    common.data.indigenous_panel's own "aym"/"crk"/"nah" codes, unlike
+    BOUQuET's lang_Script stems) -- confirmed live that langcodes resolves
+    these directly (aym -> Aymara, crk -> Plains Cree, nah -> "Nahuatl
+    languages", a real macrolanguage-umbrella CLDR name, not a lookup
+    failure). Falls back to the bare code if it can't be parsed/resolved
+    either way (should not happen given the above, but a chart label
+    showing the raw code is a safe, honest failure mode, not a crash)."""
     if code in _cache:
         return _cache[code]
     name = code
-    if "_" in code:
-        lang, script = code.split("_", 1)
-        try:
+    try:
+        if "_" in code:
+            lang, script = code.split("_", 1)
             name = langcodes.Language.get(f"{lang}-{script}").language_name()
-            name = name.replace(" (individual language)", "")
-        except Exception:
-            name = code
+        else:
+            name = langcodes.Language.get(code).language_name()
+        name = name.replace(" (individual language)", "")
+    except Exception:
+        name = code
     _cache[code] = name
     return name
 
@@ -599,6 +607,27 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
     Only the leftmost subplot in each grid row gets y-tick labels --
     repeating all of `rows`'s model names in every subplot is exactly the
     "huge figure" bulk this per-language-subplot design exists to avoid.
+
+    LAYOUT FIX, stated plainly (a real bug in an earlier version of this
+    function, not a style choice): each axis's own `width` MUST be relative
+    to its containing minipage (TeX's `\\linewidth`, which resolves to
+    whatever that minipage's own width actually is), never a fixed cm
+    value -- a hardcoded width wider than the minipage silently overflows
+    into the NEXT minipage, which a real render confirmed live: garbled,
+    overlapping titles/tick labels across adjacent subplots, not merely an
+    aesthetic issue. `ncols` should stay small enough that `\\linewidth`
+    per subplot leaves room for a real bar chart (2 is comfortable for any
+    reasonable page width; the earlier 5-wide layout for the 10-language
+    Spanish group was too narrow to read regardless of the width bug).
+    A dashed reference line at parity=1.0 (this tokenizer costs the same
+    for this language as for its own anchor) is drawn in every subplot --
+    the single most useful reading aid this chart can offer, so a reader
+    doesn't have to mentally locate "1.0" on each panel's own axis scale
+    separately. The per-subplot xlabel from an earlier version was dropped
+    entirely (repeating "token parity vs {anchor}" in every one of up to
+    10 subplots was real, needless clutter, directly implicated in the
+    live-observed overlap) -- state the axis meaning once, in the
+    figure's own caption, instead.
     """
     ordered, row_pos, _blocks, total_height = _grouped_positions(rows, families)
     n = len(ordered)
@@ -622,7 +651,7 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
                         continue
                     f.write(f"{row_pos[r['name']]} {v:.4f}\n")
 
-    subplot_width = 1.0 / ncols - 0.02
+    subplot_width = 1.0 / ncols - 0.03
     subplot_height_cm = 8.0  # fixed, NOT scaled by n -- see module docstring
     # section on why this design trades "every subplot shows every
     # tokenizer" for "compact enough to tile many of them," rather than the
@@ -636,9 +665,11 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
         body.append(r"\centering")
         body.append(r"\begin{tikzpicture}")
         body.append(r"\begin{axis}[")
-        body.append(r"    xbar, width=%.1fcm, height=%.1fcm," % (5.5, subplot_height_cm))
-        body.append(r"    title={\small %s (%s)}," % (esc(lang_display_name(lang)), esc(lang)))
-        body.append(r"    xlabel={\tiny token parity vs %s}," % esc(anchor))
+        # width=\linewidth (NOT a fixed cm value) -- see this function's
+        # own LAYOUT FIX docstring section for the real overflow bug this
+        # replaced.
+        body.append(r"    xbar, width=\linewidth, height=%.1fcm," % subplot_height_cm)
+        body.append(r"    title={\small %s}," % esc(lang_display_name(lang)))
         body.append(r"    xmin=0,")
         body.append(r"    ytick={%s}," % ",".join(str(row_pos[r["name"]]) for r in ordered))
         if show_labels:
@@ -657,6 +688,12 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
                 r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=parity, y=idx] {%sbar_%s_%s_%s.dat};"
                 % (col_name, col_name, data_prefix, fig_name, fam_key(lang), fam_key(fam))
             )
+        # Parity=1.0 reference line, drawn AFTER (on top of) the bars so it
+        # stays visible even where a bar reaches past it -- spans well
+        # beyond the actual y-range so pgfplots clips it to the full
+        # visible height regardless of n, rather than hardcoding exact
+        # axis coordinates here.
+        body.append(r"\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,%d)};" % (n + 10))
         body += [r"\end{axis}", r"\end{tikzpicture}", r"\end{minipage}"]
         at_row_end = col == ncols - 1 or i == len(langs) - 1
         body.append(r"\par\vspace{0.3cm}" if at_row_end else r"\hfill")
@@ -699,7 +736,12 @@ def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
         anchor_dir = os.path.join(out_dir, f"parity_vs_{anchor}")
         os.makedirs(anchor_dir, exist_ok=True)
         fig_name = f"indigenous_panel_parity_vs_{anchor}"
-        ncols = 2 if len(langs) <= 2 else 5
+        # ncols=2 regardless of language count -- see
+        # gen_indigenous_panel_parity_bars_tex's own LAYOUT FIX docstring
+        # section: a real render confirmed a wider grid (5 columns for the
+        # 10-language Spanish group) left each subplot too narrow to read,
+        # independent of the width-overflow bug that redesign also fixed.
+        ncols = 2
         tex, subplot_info, nrows = gen_indigenous_panel_parity_bars_tex(
             rows, models, families, langs, anchor, fig_name, anchor_dir,
             data_prefix=f"{base_prefix}parity_vs_{anchor}/", ncols=ncols,
