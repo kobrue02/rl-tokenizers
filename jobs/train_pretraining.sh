@@ -28,14 +28,34 @@
 # step if a single node's GPUs stop being enough (still short of true FSDP
 # sharding, just more DDP replicas).
 #
-# This job reuses train_manta.sh's own cuDNN workaround (see below) since
-# pretraining/model.py also runs a CUDA-backed torch model on this cluster --
-# same root cause (the CUDA module's own older cuDNN shadowing PyTorch's
-# bundled one), already diagnosed once for MANTa's block-level GRU.
+# AUTO-RESUBMIT: a run whose token/step budget exceeds this job's own
+# --time limit (e.g. the "large" preset's ~10-day estimate against this
+# job's 24h default) will get SIGTERM/SIGKILL'd by SLURM mid-loop, well
+# before train.py's own final.pt save at the bottom of its training loop
+# (pretraining/train.py) ever runs. Rather than requiring a human to notice
+# the timeout and manually resubmit with --resume-from every time, this
+# script checks for itself once training exits:
+#   - final.pt present in output_dir -> genuinely done, exit 0, no resubmit.
+#   - no final.pt, but a NEWER step_*.pt checkpoint exists than when this
+#     run started -> real progress was made this run (just not enough to
+#     finish); resubmit itself via sbatch with --resume-from that
+#     checkpoint, preserving this run's own --gres GPU count (which a bare
+#     `sbatch jobs/train_pretraining.sh ...` would NOT do on its own --
+#     it would silently fall back to this script's #SBATCH --gres=gpu:1
+#     default, quietly dropping a multi-GPU run back to 1 GPU on every
+#     resume).
+#   - no final.pt AND no checkpoint progress beyond this run's own starting
+#     point -> treated as a genuine failure (e.g. a persistent crash before
+#     the first save_steps checkpoint), NOT resubmitted, so a real bug
+#     can't spin into an infinite resubmission loop burning allocation.
+# This means squeue will show a NEW job id appear every ~24h for a
+# multi-day run until it finishes -- expected, not a bug -- and
+# --mail-type=ALL will send one completion/failure email per segment.
 #
 # Usage:
 #   sbatch jobs/train_pretraining.sh --shard-dir pretrain_data/glot500_bpe \
 #       --model-size small --total-steps 50000 --seq-len 1024 --per-device-batch-size 16
+#   sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
 #
 # All flags forward directly to pretraining/cli.py -- see
 # `python3 -m pretraining.cli --help`.
@@ -62,7 +82,39 @@ cd $PROJECT_ROOT
 uv sync
 mkdir -p logs checkpoints/pretrain
 
-# 5. Run -- single process for one GPU, torchrun for more than one.
+# 5. Resolve this run's output_dir/total_steps from the EXACT args this job
+# received (config file + any CLI overrides, e.g. a --resume-from appended
+# by a prior resubmit of this same script) -- reuses pretraining.cli's own
+# parsing so this can never drift from what pretraining.cli itself uses.
+CFG_INFO=$(python3 -c "
+import sys
+from pretraining.cli import build_arg_parser, _config_from_args
+from common.config_file import parse_args_with_config
+args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
+cfg = _config_from_args(args)
+print(cfg.output_dir)
+print(cfg.total_steps)
+" "$@")
+OUTPUT_DIR=$(echo "$CFG_INFO" | sed -n '1p')
+TOTAL_STEPS=$(echo "$CFG_INFO" | sed -n '2p')
+echo "Resolved output_dir=$OUTPUT_DIR total_steps=$TOTAL_STEPS"
+
+# Highest-step step_*.pt in a dir, empty string if none -- used both before
+# and after the run below purely to detect whether THIS run made progress,
+# not as the resume mechanism itself (train.py's own --resume-from/
+# load_checkpoint handles that).
+latest_checkpoint() {
+    ls "$1"/step_*.pt 2>/dev/null | sed -E 's#.*/step_([0-9]+)\.pt#\1 &#' | sort -n | tail -1 | cut -d' ' -f2-
+}
+
+BEFORE_CKPT=$(latest_checkpoint "$OUTPUT_DIR")
+if [ -n "$BEFORE_CKPT" ]; then
+    BEFORE_STEP=$(basename "$BEFORE_CKPT" | sed -E 's/step_([0-9]+)\.pt/\1/')
+else
+    BEFORE_STEP=0
+fi
+
+# 6. Run -- single process for one GPU, torchrun for more than one.
 NUM_GPUS="${SLURM_GPUS_ON_NODE:-1}"
 echo "Starting pretraining with $NUM_GPUS GPU(s), args: $@"
 if [ "$NUM_GPUS" -gt 1 ]; then
@@ -70,9 +122,33 @@ if [ "$NUM_GPUS" -gt 1 ]; then
 else
     python3 -m pretraining.cli "$@"
 fi
+TRAIN_EXIT=$?
 
-if [ $? -eq 0 ]; then
-    echo "Training complete."
-else
-    echo "Training failed." && exit 1
+# 7. Done, or resubmit? See the AUTO-RESUBMIT comment at the top.
+if [ -f "$OUTPUT_DIR/final.pt" ]; then
+    echo "Training complete -- reached total_steps=$TOTAL_STEPS, final.pt written."
+    exit 0
 fi
+
+echo "final.pt not found in $OUTPUT_DIR (training exited with code $TRAIN_EXIT) -- checking for progress to resume from."
+AFTER_CKPT=$(latest_checkpoint "$OUTPUT_DIR")
+if [ -z "$AFTER_CKPT" ]; then
+    echo "No checkpoint found in $OUTPUT_DIR at all -- treating this as a real failure, NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+    exit 1
+fi
+AFTER_STEP=$(basename "$AFTER_CKPT" | sed -E 's/step_([0-9]+)\.pt/\1/')
+if [ "$AFTER_STEP" -le "$BEFORE_STEP" ]; then
+    echo "Latest checkpoint step ($AFTER_STEP) did not advance past this run's own starting point ($BEFORE_STEP) -- no real progress was made, NOT resubmitting (likely a persistent crash). Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+    exit 1
+fi
+
+echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."
+sbatch --gres=gpu:"$NUM_GPUS" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
+SBATCH_EXIT=$?
+if [ "$SBATCH_EXIT" -ne 0 ]; then
+    echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
+    echo "  sbatch --gres=gpu:$NUM_GPUS jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
+    exit 1
+fi
+echo "Resubmitted successfully."
+exit 0
