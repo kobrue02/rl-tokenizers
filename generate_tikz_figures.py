@@ -602,6 +602,30 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
     return full_tex, dict(counts), unresolved
 
 
+def _panel_title(panel, models):
+    """Appends "(N% complete)" to a panel's title whenever its underlying
+    data is meaningfully partial -- self-correcting, since it's computed
+    directly from that model's own real num_total_calls/num_failed_calls
+    (only present on evaluate_claude_on_groups-style entries; hf_frontier
+    entries have neither key, so this is a no-op for them). Confirmed
+    useful live: this project's own Claude evaluation is a genuinely
+    multi-day job that gets checkpointed and regenerated from partial data
+    mid-run -- this marker makes that visible directly IN the figure,
+    not just in a commit message or chat note that's easy to forget, and
+    disappears on its own once a regenerate uses the finished results
+    (no manual edit to remember/revert)."""
+    display = panel["display"]
+    m = models.get(panel["key"], {})
+    total = m.get("num_total_calls")
+    if not total:
+        return display
+    completed = total - m.get("num_failed_calls", 0)
+    pct = 100 * completed / total
+    if pct < 99.5:
+        return f"{display} ({pct:.0f}\\% complete)"
+    return display
+
+
 def _boxplot_stats(values):
     """Standard Tukey five-number summary from REAL data (not simulated):
     median/quartiles via numpy, whiskers extended to the most extreme point
@@ -678,11 +702,29 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
         body.append(r"\begin{minipage}[t]{0.48\linewidth}")
         body.append(r"\centering")
         if panel["key"] not in models:
+            # Same axis options as the real panels below (grid, ticks, ylabel,
+            # log-scale range) -- confirmed live that an empty `axis lines=none`
+            # placeholder does NOT reserve the same layout space pgfplots gives
+            # a real, populated axis, so the title/text ended up misaligned
+            # against the other 3 panels. Matching the structure (just with no
+            # \addplot data) keeps every panel's title at the same height.
             body += [
                 r"\begin{tikzpicture}",
-                r"\begin{axis}[width=\linewidth, height=5.2cm, title={%s}, title style={font=\small}," % panel["display"],
-                r"    axis lines=none, xmin=0, xmax=1, ymin=0, ymax=1]",
-                r"\node[align=center, font=\footnotesize] at (axis cs:0.5,0.5) {Pending evaluation results};",
+                r"\begin{axis}[",
+                r"    width=\linewidth, height=5.2cm,",
+                r"    ymode=log, ymin=0.1, ymax=100,",
+                r"    xmin=0.5, xmax=6.5,",
+                r"    title={%s}," % _panel_title(panel, models),
+                r"    title style={font=\small},",
+                r"    xtick={1,2,3,4,5,6},",
+                r"    xticklabels={0,1,2,3,4,5},",
+                r"    x tick label style={font=\tiny},",
+                r"    ylabel={Cost (USD)},",
+                r"    y label style={font=\scriptsize},",
+                r"    yticklabel style={font=\tiny},",
+                r"    grid=both, grid style={gray!15},",
+                r"]",
+                r"\node[align=center, font=\footnotesize] at (axis cs:3.5,3.16) {Pending evaluation\\results};",
                 r"\end{axis}",
                 r"\end{tikzpicture}",
             ]
@@ -701,7 +743,7 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
                 r"    boxplot/draw direction=y,",
                 r"    width=\linewidth, height=5.2cm,",
                 r"    ymode=log,",
-                r"    title={%s}," % panel["display"],
+                r"    title={%s}," % _panel_title(panel, models),
                 r"    title style={font=\small},",
                 r"    xtick={%s}," % ",".join(str(j + 1) for j in range(len(present_levels))),
                 r"    xticklabels={%s}," % ",".join(str(l) for l in present_levels),

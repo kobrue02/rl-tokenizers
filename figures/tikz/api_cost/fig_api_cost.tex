@@ -64,9 +64,26 @@
 \begin{minipage}[t]{0.48\linewidth}
 \centering
 \begin{tikzpicture}
-\begin{axis}[width=\linewidth, height=5.2cm, title={Claude Opus 5}, title style={font=\small},
-    axis lines=none, xmin=0, xmax=1, ymin=0, ymax=1]
-\node[align=center, font=\footnotesize] at (axis cs:0.5,0.5) {Pending evaluation results};
+\begin{axis}[
+    boxplot/draw direction=y,
+    width=\linewidth, height=5.2cm,
+    ymode=log,
+    title={Claude Opus 5 (16\% complete)},
+    title style={font=\small},
+    xtick={1,2,3,4,5,6},
+    xticklabels={0,1,2,3,4,5},
+    x tick label style={font=\tiny},
+    ylabel={Cost (USD)},
+    y label style={font=\scriptsize},
+    yticklabel style={font=\tiny},
+    grid=both, grid style={gray!15},
+]
+\addplot+[boxplot prepared={median=19.099562,upper quartile=22.995253,lower quartile=16.915576,upper whisker=32.081212,lower whisker=11.100273},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {(0,33.563693) (0,50.636687) (0,53.898147) (0,61.903677) (0,73.324772)};
+\addplot+[boxplot prepared={median=19.259518,upper quartile=22.979700,lower quartile=17.463865,upper whisker=30.960945,lower whisker=11.482356},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {(0,31.607429) (0,35.250972) (0,36.508789) (0,37.784868) (0,42.503798) (0,44.958935) (0,47.789426) (0,51.403829) (0,52.550896) (0,56.312671) (0,89.457842)};
+\addplot+[boxplot prepared={median=19.101854,upper quartile=24.377662,lower quartile=17.575433,upper whisker=33.759320,lower whisker=15.072926},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {(0,56.889093)};
+\addplot+[boxplot prepared={median=16.013370,upper quartile=18.083985,lower quartile=14.760711,upper whisker=22.979996,lower whisker=12.807657},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {(0,24.257065) (0,30.412273)};
+\addplot+[boxplot prepared={median=14.832878,upper quartile=16.592488,lower quartile=13.739547,upper whisker=19.785783,lower whisker=12.698908},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {};
+\addplot+[boxplot prepared={median=12.297174,upper quartile=14.776664,lower quartile=10.771802,upper whisker=17.028259,lower whisker=10.278031},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {};
 \end{axis}
 \end{tikzpicture}
 \end{minipage}

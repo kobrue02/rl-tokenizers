@@ -16,6 +16,8 @@
 \addlegendentry{Meta/Llama}
 \addplot+[only marks, mark=*, mark size=2pt, color=encCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Encoder-only.dat};
 \addlegendentry{Encoder-only}
+\addplot+[only marks, mark=*, mark size=2pt, color=anthropicCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Anthropic.dat};
+\addlegendentry{Anthropic}
 \addplot+[only marks, mark=*, mark size=2pt, color=otherCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Other.dat};
 \addlegendentry{Other}
 \node[font=\scriptsize, anchor=south east] at (axis cs:3.989,4.913) {xlm-roberta-base};

@@ -5,19 +5,20 @@
 \definecolor{chinaCol}{RGB}{214,96,42}
 \definecolor{metaCol}{RGB}{74,111,227}
 \definecolor{encCol}{RGB}{140,140,140}
+\definecolor{anthropicCol}{RGB}{180,60,60}
 \definecolor{otherCol}{RGB}{163,79,168}
 \begin{document}
 \begin{tikzpicture}
 \begin{axis}[
     xbar,
-    width=10cm, height=21.4cm,
+    width=10cm, height=22.1cm,
     xlabel={Token-parity spread (max/min across all languages, anchor-invariant)},
     xmin=0,
-    ytick={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32},
-    yticklabels={{xlm-roberta-base}, {deberta-v3-base}, {gemma-7b}, {Muse-Glimmer-30B}, {Llama-2-7b-hf}, {bert-base-multilingual-cased}, {Qwen3-8B}, {Mistral-7B-v0.1}, {ModernBERT-base}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {bloom}, {falcon-7b}, {gpt2}, {opt-125m}, {roberta-base}, {deberta-base}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {Qwen3.8-2.4T-A95B}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-cased}},
+    ytick={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33},
+    yticklabels={{xlm-roberta-base}, {deberta-v3-base}, {gemma-7b}, {claude-opus-5}, {Muse-Glimmer-30B}, {Llama-2-7b-hf}, {bert-base-multilingual-cased}, {Qwen3-8B}, {Mistral-7B-v0.1}, {ModernBERT-base}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {bloom}, {falcon-7b}, {gpt2}, {opt-125m}, {roberta-base}, {deberta-base}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {Qwen3.8-2.4T-A95B}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-cased}},
     yticklabel style={font=\scriptsize},
     y dir=reverse,
-    ymin=-0.7, ymax=32,
+    ymin=-0.7, ymax=33,
     bar width=5pt,
     legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},
     axis y line*=left, axis x line*=bottom,
@@ -30,6 +31,8 @@
 \addlegendentry{Meta/Llama}
 \addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Encoder-only.dat};
 \addlegendentry{Encoder-only}
+\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Anthropic.dat};
+\addlegendentry{Anthropic}
 \addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard/bar_Other.dat};
 \addlegendentry{Other}
 \end{axis}
