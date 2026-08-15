@@ -1,0 +1,27 @@
+\begin{tikzpicture}
+\begin{axis}[
+    xbar,
+    width=10cm, height=21.4cm,
+    xlabel={Fertility spread (max/min tokens-per-word across the panel's 11 languages)},
+    xmin=0,
+    ytick={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32},
+    yticklabels={{xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {gemma-7b}, {Qwen3-8B}, {gpt2}, {opt-125m}, {roberta-base}, {deberta-base}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {Llama-2-7b-hf}, {falcon-7b}, {Mistral-7B-v0.1}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {tk:cl100k\_base}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {Qwen3.8-2.4T-A95B}, {Muse-Glimmer-30B}, {ModernBERT-base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {bloom}},
+    yticklabel style={font=\scriptsize},
+    y dir=reverse,
+    ymin=-0.7, ymax=32,
+    bar width=5pt,
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},
+    axis y line*=left, axis x line*=bottom,
+]
+\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/indigenous_panel/leaderboard/bar_OpenAI_tiktoken.dat};
+\addlegendentry{OpenAI/tiktoken}
+\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/indigenous_panel/leaderboard/bar_Chinese_labs.dat};
+\addlegendentry{Chinese labs}
+\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/indigenous_panel/leaderboard/bar_Meta_Llama.dat};
+\addlegendentry{Meta/Llama}
+\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/indigenous_panel/leaderboard/bar_Encoder-only.dat};
+\addlegendentry{Encoder-only}
+\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/indigenous_panel/leaderboard/bar_Other.dat};
+\addlegendentry{Other}
+\end{axis}
+\end{tikzpicture}
