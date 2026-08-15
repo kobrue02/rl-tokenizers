@@ -171,10 +171,13 @@ def test_generate_indigenous_panel_figures(tmp_path):
     small hand-built results.json matching evaluate_on_indigenous_panel's
     real shape (see that function's own docstring) -- confirms one
     parity_vs_<anchor>/ subdirectory per anchor actually present in
-    common.data.indigenous_panel.PAIRS, with well-formed TeX (one
-    tikzpicture per language, balanced minipages), per the redesign that
-    replaced an earlier single heatmap with two separate, anchor-specific
-    bar-chart figures instead."""
+    common.data.indigenous_panel.PAIRS, each a single, well-formed grouped
+    bar chart (one tikzpicture, one .dat per tokenizer family, mean
+    token_parity per family per language) -- see
+    gen_indigenous_panel_parity_bars_tex's own docstring for why this
+    replaced an earlier per-language-subplot design (too dense at 34
+    individual tokenizers per language, and overflowed the page at 10
+    languages -- confirmed on a real render)."""
     from generate_tikz_figures import generate_indigenous_panel_figures
 
     def fake_model_result(fertility_spread):
@@ -204,12 +207,16 @@ def test_generate_indigenous_panel_figures(tmp_path):
     rows, families, written = generate_indigenous_panel_figures(str(results_path), str(out_dir))
 
     assert set(written) == {"en", "es"}
-    assert written["en"][0] == ["crk", "iu"]
-    assert len(written["es"][0]) == 10
+    assert written["en"] == ["crk", "iu"]
+    assert len(written["es"]) == 10
     for anchor in ("en", "es"):
         anchor_dir = out_dir / f"parity_vs_{anchor}"
-        assert (anchor_dir / f"fig_indigenous_panel_parity_vs_{anchor}.tex").exists()
+        tex_path = anchor_dir / f"fig_indigenous_panel_parity_vs_{anchor}.tex"
+        assert tex_path.exists()
         assert (anchor_dir / f"fig_indigenous_panel_parity_vs_{anchor}_body.tex").exists()
+        # one .dat per tokenizer family, mean-aggregated (not per-model)
+        for fam in families:
+            assert (anchor_dir / f"bar_indigenous_panel_parity_vs_{anchor}_{fam.replace('/', '_').replace(' ', '_')}.dat").exists()
 
 
 def test_run_eval_cli_indigenous_panel_branch(tmp_path, monkeypatch):

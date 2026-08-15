@@ -1,255 +1,29 @@
-\begin{minipage}{0.470\textwidth}
-\centering
 \begin{tikzpicture}
 \begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Aymara},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={{gpt2}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Qwen3-8B}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {Qwen3.8-2.4T-A95B}, {Llama-2-7b-hf}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {roberta-base}, {deberta-base}, {ModernBERT-base}, {claude-opus-5}, {gemma-7b}, {opt-125m}, {falcon-7b}, {Mistral-7B-v0.1}, {Muse-Glimmer-30B}, {bloom}},
-    yticklabel style={font=\tiny},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
+    ybar, width=13.0cm, height=6.5cm,
+    bar width=3pt,
+    symbolic x coords={aym,bzd,cni,gn,hch,nah,oto,quy,shp,tar},
+    xtick=data,
+    xticklabels={{Aymara}, {Bribri}, {Asháninka}, {Guarani}, {Huichol}, {Nahuatl languages}, {Otomian languages}, {Ayacucho Quechua}, {Shipibo-Conibo}, {Central Tarahumara}},
+    x tick label style={rotate=40, anchor=east, font=\small},
+    ylabel={mean token parity vs es},
+    ymin=0,
+    enlarge x limits=0.050,
+    extra y ticks={1},
+    extra y tick labels={},
+    extra y tick style={grid=major, major grid style={dashed, gray, thick}},
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},
     axis y line*=left, axis x line*=bottom,
 ]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_aym_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_aym_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_aym_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_aym_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_aym_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_aym_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
+\addplot+[ybar, fill=openaiCol, draw=openaiCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_OpenAI_tiktoken.dat};
+\addlegendentry{OpenAI/tiktoken}
+\addplot+[ybar, fill=chinaCol, draw=chinaCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Chinese_labs.dat};
+\addlegendentry{Chinese labs}
+\addplot+[ybar, fill=metaCol, draw=metaCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Meta_Llama.dat};
+\addlegendentry{Meta/Llama}
+\addplot+[ybar, fill=encCol, draw=encCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Encoder-only.dat};
+\addlegendentry{Encoder-only}
+\addplot+[ybar, fill=otherCol, draw=otherCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Other.dat};
+\addlegendentry{Other}
 \end{axis}
 \end{tikzpicture}
-\end{minipage}
-\hfill
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Bribri},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_bzd_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_bzd_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_bzd_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_bzd_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_bzd_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_bzd_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\par\vspace{0.3cm}
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Asháninka},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={{gpt2}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Qwen3-8B}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {Qwen3.8-2.4T-A95B}, {Llama-2-7b-hf}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {roberta-base}, {deberta-base}, {ModernBERT-base}, {claude-opus-5}, {gemma-7b}, {opt-125m}, {falcon-7b}, {Mistral-7B-v0.1}, {Muse-Glimmer-30B}, {bloom}},
-    yticklabel style={font=\tiny},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_cni_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_cni_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_cni_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_cni_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_cni_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_cni_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\hfill
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Guarani},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_gn_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_gn_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_gn_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_gn_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_gn_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_gn_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\par\vspace{0.3cm}
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Huichol},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={{gpt2}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Qwen3-8B}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {Qwen3.8-2.4T-A95B}, {Llama-2-7b-hf}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {roberta-base}, {deberta-base}, {ModernBERT-base}, {claude-opus-5}, {gemma-7b}, {opt-125m}, {falcon-7b}, {Mistral-7B-v0.1}, {Muse-Glimmer-30B}, {bloom}},
-    yticklabel style={font=\tiny},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_hch_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_hch_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_hch_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_hch_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_hch_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_hch_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\hfill
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Nahuatl languages},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_nah_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_nah_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_nah_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_nah_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_nah_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_nah_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\par\vspace{0.3cm}
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Otomian languages},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={{gpt2}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Qwen3-8B}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {Qwen3.8-2.4T-A95B}, {Llama-2-7b-hf}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {roberta-base}, {deberta-base}, {ModernBERT-base}, {claude-opus-5}, {gemma-7b}, {opt-125m}, {falcon-7b}, {Mistral-7B-v0.1}, {Muse-Glimmer-30B}, {bloom}},
-    yticklabel style={font=\tiny},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_oto_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_oto_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_oto_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_oto_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_oto_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_oto_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\hfill
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Ayacucho Quechua},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_quy_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_quy_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_quy_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_quy_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_quy_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_quy_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\par\vspace{0.3cm}
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Shipibo-Conibo},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={{gpt2}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {tk:cl100k\_base}, {gpt-oss-20b}, {gpt-oss-120b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Qwen3-8B}, {Kimi-K3}, {DeepSeek-V4-Pro}, {DeepSeek-R1}, {Qwen3.8-2.4T-A95B}, {Llama-2-7b-hf}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {xlm-roberta-base}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-multilingual-cased}, {bert-base-cased}, {deberta-v3-base}, {roberta-base}, {deberta-base}, {ModernBERT-base}, {claude-opus-5}, {gemma-7b}, {opt-125m}, {falcon-7b}, {Mistral-7B-v0.1}, {Muse-Glimmer-30B}, {bloom}},
-    yticklabel style={font=\tiny},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_shp_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_shp_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_shp_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_shp_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_shp_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_shp_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\hfill
-\begin{minipage}{0.470\textwidth}
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    xbar, width=\linewidth, height=8.0cm,
-    title={\small Central Tarahumara},
-    xmin=0,
-    ytick={0.0,1.0,2.0,3.0,4.0,5.0,6.0,7.0,8.0,9.0,10.7,11.7,12.7,13.7,14.7,16.4,17.4,18.4,20.099999999999998,21.099999999999998,22.099999999999998,23.099999999999998,24.099999999999998,25.099999999999998,26.099999999999998,27.099999999999998,28.099999999999998,29.799999999999997,31.499999999999996,32.5,33.5,34.5,35.5,36.5},
-    yticklabels={},
-    y dir=reverse,
-    ymin=-0.7, ymax=33.70,
-    bar width=2pt,
-    axis y line*=left, axis x line*=bottom,
-]
-\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_tar_OpenAI_tiktoken.dat};
-\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_tar_Chinese_labs.dat};
-\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_tar_Meta_Llama.dat};
-\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_tar_Encoder-only.dat};
-\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_tar_Anthropic.dat};
-\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=parity, y=idx] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_tar_Other.dat};
-\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,44)};
-\end{axis}
-\end{tikzpicture}
-\end{minipage}
-\par\vspace{0.3cm}

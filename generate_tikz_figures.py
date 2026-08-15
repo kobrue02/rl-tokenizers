@@ -586,120 +586,96 @@ def load_indigenous_panel_rows(results_path):
     return rows, models
 
 
-def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, fig_name, out_dir, data_prefix="", ncols=2):
-    """One compact xbar subplot PER LANGUAGE in `langs` (all anchored to the
-    SAME `anchor`), arranged in a minipage grid `ncols` wide -- the same
-    minipage-grid technique gen_api_cost_boxplot_tex already established
-    for 4 provider panels, reused here for however many languages this
-    anchor group has. Replaces an earlier single-heatmap design per
-    explicit user feedback: the mixed-anchor panel reads more naturally as
-    two separate, anchor-specific REAL token_parity figures (English for
-    crk/iu, Spanish for the ten AmericasNLP languages -- see
-    common.data.indigenous_panel's own module docstring) than one
-    anchor-free fertility summary, and didn't need the full 33-model
-    heatmap treatment at only 2-10 languages.
+def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, fig_name, out_dir, data_prefix=""):
+    """ONE grouped vertical bar chart for this anchor group -- languages
+    along the x-axis, one clustered bar per tokenizer FAMILY (not per
+    individual tokenizer), colored the same as every other figure
+    (_FAMILY_COLORS/_FAMILY_RGB). Replaces an earlier per-language-subplot
+    design (a minipage grid, one xbar subplot per language, all 33+
+    individual tokenizers shown as separate bars in each) per explicit
+    user feedback on a real render: even after fixing that version's own
+    width-overflow bug, showing every individual tokenizer once per
+    language was too dense to read AND the subplot grid overflowed the
+    page at 10 languages. Aggregating to family-level MEANS collapses
+    ~34 bars per language down to len(families) (currently 6), and putting
+    every language on one shared x-axis instead of one-subplot-per-language
+    means the whole comparison is one compact, page-fitting plot instead
+    of a tall grid.
 
-    Bars colored by tokenizer family (same _FAMILY_COLORS/_FAMILY_RGB as
-    every other figure). Row order (which tokenizer sits at which y
-    position) comes from _grouped_positions(rows, families) -- the SAME
-    call this function's sibling for the other anchor group also makes, so
-    a reader can track one tokenizer's row position across both figures.
-    Only the leftmost subplot in each grid row gets y-tick labels --
-    repeating all of `rows`'s model names in every subplot is exactly the
-    "huge figure" bulk this per-language-subplot design exists to avoid.
+    Each family's own bar is the MEAN token_parity across every model in
+    that family that has data for a given language -- individual-tokenizer
+    detail is deliberately traded away here for a readable overview; a
+    reader who wants the per-tokenizer number can still get it from
+    results/indigenous_panel_comparison.json directly. A language with NO
+    data at all for a given family (e.g. a checkpoint that never covered
+    it) simply has no bar there, same graceful-skip convention as every
+    other figure in this module.
 
-    LAYOUT FIX, stated plainly (a real bug in an earlier version of this
-    function, not a style choice): each axis's own `width` MUST be relative
-    to its containing minipage (TeX's `\\linewidth`, which resolves to
-    whatever that minipage's own width actually is), never a fixed cm
-    value -- a hardcoded width wider than the minipage silently overflows
-    into the NEXT minipage, which a real render confirmed live: garbled,
-    overlapping titles/tick labels across adjacent subplots, not merely an
-    aesthetic issue. `ncols` should stay small enough that `\\linewidth`
-    per subplot leaves room for a real bar chart (2 is comfortable for any
-    reasonable page width; the earlier 5-wide layout for the 10-language
-    Spanish group was too narrow to read regardless of the width bug).
-    A dashed reference line at parity=1.0 (this tokenizer costs the same
-    for this language as for its own anchor) is drawn in every subplot --
-    the single most useful reading aid this chart can offer, so a reader
-    doesn't have to mentally locate "1.0" on each panel's own axis scale
-    separately. The per-subplot xlabel from an earlier version was dropped
-    entirely (repeating "token parity vs {anchor}" in every one of up to
-    10 subplots was real, needless clutter, directly implicated in the
-    live-observed overlap) -- state the axis meaning once, in the
-    figure's own caption, instead.
+    A dashed horizontal reference line at parity=1.0 is drawn via pgfplots'
+    own `extra y ticks` + `grid=major` mechanism (not a manually-plotted
+    line) -- the standard, robust way to add a reference gridline at an
+    arbitrary axis value without hand-computing plot-area coordinates.
     """
-    ordered, row_pos, _blocks, total_height = _grouped_positions(rows, families)
-    n = len(ordered)
-    nrows = math.ceil(len(langs) / ncols)
+    family_models = defaultdict(list)
+    for r in rows:
+        family_models[r["family"]].append(r["name"])
+
+    def family_mean(fam, lang):
+        vals = []
+        for name in family_models[fam]:
+            v = models[name]["token_parity_by_anchor"].get(anchor, {}).get("token_parity", {}).get(lang)
+            if v is not None:
+                vals.append(v)
+        return sum(vals) / len(vals) if vals else None
 
     preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
     for fam in families:
         r_, g_, b_ = _FAMILY_RGB[fam]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
 
-    for lang in langs:
-        for fam in families:
-            path = os.path.join(out_dir, f"bar_{fig_name}_{fam_key(lang)}_{fam_key(fam)}.dat")
-            with open(path, "w", encoding="utf-8") as f:
-                f.write("idx parity\n")
-                for r in ordered:
-                    if r["family"] != fam:
-                        continue
-                    v = models[r["name"]]["token_parity_by_anchor"].get(anchor, {}).get("token_parity", {}).get(lang)
-                    if v is None:
-                        continue
-                    f.write(f"{row_pos[r['name']]} {v:.4f}\n")
+    for fam in families:
+        path = os.path.join(out_dir, f"bar_{fig_name}_{fam_key(fam)}.dat")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("lang parity\n")
+            for lang in langs:
+                v = family_mean(fam, lang)
+                if v is None:
+                    continue
+                f.write(f"{lang} {v:.4f}\n")
 
-    subplot_width = 1.0 / ncols - 0.03
-    subplot_height_cm = 8.0  # fixed, NOT scaled by n -- see module docstring
-    # section on why this design trades "every subplot shows every
-    # tokenizer" for "compact enough to tile many of them," rather than the
-    # earlier heatmap's one-figure-scales-with-model-count approach.
-    body = []
-    for i, lang in enumerate(langs):
-        col = i % ncols
-        show_labels = col == 0
-        yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in ordered)
-        body.append(r"\begin{minipage}{%.3f\textwidth}" % subplot_width)
-        body.append(r"\centering")
-        body.append(r"\begin{tikzpicture}")
-        body.append(r"\begin{axis}[")
-        # width=\linewidth (NOT a fixed cm value) -- see this function's
-        # own LAYOUT FIX docstring section for the real overflow bug this
-        # replaced.
-        body.append(r"    xbar, width=\linewidth, height=%.1fcm," % subplot_height_cm)
-        body.append(r"    title={\small %s}," % esc(lang_display_name(lang)))
-        body.append(r"    xmin=0,")
-        body.append(r"    ytick={%s}," % ",".join(str(row_pos[r["name"]]) for r in ordered))
-        if show_labels:
-            body.append(r"    yticklabels={%s}," % yticklabels)
-            body.append(r"    yticklabel style={font=\tiny},")
-        else:
-            body.append(r"    yticklabels={},")
-        body.append(r"    y dir=reverse,")
-        body.append(r"    ymin=-0.7, ymax=%.2f," % (n - 0.3))
-        body.append(r"    bar width=2pt,")
-        body.append(r"    axis y line*=left, axis x line*=bottom,")
-        body.append(r"]")
-        for fam in families:
-            col_name = _FAMILY_COLORS[fam]
-            body.append(
-                r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=parity, y=idx] {%sbar_%s_%s_%s.dat};"
-                % (col_name, col_name, data_prefix, fig_name, fam_key(lang), fam_key(fam))
-            )
-        # Parity=1.0 reference line, drawn AFTER (on top of) the bars so it
-        # stays visible even where a bar reaches past it -- spans well
-        # beyond the actual y-range so pgfplots clips it to the full
-        # visible height regardless of n, rather than hardcoding exact
-        # axis coordinates here.
-        body.append(r"\addplot[dashed, gray, thick, mark=none] coordinates {(1,-10) (1,%d)};" % (n + 10))
-        body += [r"\end{axis}", r"\end{tikzpicture}", r"\end{minipage}"]
-        at_row_end = col == ncols - 1 or i == len(langs) - 1
-        body.append(r"\par\vspace{0.3cm}" if at_row_end else r"\hfill")
+    symbolic_coords = ",".join(langs)
+    xticklabels = ", ".join(f"{{{esc(lang_display_name(lang))}}}" for lang in langs)
+
+    body = [
+        r"\begin{tikzpicture}",
+        r"\begin{axis}[",
+        r"    ybar, width=%.1fcm, height=6.5cm," % max(10.0, len(langs) * 1.3),
+        r"    bar width=%dpt," % max(3, 18 // max(len(families), 1)),
+        r"    symbolic x coords={%s}," % symbolic_coords,
+        r"    xtick=data,",
+        r"    xticklabels={%s}," % xticklabels,
+        r"    x tick label style={rotate=40, anchor=east, font=\small},",
+        r"    ylabel={mean token parity vs %s}," % esc(anchor),
+        r"    ymin=0,",
+        r"    enlarge x limits=%.3f," % (0.5 / max(len(langs), 1)),
+        r"    extra y ticks={1},",
+        r"    extra y tick labels={},",
+        r"    extra y tick style={grid=major, major grid style={dashed, gray, thick}},",
+        r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},",
+        r"    axis y line*=left, axis x line*=bottom,",
+        r"]",
+    ]
+    for fam in families:
+        col_name = _FAMILY_COLORS[fam]
+        body.append(
+            r"\addplot+[ybar, fill=%s, draw=%s] table [x=lang, y=parity] {%sbar_%s_%s.dat};"
+            % (col_name, col_name, data_prefix, fig_name, fam_key(fam))
+        )
+        body.append(r"\addlegendentry{%s}" % esc(fam))
+    body += [r"\end{axis}", r"\end{tikzpicture}"]
 
     full_tex, _ = _write_standalone_and_body(fig_name, preamble, body, out_dir)
-    return full_tex, [(lang, ordered) for lang in langs], nrows
+    return full_tex
 
 
 def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
@@ -736,19 +712,13 @@ def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
         anchor_dir = os.path.join(out_dir, f"parity_vs_{anchor}")
         os.makedirs(anchor_dir, exist_ok=True)
         fig_name = f"indigenous_panel_parity_vs_{anchor}"
-        # ncols=2 regardless of language count -- see
-        # gen_indigenous_panel_parity_bars_tex's own LAYOUT FIX docstring
-        # section: a real render confirmed a wider grid (5 columns for the
-        # 10-language Spanish group) left each subplot too narrow to read,
-        # independent of the width-overflow bug that redesign also fixed.
-        ncols = 2
-        tex, subplot_info, nrows = gen_indigenous_panel_parity_bars_tex(
+        tex = gen_indigenous_panel_parity_bars_tex(
             rows, models, families, langs, anchor, fig_name, anchor_dir,
-            data_prefix=f"{base_prefix}parity_vs_{anchor}/", ncols=ncols,
+            data_prefix=f"{base_prefix}parity_vs_{anchor}/",
         )
-        _assert_well_formed(tex, f"fig_{fig_name}.tex", expected_tikzpictures=len(langs))
-        written[anchor] = (langs, nrows)
-        print(f"wrote parity_vs_{anchor}/ ({len(langs)} languages, {ncols}x{nrows} grid)")
+        _assert_well_formed(tex, f"fig_{fig_name}.tex")
+        written[anchor] = langs
+        print(f"wrote parity_vs_{anchor}/ ({len(langs)} languages, {len(families)} tokenizer families)")
 
     print(f"{len(rows)} models, {len(families)} families")
     print("wrote one parity_vs_<anchor>/ subdirectory per anchor language under", out_dir)
