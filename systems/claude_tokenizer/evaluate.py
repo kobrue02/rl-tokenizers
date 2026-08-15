@@ -94,14 +94,19 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--eval-data-source",
-        choices=["bouquet", "bouquet_test", "synthetic"],
+        choices=["bouquet", "bouquet_test", "synthetic", "indigenous_panel"],
         default="bouquet",
         help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
         "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
         "reported numbers, not repeated tuning checks; "
         "'synthetic': a small real-text placeholder (reuses systems.bpe.train's own "
         "_SMOKE_TEST_GROUPS -- NOT common.data.synthetic's byte generator, which isn't guaranteed "
-        "valid UTF-8), for a quick sanity check with minimal API usage",
+        "valid UTF-8), for a quick sanity check with minimal API usage; "
+        "'indigenous_panel': common.data.indigenous_panel's curated Indigenous-language panel "
+        "(needs a one-time common.data.prepare_indigenous_panel run first) -- scored via "
+        "evaluate_claude_on_indigenous_panel, not evaluate_claude_on_groups, since this panel is "
+        "deliberately mixed-anchor (see that function's own docstring); results have a different "
+        "shape, not directly comparable to a bouquet/bouquet_test/synthetic run's own",
     )
     parser.add_argument(
         "--num-groups", type=int, default=None,
@@ -135,6 +140,11 @@ def build_arg_parser():
 def _load_eval_groups(args):
     if args.eval_data_source == "synthetic":
         groups = _SMOKE_TEST_GROUPS
+        return groups[: args.num_groups] if args.num_groups else groups
+    if args.eval_data_source == "indigenous_panel":
+        from common.data.corpora import stream_groups
+
+        groups = list(stream_groups("indigenous_panel", config="all"))
         return groups[: args.num_groups] if args.num_groups else groups
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
     groups = loader("all")
@@ -316,6 +326,124 @@ def evaluate_claude_on_groups(
     }
 
 
+def evaluate_claude_on_indigenous_panel(
+    eval_groups, count_fn, max_workers=25, progress_every=1000, checkpoint_path=None
+):
+    """Claude-specific analog of common.eval.cross_tokenizer.
+    evaluate_on_indigenous_panel, built around evaluate_claude_on_groups the
+    same way that function is built around common.eval.cross_tokenizer.
+    evaluate_on_groups -- see both functions' own docstrings for why this
+    panel needs dedicated handling (mixed anchors: English for crk-en/
+    iu-en, Spanish for the ten AmericasNLP pairs -- see common.data.
+    indigenous_panel's own module docstring) and why merging ratios
+    computed against different anchors would silently reintroduce anchor
+    bias rather than actually eliminating it.
+
+    checkpoint_path: unlike evaluate_claude_on_groups's own single
+    checkpoint file, this panel runs TWO internal evaluate_claude_on_groups
+    calls (one per anchor) -- each gets its own checkpoint file
+    ("{checkpoint_path}.{anchor}.jsonl") so a resumed run resumes each
+    anchor's own calls independently, same "submit, get killed/timed out,
+    resubmit the exact same command" workflow every checkpoint_path use in
+    this module already supports.
+
+    Returns {"combined": {"avg_compression", "per_lang_compression",
+    "fertility", "renyi": {} (always empty), "gini": None (always) --
+    pooled across BOTH anchor subgroups, safe since these are per-language,
+    anchor-free quantities}, "token_parity_by_anchor": {anchor: <that
+    subgroup's own evaluate_claude_on_groups result>}, "morphology_spread":
+    {"fertility_spread", "compression_spread"} (max/min across the whole
+    panel, no anchor needed), "num_total_calls"/"num_failed_calls"/
+    "num_skipped_via_checkpoint" (summed across both anchor subgroups)}.
+    """
+    from common.data.indigenous_panel import PAIRS
+
+    known_anchors = {meta["anchor"] for meta in PAIRS.values()}
+    groups_by_anchor = defaultdict(list)
+    for group in eval_groups:
+        anchors_present = known_anchors & set(group)
+        if not anchors_present:
+            raise ValueError(
+                f"indigenous_panel group has none of this panel's known anchor languages "
+                f"({sorted(known_anchors)}) as a key: {sorted(group)} -- see "
+                "common.data.indigenous_panel.PAIRS"
+            )
+        for anchor in anchors_present:
+            groups_by_anchor[anchor].append(group)
+
+    token_parity_by_anchor = {}
+    per_lang_compression = {}
+    fertility_by_lang = {}
+    total_calls = total_failed = total_skipped = 0
+    for anchor, anchor_groups in groups_by_anchor.items():
+        anchor_ckpt = f"{checkpoint_path}.{anchor}.jsonl" if checkpoint_path else None
+        anchor_results = evaluate_claude_on_groups(
+            anchor_groups, count_fn, anchor_lang=anchor, max_workers=max_workers,
+            progress_every=progress_every, checkpoint_path=anchor_ckpt,
+        )
+        token_parity_by_anchor[anchor] = anchor_results
+        per_lang_compression.update(anchor_results["per_lang_compression"])
+        fertility_by_lang.update(anchor_results["fertility"])
+        total_calls += anchor_results["num_total_calls"]
+        total_failed += anchor_results["num_failed_calls"]
+        total_skipped += anchor_results["num_skipped_via_checkpoint"]
+
+    avg_compression = float(np.mean(list(per_lang_compression.values()))) if per_lang_compression else 0.0
+    fertility_vals = [v for v in fertility_by_lang.values() if v > 0]
+    compression_vals = [v for v in per_lang_compression.values() if v > 0]
+    morphology_spread = {
+        "fertility_spread": (max(fertility_vals) / min(fertility_vals)) if fertility_vals else 1.0,
+        "compression_spread": (max(compression_vals) / min(compression_vals)) if compression_vals else 1.0,
+    }
+
+    return {
+        "combined": {
+            "avg_compression": avg_compression,
+            "per_lang_compression": per_lang_compression,
+            "fertility": fertility_by_lang,
+            "renyi": {},
+            "gini": None,
+        },
+        "token_parity_by_anchor": token_parity_by_anchor,
+        "morphology_spread": morphology_spread,
+        "num_total_calls": total_calls,
+        "num_failed_calls": total_failed,
+        "num_skipped_via_checkpoint": total_skipped,
+    }
+
+
+def report_claude_indigenous_panel_eval(results, label=""):
+    prefix = f"[{label}] " if label else ""
+    print(f"\n{prefix}indigenous_panel evaluation (mixed-anchor, compression/fertility only -- "
+          f"see evaluate_claude_on_indigenous_panel's own docstring):")
+    skipped = results.get("num_skipped_via_checkpoint", 0)
+    skipped_note = f", {skipped} resumed from checkpoint" if skipped else ""
+    print(f"  count_tokens calls: {results['num_total_calls']} total, {results['num_failed_calls']} failed{skipped_note}")
+    print(
+        f"  panel-wide fertility_spread={results['morphology_spread']['fertility_spread']:.3f}  "
+        f"compression_spread={results['morphology_spread']['compression_spread']:.3f}"
+    )
+    combined = results["combined"]
+    print(f"  avg_compression={combined['avg_compression']:.2f}")
+    print("  per-language compression / fertility (anchor-free, comparable across the whole panel):")
+    for lang in sorted(combined["per_lang_compression"]):
+        print(
+            f"    {lang}: compression={combined['per_lang_compression'][lang]:.2f}  "
+            f"fertility={combined['fertility'].get(lang, 0.0):.2f}"
+        )
+    for anchor, anchor_results in sorted(results["token_parity_by_anchor"].items()):
+        print(f"  token_parity vs anchor={anchor!r} (only comparable within this anchor's own languages):")
+        token_parity = anchor_results["token_parity"]
+        token_parity_gm = anchor_results["token_parity_gm"]
+        for lang in sorted(token_parity):
+            if lang == anchor:
+                continue
+            print(
+                f"    {lang}: token_parity={token_parity[lang]:.3f}  "
+                f"token_parity_gm={token_parity_gm.get(lang, 1.0):.3f}"
+            )
+
+
 def report_claude_eval(results, label=""):
     prefix = f"[{label}] " if label else ""
     print(f"\n{prefix}held-out evaluation (compression / fertility / token parity only -- "
@@ -372,20 +500,29 @@ def main(argv=None):
     else:
         print("no --output/--checkpoint-dir given -- checkpointing disabled, an interrupted run can't resume")
 
+    is_indigenous_panel = args.eval_data_source == "indigenous_panel"
     all_results = {}
     failed = {}
     for model in models:
         checkpoint_path = os.path.join(checkpoint_dir, f"{model}.jsonl") if checkpoint_dir else None
         try:
             counter = ClaudeTokenCounter(model, rate_limiter, api_key=args.api_key)
-            results = evaluate_claude_on_groups(
-                eval_groups, counter.count, max_workers=args.max_workers, checkpoint_path=checkpoint_path
-            )
+            if is_indigenous_panel:
+                results = evaluate_claude_on_indigenous_panel(
+                    eval_groups, counter.count, max_workers=args.max_workers, checkpoint_path=checkpoint_path
+                )
+            else:
+                results = evaluate_claude_on_groups(
+                    eval_groups, counter.count, max_workers=args.max_workers, checkpoint_path=checkpoint_path
+                )
         except Exception as e:
             print(f"\n[{model}] FAILED: {type(e).__name__}: {e}")
             failed[model] = f"{type(e).__name__}: {e}"
             continue
-        report_claude_eval(results, label=model)
+        if is_indigenous_panel:
+            report_claude_indigenous_panel_eval(results, label=model)
+        else:
+            report_claude_eval(results, label=model)
         all_results[model] = results
 
     if failed:
@@ -416,7 +553,14 @@ def main(argv=None):
             },
         )
         successful = {m: r for m, r in all_results.items() if m != "_failed"}
-        summary_rows = [[m, r["avg_compression"], r["num_total_calls"], r["num_failed_calls"]] for m, r in successful.items()]
+        # indigenous_panel's own results nest avg_compression under
+        # "combined" (see evaluate_claude_on_indigenous_panel's own
+        # docstring) -- num_total_calls/num_failed_calls stay top-level
+        # either way.
+        avg_compression_of = (lambda r: r["combined"]["avg_compression"]) if is_indigenous_panel else (lambda r: r["avg_compression"])
+        summary_rows = [
+            [m, avg_compression_of(r), r["num_total_calls"], r["num_failed_calls"]] for m, r in successful.items()
+        ]
         run.log(
             {
                 "comparison": wandb.Table(
@@ -426,7 +570,24 @@ def main(argv=None):
             }
         )
         for model, r in successful.items():
-            run.log(claude_wandb_log_dict(r, prefix=model))
+            if is_indigenous_panel:
+                log_dict = {
+                    f"{model}/avg_compression": r["combined"]["avg_compression"],
+                    **{f"{model}/compression/{lang}": v for lang, v in r["combined"]["per_lang_compression"].items()},
+                    **{f"{model}/fertility/{lang}": v for lang, v in r["combined"]["fertility"].items()},
+                    **{f"{model}/morphology_spread/{k}": v for k, v in r["morphology_spread"].items()},
+                }
+                for anchor, anchor_results in r["token_parity_by_anchor"].items():
+                    log_dict.update(
+                        {
+                            f"{model}/token_parity_vs_{anchor}/{lang}": v
+                            for lang, v in anchor_results["token_parity"].items()
+                            if lang != anchor
+                        }
+                    )
+                run.log(log_dict)
+            else:
+                run.log(claude_wandb_log_dict(r, prefix=model))
         run.finish()
         print(f"logged comparison to wandb project={args.wandb_project!r}")
 

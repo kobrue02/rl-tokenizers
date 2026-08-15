@@ -328,7 +328,12 @@ _EVAL_DATA_SOURCE_HELP = (
     "'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
     "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
     "reported numbers, not repeated tuning checks; "
-    "'synthetic': the placeholder corpus, for a quick sanity check with no network access"
+    "'synthetic': the placeholder corpus, for a quick sanity check with no network access; "
+    "'indigenous_panel': common.data.indigenous_panel's curated Indigenous-language panel "
+    "(needs a one-time common.data.prepare_indigenous_panel run first) -- scored via "
+    "evaluate_on_indigenous_panel, not evaluate_on_groups, since this panel is deliberately "
+    "mixed-anchor (see that function's own docstring); results have a different shape, not "
+    "directly comparable to a bouquet/bouquet_test/synthetic run's own"
 )
 
 
@@ -347,7 +352,9 @@ def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_h
         help=checkpoint_help or f"path to a {system_label} checkpoint (--output-dir at training time)",
     )
     parser.add_argument(
-        "--eval-data-source", choices=["bouquet", "bouquet_test", "synthetic"], default="bouquet",
+        "--eval-data-source",
+        choices=["bouquet", "bouquet_test", "synthetic", "indigenous_panel"],
+        default="bouquet",
         help=eval_data_source_help or _EVAL_DATA_SOURCE_HELP,
     )
     parser.add_argument(
@@ -374,6 +381,11 @@ def load_eval_groups(args, synthetic_groups=None):
         from common.data.synthetic import make_synthetic_parallel_groups
 
         return make_synthetic_parallel_groups(args.num_groups or 40)
+    if args.eval_data_source == "indigenous_panel":
+        from common.data.corpora import stream_groups
+
+        groups = list(stream_groups("indigenous_panel", config="all"))
+        return groups[: args.num_groups] if args.num_groups else groups
     # "all": every language BOUQuET covers -- evaluate_on_groups already
     # skips languages this checkpoint has no entry for, so this is always
     # safe.
@@ -414,7 +426,25 @@ def run_eval_cli(
     3-arg-with-device (flexitokens/manta/fanta) induce_spans call every other
     system makes.
 
-    Returns the same results dict evaluate_on_groups does.
+    Returns the same results dict evaluate_on_groups does (or
+    evaluate_on_indigenous_panel's own differently-shaped dict for
+    --eval-data-source indigenous_panel -- see that function's own
+    docstring).
+
+    MAGNET CAVEAT, stated plainly: magnet/evaluate.py's own
+    build_induce_fn_by_lang resolves each language to a SCRIPT via
+    eval_lang_to_script before looking it up in model.boundary_predictors.
+    indigenous_panel's own language keys (crk, iu, nah, es, ...) are plain
+    codes with no lang_Script suffix and aren't in magnet.train.LANG_SCRIPT,
+    so eval_lang_to_script's own fallback treats each one as its OWN
+    one-off "script" bucket (see that function's docstring) -- a checkpoint
+    trained the normal way (against BOUQuET/glot500's real lang_Script-keyed
+    scripts) will have no matching boundary_predictors entry for any of
+    them, so a magnet checkpoint scores 0 languages on this panel. Not a bug
+    to work around here: it's a genuine capability question (does a
+    per-script boundary predictor generalize to scripts it never saw a
+    single example of?) rather than something this harness should paper
+    over with an invented script mapping.
     """
     args = build_eval_arg_parser(system_label, checkpoint_help, eval_data_source_help).parse_args(argv)
     model = load_model(args.checkpoint, args.device)
@@ -427,6 +457,10 @@ def run_eval_cli(
 
     sequences_by_lang = sequences_by_lang_from_groups(eval_groups)
     induce_fn_by_lang = build_induce_fn_by_lang(model, sequences_by_lang, args)
-    results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
-    report_eval(results, label=system_label)
+    if args.eval_data_source == "indigenous_panel":
+        results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups)
+        report_indigenous_panel_eval(results, label=system_label)
+    else:
+        results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
+        report_eval(results, label=system_label)
     return results

@@ -1,0 +1,33 @@
+# systems/claude_tokenizer/evaluate.py -- sbatch jobs/evaluate_claude.sh -c configs/eval_claude_indigenous_panel.yml
+#
+# Same model/rpm/max_workers as configs/eval_claude.yml (see that file's
+# own comment for why rpm=90, not the "Start" tier's published 2000 --
+# confirmed live via a real 429 that this org's actual cap is 100/min), but
+# scored on common.data.indigenous_panel's curated Indigenous-language
+# panel instead of BOUQuET -- requires a one-time
+# `python -m common.data.prepare_indigenous_panel` run first. Uses
+# evaluate_claude_on_indigenous_panel (see that function's own docstring in
+# systems/claude_tokenizer/evaluate.py), which internally splits into TWO
+# anchor-scoped runs (English for crk-en/iu-en, Spanish for the ten
+# AmericasNLP pairs) since this panel is deliberately mixed-anchor --
+# checkpoint_dir below still makes the WHOLE run resumable, one <model>.
+# <anchor>.jsonl file per anchor under it.
+#
+# Much smaller than the ~272k-pair BOUQuET run (this panel is ~12 language
+# pairs across a few hundred thousand sentences total, not 259 languages),
+# but still large enough at rpm=90 that this will likely span multiple
+# job time limits -- same "submit, let it time out, resubmit this EXACT
+# config" workflow as configs/eval_claude.yml, not a one-shot run.
+#
+# output/checkpoint_dir are DELIBERATELY different paths from
+# configs/eval_claude.yml's own -- that BOUQuET job is still resuming
+# independently (results/claude_comparison.checkpoint/) and must not
+# collide with this one.
+model: "claude-opus-5"
+rpm: 90
+max_workers: 25
+eval_data_source: indigenous_panel
+output: results/claude_indigenous_panel.json
+checkpoint_dir: results/claude_indigenous_panel.checkpoint
+use_wandb: true
+run_name: claude_tokenizer_indigenous_panel_v1
