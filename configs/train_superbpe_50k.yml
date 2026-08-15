@@ -1,0 +1,15 @@
+# systems/superbpe/cli.py -- sbatch jobs/train_superbpe.sh -c configs/train_superbpe_50k.yml
+#
+# Same data_source/langs/vocab_size as configs/train_bpe_50k.yml -- matched
+# vocab size (50k) is what makes a direct superbpe-vs-bpe comparison fair,
+# same convention the rest of this project's tokenizer comparisons already
+# use. output_dir/vocab_out are DELIBERATELY omitted here -- jobs/
+# train_superbpe.sh already hardcodes job-id-tagged paths
+# (checkpoints/superbpe_${SLURM_JOB_ID}.pt, vocab_out/superbpe_vocab_
+# ${SLURM_JOB_ID}.json) directly on its own command line, and those
+# explicit CLI flags take priority over anything set here regardless of
+# argv order (see common.config_file.parse_args_with_config's own
+# docstring) -- setting them here too would just be silently ignored.
+data_source: all
+langs: all
+vocab_size: 50000

@@ -633,7 +633,27 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
         r_, g_, b_ = _FAMILY_RGB[fam]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
 
-    for fam in families:
+    # Families with NO data at all for this anchor group (e.g. a checkpoint-
+    # in-progress model whose relevant phase hasn't produced any completed
+    # calls yet) are excluded from `present_families` entirely -- both their
+    # .dat file AND their \addplot/\addlegendentry pair are skipped below.
+    # This matters beyond just "don't draw an empty bar": pgfplots silently
+    # drops a completely-empty-table addplot from its own internal legend
+    # numbering, which shifts every LATER \addlegendentry to mislabel the
+    # next real plot instead (confirmed live -- a real render showed
+    # "Anthropic"'s legend entry colored/positioned as if it were "Other",
+    # with "Other"'s own entry missing entirely, because Anthropic's own
+    # table was empty at compile time). Skipping the pair in Python avoids
+    # ever emitting a plot pgfplots would silently drop.
+    present_families = [fam for fam in families if any(family_mean(fam, lang) is not None for lang in langs)]
+    dropped_families = [fam for fam in families if fam not in present_families]
+    if dropped_families:
+        print(
+            f"  {fig_name}: {len(dropped_families)} family/families with NO data for this anchor group, "
+            f"omitted from the legend rather than risk a pgfplots empty-plot misalignment: {dropped_families}"
+        )
+
+    for fam in present_families:
         path = os.path.join(out_dir, f"bar_{fig_name}_{fam_key(fam)}.dat")
         with open(path, "w", encoding="utf-8") as f:
             f.write("lang parity\n")
@@ -665,7 +685,7 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
         r"    axis y line*=left, axis x line*=bottom,",
         r"]",
     ]
-    for fam in families:
+    for fam in present_families:
         col_name = _FAMILY_COLORS[fam]
         body.append(
             r"\addplot+[ybar, fill=%s, draw=%s] table [x=lang, y=parity] {%sbar_%s_%s.dat};"

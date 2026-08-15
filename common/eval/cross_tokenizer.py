@@ -17,10 +17,12 @@ uses for the boundary-stability diagnostic.
 """
 
 import argparse
+import json
 from collections import Counter, defaultdict
 
 import numpy as np
 
+from common.config_file import parse_args_with_config
 from common.eval.metrics import compression_rate, fertility, gini_coefficient, renyi_efficiency
 from common.eval.parity import _find_anchor_key, anchor_invariant_parity
 from common.eval.reporting import word_count
@@ -324,6 +326,54 @@ def eval_wandb_log_dict(results, prefix="eval"):
     return log_dict
 
 
+def strip_token_freq(results, is_indigenous_panel):
+    """token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't valid
+    JSON. Shared here so run_eval_cli's own --output writing doesn't
+    duplicate the exact stripping logic systems/hf_frontier/evaluate.py and
+    systems/claude_tokenizer/evaluate.py's own main() already each carry
+    inline (confirmed live: an earlier version of pretraining.cli_eval hit
+    the identical class of bug with tuple-keyed dicts). For
+    --eval-data-source indigenous_panel, token_freq is nested inside
+    "combined" and inside each anchor's own entry in
+    "token_parity_by_anchor" (see evaluate_on_indigenous_panel's own
+    docstring), not at the top level."""
+    if not is_indigenous_panel:
+        return {k: v for k, v in results.items() if k != "token_freq"}
+    return {
+        "combined": {k: v for k, v in results["combined"].items() if k != "token_freq"},
+        "token_parity_by_anchor": {
+            anchor: {k: v for k, v in anchor_results.items() if k != "token_freq"}
+            for anchor, anchor_results in results["token_parity_by_anchor"].items()
+        },
+        "morphology_spread": results["morphology_spread"],
+    }
+
+
+def indigenous_panel_wandb_log_dict(results, prefix="eval"):
+    """Analog of eval_wandb_log_dict for --eval-data-source
+    indigenous_panel's own differently-shaped results (see
+    evaluate_on_indigenous_panel's own docstring) -- mirrors the inline
+    logic systems/hf_frontier/evaluate.py's own main() already uses."""
+    combined = results["combined"]
+    log_dict = {
+        f"{prefix}/avg_compression": combined["avg_compression"],
+        f"{prefix}/gini": combined["gini"],
+        **{f"{prefix}/renyi/{lang}": v for lang, v in combined["renyi"].items()},
+        **{f"{prefix}/compression/{lang}": v for lang, v in combined["per_lang_compression"].items()},
+        **{f"{prefix}/fertility/{lang}": v for lang, v in combined["fertility"].items()},
+        **{f"{prefix}/morphology_spread/{k}": v for k, v in results["morphology_spread"].items()},
+    }
+    for anchor, anchor_results in results["token_parity_by_anchor"].items():
+        log_dict.update(
+            {
+                f"{prefix}/token_parity_vs_{anchor}/{lang}": v
+                for lang, v in anchor_results["token_parity"].items()
+                if lang != anchor
+            }
+        )
+    return log_dict
+
+
 _EVAL_DATA_SOURCE_HELP = (
     "'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
     "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
@@ -338,12 +388,24 @@ _EVAL_DATA_SOURCE_HELP = (
 
 
 def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_help=None):
-    """--checkpoint/--eval-data-source/--num-groups/--device, confirmed live
-    to be the ENTIRE argparse surface of all seven systems/*/evaluate.py in
-    this repo (hf_frontier is the one evaluate.py NOT built on this: it scores
-    externally-downloaded HF tokenizers, not a checkpoint this repo trained,
-    and genuinely needs its own CLI shape) -- extracted verbatim rather than
-    copy-pasted a seventh time."""
+    """--checkpoint/--eval-data-source/--num-groups/--device/--output/
+    --result-key/--use-wandb/--wandb-project/--run-name, confirmed live to
+    be the ENTIRE argparse surface of all seven systems/*/evaluate.py in
+    this repo (hf_frontier is the one evaluate.py NOT built on this: it
+    scores externally-downloaded HF tokenizers, not a checkpoint this repo
+    trained, and genuinely needs its own CLI shape) -- extracted verbatim
+    rather than copy-pasted a seventh time.
+
+    --output/--result-key exist so these seven systems' own results can
+    join the SAME comparison pipeline hf_frontier/claude_tokenizer already
+    write into (combine_eval_results.py, generate_tikz_figures.py) --
+    written as {result_key: results} (result_key defaults to system_label,
+    e.g. "fanta"), the same "keyed by tokenizer/model name" shape every
+    other results JSON in this project already uses. Override
+    --result-key if you ever need to keep two differently-configured runs
+    of the SAME system (e.g. two fanta checkpoints) as distinct entries in
+    one combined file -- the bare system_label alone would collide.
+    """
     parser = argparse.ArgumentParser(
         description=f"Evaluate a trained {system_label} checkpoint on held-out data."
     )
@@ -362,6 +424,26 @@ def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_h
         help="cap the number of held-out groups scored; omit for the full set",
     )
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="write {result_key: results} JSON here (default: print only, via report_eval/"
+        "report_indigenous_panel_eval, no file written) -- the same per-tokenizer results "
+        "shape systems/hf_frontier/evaluate.py and systems/claude_tokenizer/evaluate.py "
+        "already write, so combine_eval_results.py can merge this in directly",
+    )
+    parser.add_argument(
+        "--result-key", type=str, default=None,
+        help=f"top-level key this run's results are written under in --output (default: "
+        f"{system_label!r}, this system's own label) -- override to keep two differently-"
+        f"configured runs of the same system as distinct entries in one combined file",
+    )
+    parser.add_argument("--use-wandb", action="store_true")
+    parser.add_argument(
+        "--wandb-project", type=str, default=f"{system_label}_eval",
+        help=f"own project, separate from {system_label}/train.py's own {system_label!r} "
+        "training-time project -- this is a held-out EVALUATION run, not a training run",
+    )
+    parser.add_argument("--run-name", type=str, default="")
     return parser
 
 
@@ -446,7 +528,13 @@ def run_eval_cli(
     single example of?) rather than something this harness should paper
     over with an invented script mapping.
     """
-    args = build_eval_arg_parser(system_label, checkpoint_help, eval_data_source_help).parse_args(argv)
+    # parse_args_with_config (NOT plain .parse_args) -- adds -c/--config
+    # support so a YAML file can supply --checkpoint/--eval-data-source/
+    # etc. the same way every other systems/*/evaluate.py (hf_frontier,
+    # claude_tokenizer) and every systems/*/train.py in this repo already
+    # does, rather than requiring these seven systems' own eval CLIs to be
+    # invoked with everything spelled out on the command line every time.
+    args = parse_args_with_config(build_eval_arg_parser(system_label, checkpoint_help, eval_data_source_help), argv)
     model = load_model(args.checkpoint, args.device)
 
     eval_groups = load_eval_groups(args, synthetic_groups=synthetic_groups)
@@ -457,10 +545,37 @@ def run_eval_cli(
 
     sequences_by_lang = sequences_by_lang_from_groups(eval_groups)
     induce_fn_by_lang = build_induce_fn_by_lang(model, sequences_by_lang, args)
-    if args.eval_data_source == "indigenous_panel":
+    is_indigenous_panel = args.eval_data_source == "indigenous_panel"
+    if is_indigenous_panel:
         results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups)
         report_indigenous_panel_eval(results, label=system_label)
     else:
         results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
         report_eval(results, label=system_label)
+
+    if args.output:
+        result_key = args.result_key or system_label
+        payload = {result_key: strip_token_freq(results, is_indigenous_panel)}
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        print(f"wrote results under key {result_key!r} to {args.output}")
+
+    if args.use_wandb:
+        import wandb
+
+        run = wandb.init(
+            project=args.wandb_project,
+            name=args.run_name or None,
+            job_type="eval",
+            config={
+                "checkpoint": args.checkpoint,
+                "eval_data_source": args.eval_data_source,
+                "num_groups": args.num_groups,
+            },
+        )
+        log_fn = indigenous_panel_wandb_log_dict if is_indigenous_panel else eval_wandb_log_dict
+        run.log(log_fn(results, prefix="eval"))
+        run.finish()
+        print(f"logged results to wandb project={args.wandb_project!r}")
+
     return results

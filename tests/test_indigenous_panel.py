@@ -219,6 +219,40 @@ def test_generate_indigenous_panel_figures(tmp_path):
             assert (anchor_dir / f"bar_indigenous_panel_parity_vs_{anchor}_{fam.replace('/', '_').replace(' ', '_')}.dat").exists()
 
 
+def test_gen_indigenous_panel_parity_bars_omits_family_with_no_data(tmp_path):
+    """Regression test for a real bug: a family with ZERO data points for
+    an anchor group (e.g. claude-opus-5's English-anchor phase not having
+    produced any completed calls yet) must have its \\addplot/\\addlegendentry
+    pair skipped entirely, not emitted against an empty table. A real
+    Overleaf render confirmed pgfplots silently drops a completely-empty
+    addplot from its own legend numbering, which shifts every LATER
+    \\addlegendentry to mislabel the next real plot instead -- "Anthropic"'s
+    legend entry ended up colored/positioned as "Other", with "Other"'s own
+    entry missing entirely. This test locks in the fix: the empty family's
+    .dat file and TeX entries must not exist at all."""
+    from generate_tikz_figures import gen_indigenous_panel_parity_bars_tex
+
+    rows = [
+        {"name": "gpt2", "family": "OpenAI/tiktoken"},
+        {"name": "claude-opus-5", "family": "Anthropic"},
+    ]
+    models = {
+        "gpt2": {"token_parity_by_anchor": {"en": {"token_parity": {"crk": 1.2, "iu": 0.9}}}},
+        "claude-opus-5": {"token_parity_by_anchor": {"en": {"token_parity": {}}}},  # no data yet
+    }
+    families = ["OpenAI/tiktoken", "Anthropic"]
+
+    tex = gen_indigenous_panel_parity_bars_tex(
+        rows, models, families, ["crk", "iu"], "en", "test_fig", str(tmp_path)
+    )
+
+    assert r"\addlegendentry{Anthropic}" not in tex
+    assert "fill=anthropicCol" not in tex  # no addplot referencing it either
+    assert r"\addlegendentry{OpenAI/tiktoken}" in tex
+    assert not os.path.exists(tmp_path / "bar_test_fig_Anthropic.dat")
+    assert os.path.exists(tmp_path / "bar_test_fig_OpenAI_tiktoken.dat")
+
+
 def test_run_eval_cli_indigenous_panel_branch(tmp_path, monkeypatch):
     """common.eval.cross_tokenizer.run_eval_cli is the shared main() body
     for bpe/superbpe/fairtok/fanta/flexitokens/magnet/manta's own
@@ -272,6 +306,112 @@ def test_run_eval_cli_bouquet_branch_unaffected(monkeypatch):
         "token_freq", "renyi", "gini", "per_lang_compression", "avg_compression",
         "fertility", "token_parity", "token_parity_anchor", "token_parity_gm", "token_parity_spread",
     }
+
+
+def test_run_eval_cli_output_writes_combinable_json(tmp_path):
+    """--output should write {result_key: results} JSON with token_freq
+    stripped (bytes keys aren't JSON-serializable) -- the SAME shape
+    systems/hf_frontier/evaluate.py and systems/claude_tokenizer/evaluate.py
+    already write, so combine_eval_results.py can merge one of these
+    seven systems' own results in directly. Defaults result_key to the
+    system_label; --result-key overrides it (for keeping two differently
+    configured runs of the same system as distinct entries)."""
+    fake_groups = [{"eng": "hello world", "deu": "hallo welt"}]
+
+    def fake_load_model(checkpoint, device):
+        return object()
+
+    def fake_build_induce_fn_by_lang(model, sequences_by_lang, args):
+        return {lang: _one_token_per_byte for lang in sequences_by_lang}
+
+    out_path = tmp_path / "results.json"
+    run_eval_cli(
+        ["--checkpoint", "unused", "--eval-data-source", "synthetic", "--output", str(out_path)],
+        "fanta",
+        fake_load_model,
+        fake_build_induce_fn_by_lang,
+        synthetic_groups=fake_groups,
+    )
+    with open(out_path) as f:
+        payload = json.load(f)
+    assert set(payload) == {"fanta"}  # defaults to system_label
+    assert "token_freq" not in payload["fanta"]
+    assert "avg_compression" in payload["fanta"]
+
+    out_path2 = tmp_path / "results2.json"
+    run_eval_cli(
+        [
+            "--checkpoint", "unused", "--eval-data-source", "synthetic",
+            "--output", str(out_path2), "--result-key", "fanta_variant_b",
+        ],
+        "fanta",
+        fake_load_model,
+        fake_build_induce_fn_by_lang,
+        synthetic_groups=fake_groups,
+    )
+    with open(out_path2) as f:
+        payload2 = json.load(f)
+    assert set(payload2) == {"fanta_variant_b"}
+
+
+def test_run_eval_cli_output_indigenous_panel_strips_nested_token_freq(tmp_path, monkeypatch):
+    """Same --output guarantee, but for the nested indigenous_panel shape
+    (token_freq appears inside "combined" AND inside each anchor's own
+    entry in "token_parity_by_anchor" -- see strip_token_freq's own
+    docstring)."""
+    _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no way"}])
+    monkeypatch.setattr(corpora, "INDIGENOUS_PANEL_LOCAL_DIR", str(tmp_path))
+
+    def fake_load_model(checkpoint, device):
+        return object()
+
+    def fake_build_induce_fn_by_lang(model, sequences_by_lang, args):
+        return {lang: _one_token_per_byte for lang in sequences_by_lang}
+
+    out_path = tmp_path / "results.json"
+    run_eval_cli(
+        ["--checkpoint", "unused", "--eval-data-source", "indigenous_panel", "--output", str(out_path)],
+        "manta",
+        fake_load_model,
+        fake_build_induce_fn_by_lang,
+    )
+    with open(out_path) as f:
+        payload = json.load(f)
+    assert set(payload) == {"manta"}
+    result = payload["manta"]
+    assert "token_freq" not in result["combined"]
+    for anchor_results in result["token_parity_by_anchor"].values():
+        assert "token_freq" not in anchor_results
+
+
+def test_run_eval_cli_accepts_yaml_config(tmp_path):
+    """run_eval_cli must accept -c/--config the same way every other
+    systems/*/evaluate.py and systems/*/train.py in this repo does (via
+    common.config_file.parse_args_with_config) -- an earlier version used
+    plain argparse.parse_args, silently missing this for all seven systems
+    built on this shared harness (bpe/superbpe/fairtok/fanta/flexitokens/
+    magnet/manta). --checkpoint is a required flag; parse_args_with_config's
+    own docstring is explicit that required-ness is enforced AFTER merging,
+    so it must be satisfiable from the YAML file alone, not just the CLI."""
+    config_path = tmp_path / "eval_config.yml"
+    config_path.write_text("checkpoint: fake_checkpoint_path\neval_data_source: synthetic\n")
+
+    def fake_load_model(checkpoint, device):
+        assert checkpoint == "fake_checkpoint_path"
+        return object()
+
+    def fake_build_induce_fn_by_lang(model, sequences_by_lang, args):
+        return {lang: _one_token_per_byte for lang in sequences_by_lang}
+
+    fake_groups = [{"eng": "hello world", "deu": "hallo welt"}]
+    results = run_eval_cli(
+        ["-c", str(config_path)],
+        "fake_system",
+        fake_load_model,
+        fake_build_induce_fn_by_lang,
+        synthetic_groups=fake_groups,
+    )
+    assert results["avg_compression"] > 0
 
 
 def _fake_word_count_fn(text):
