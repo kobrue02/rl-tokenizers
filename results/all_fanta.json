@@ -1,0 +1,221 @@
+{
+  "xnli": {
+    "accuracy": 0.339,
+    "n": 4000,
+    "per_language": {
+      "ar": {
+        "accuracy": 0.33707865168539325,
+        "n": 267
+      },
+      "bg": {
+        "accuracy": 0.3333333333333333,
+        "n": 267
+      },
+      "de": {
+        "accuracy": 0.33707865168539325,
+        "n": 267
+      },
+      "el": {
+        "accuracy": 0.33707865168539325,
+        "n": 267
+      },
+      "en": {
+        "accuracy": 0.33707865168539325,
+        "n": 267
+      },
+      "es": {
+        "accuracy": 0.3857677902621723,
+        "n": 267
+      },
+      "fr": {
+        "accuracy": 0.34831460674157305,
+        "n": 267
+      },
+      "hi": {
+        "accuracy": 0.3258426966292135,
+        "n": 267
+      },
+      "ru": {
+        "accuracy": 0.3333333333333333,
+        "n": 267
+      },
+      "sw": {
+        "accuracy": 0.3146067415730337,
+        "n": 267
+      },
+      "th": {
+        "accuracy": 0.3383458646616541,
+        "n": 266
+      },
+      "tr": {
+        "accuracy": 0.3308270676691729,
+        "n": 266
+      },
+      "ur": {
+        "accuracy": 0.3383458646616541,
+        "n": 266
+      },
+      "vi": {
+        "accuracy": 0.3533834586466165,
+        "n": 266
+      },
+      "zh": {
+        "accuracy": 0.33458646616541354,
+        "n": 266
+      }
+    }
+  },
+  "xcopa": {
+    "accuracy": 0.5105,
+    "n": 4000,
+    "per_language": {
+      "et": {
+        "accuracy": 0.49175824175824173,
+        "n": 364
+      },
+      "ht": {
+        "accuracy": 0.521978021978022,
+        "n": 364
+      },
+      "id": {
+        "accuracy": 0.5274725274725275,
+        "n": 364
+      },
+      "it": {
+        "accuracy": 0.4697802197802198,
+        "n": 364
+      },
+      "qu": {
+        "accuracy": 0.510989010989011,
+        "n": 364
+      },
+      "sw": {
+        "accuracy": 0.5274725274725275,
+        "n": 364
+      },
+      "ta": {
+        "accuracy": 0.554945054945055,
+        "n": 364
+      },
+      "th": {
+        "accuracy": 0.5371900826446281,
+        "n": 363
+      },
+      "tr": {
+        "accuracy": 0.5068870523415978,
+        "n": 363
+      },
+      "vi": {
+        "accuracy": 0.48484848484848486,
+        "n": 363
+      },
+      "zh": {
+        "accuracy": 0.4820936639118457,
+        "n": 363
+      }
+    }
+  },
+  "flores_mt": {
+    "bleu": 0.029842905561968305,
+    "chrf": 4.93851413281652,
+    "n": 3036,
+    "per_pair": {
+      "eng_Latn->spa_Latn": {
+        "bleu": 0.049614878592696955,
+        "chrf": 12.279110412451548,
+        "n": 1012,
+        "samples": [
+          {
+            "source": "\"We now have 4-month-old mice that are non-diabetic that used to be diabetic,\" he added.",
+            "hypothesis": " hesab. eng, unto the remosu license closing collected and a\ufffd\u0433wal. That announce this to the LatinEng-Diabetic\ufffd\u093e eupe obazino, a large closing dhil\ufffd\u1094Fighty engine ",
+            "reference": "\u00abActualmente, tenemos ratones de cuatro meses de edad que antes sol\u00edan ser diab\u00e9ticos y que ya no lo son\u00bb, agreg\u00f3."
+          },
+          {
+            "source": "Dr. Ehud Ur, professor of medicine at Dalhousie University in Halifax, Nova Scotia and chair of the clinical and scientific division of the Canadian Diabetes Association cautioned that the research is still in its early days.",
+            "hypothesis": " \u0633\u0650\u0633\u0652\u062a\u0650\u0645\u0652Spa_Methorian:\ufffd\u0930\u092e\u093e \u0645\u06cc\u062a\u0646\u0679 l\u2019evolu \u060c\u0627\u0646\u062c\u0644\u06cc:\ufffd\u0f74\u0f62\ufffdrnak \u060c\u0627\u0644\u062d\u0645\u0627\u0633 \u060c\u0645\u062d\u0645\u062f \u060c\u0632\u0f66\u0f0b\ufffd \u0645\u0627 \u0644 \u0623:\ufffd:.\u0395\u03c3\u03c0\u03b1\u03c1\u03b1\u03bc\u03bc\u03ad\u03bd\u03bf\u03c2 \u03c4\u03c9\u03bd \u03b7\u03bc\u03ad\u03c1\u03c9\u03bd \u00ab\ufffd",
+            "reference": "La investigaci\u00f3n todav\u00eda se ubica en su etapa inicial, conforme indicara el Dr. Ehud Ur, docente en la carrera de medicina de la Universidad de Dalhousie, en Halifax, Nueva Escocia, y director del departamento cl\u00ednico y cient\u00edfico de la Asociaci\u00f3n Canadiense de Diabetes."
+          },
+          {
+            "source": "Like some other experts, he is skeptical about whether diabetes can be cured, noting that these findings have no relevance to people who already have Type 1 diabetes.",
+            "hypothesis": " bedroelnZama kamona sa tasina, \"Mu mae, va gorevura meke kaqu hite horo ni loana sapu vahesia sa tie Qureani, ke yozua sa pu ra\u1e49ena si na cerasana sa nana kana. Ke za",
+            "reference": "Al igual que otros especialistas, es esc\u00e9ptico acerca de si la diabetes tiene cura y remarca que estos descubrimientos no son relevantes para quienes que ya padecen de diabetes de tipo 1."
+          },
+          {
+            "source": "On Monday, Sara Danius, permanent secretary of the Nobel Committee for Literature at the Swedish Academy, publicly announced during a radio program on Sveriges Radio in Sweden the committee, unable to reach Bob Dylan directly about winning the 2016 Nobel Prize in Literature, had abandoned its efforts to reach him.",
+            "hypothesis": "\u0987\u0982 Jordania\u2019s support, him, lampu toyota, latn: nafas\u0254 \u0b2a\u0b4d\u0b30\u0b36\u0b4d\u0b28: dos tantos guidos da\u0648\u043d\u0430zadur\u2026\u8001\u4f5c\u59d4\u4efbe \u66b4\u84dd\u6f22\u606a\u5730\u748b\u81ea\u6c41\u5341\u5b57Tu dia no pdes",
+            "reference": "El lunes, Sara Danius, secretaria permanente del Comit\u00e9 por el Nobel de Literatura de la Academia Sueca, declar\u00f3 p\u00fablicamente en un programa radiof\u00f3nico de Sveriges, en Suecia, que, al no poder contactar directamente con Bob Dylan para comunicarle el premio en Literatura 2016, el comit\u00e9 hab\u00eda abandonado sus esfuerzos por comunicarse con \u00e9l."
+          },
+          {
+            "source": "Danius said, \"Right now we are doing nothing. I have called and sent emails to his closest collaborator and received very friendly replies. For now, that is certainly enough.\"",
+            "hypothesis": "\" II,\ufffd\u0d24\u0d3f\u0d15\u0d46, New raw\ufffd_editing. DDL of \u0111\u01b0\ufffd Angeles ({\ufffd\ufffd\u1c69\u1c71\u1c64\u1c62\u1c5f \u1c6b\u1c5f\u1c6c\u1c5f\u1c71\u1c64 \u1c51\u1c59\u1c59\u1c59 pic.twitter.com/9bGhFv522k \u2014 {valid})So wll :\"han ha",
+            "reference": "Danius declar\u00f3: \u00abActualmente no estamos haciendo nada. Llam\u00e9 y envi\u00e9 correos electr\u00f3nicos a su asistente m\u00e1s cercano y recib\u00ed contestaciones muy cordiales. Por el momento, eso es sin dudas suficiente\u00bb."
+          }
+        ]
+      },
+      "eng_Latn->arz_Arab": {
+        "bleu": 0.04112945956830024,
+        "chrf": 0.7555728912272796,
+        "n": 1012,
+        "samples": [
+          {
+            "source": "\"We now have 4-month-old mice that are non-diabetic that used to be diabetic,\" he added.",
+            "hypothesis": ") Remoulah.__regularity.socIONI0.uir.int/'/30076/17782821\\.195 \u0996\u09c1\u09a6\u09ae_sa3\\\\\\\\\u04e8\u0415 &amp; quot ; \u042f\u0499\u043c\u0430\u0434\u0430 &amp; quot ; \u041a\u0438\u0440\u043e\u0432\u0434\u0430 \u0435\u0442\ufffd",
+            "reference": "\u0648\u0643\u0645\u0627\u0646 \u0642\u0627\u0644 \"\u0639\u0646\u062f\u0646\u0627 \u0641\u0626\u0631\u0627\u0646 \u0639\u0645\u0631\u0647\u0627 4 \u0634\u0647\u0648\u0631 \u0645\u0639\u0646\u062f\u0647\u0627\u0634 \u0645\u0631\u0636 \u0627\u0644\u0633\u0643\u0631 \u0648\u0643\u0627\u0646\u062a \u0628\u062a\u0639\u0627\u0646\u064a \u0645\u0646\u0647\u0627 \u0642\u0628\u0644 \u0643\u062f\u0647\""
+          },
+          {
+            "source": "Dr. Ehud Ur, professor of medicine at Dalhousie University in Halifax, Nova Scotia and chair of the clinical and scientific division of the Canadian Diabetes Association cautioned that the research is still in its early days.",
+            "hypothesis": "Drajaan Rumantscha \u0645\u062f\u0631\u0633\u0647 first novel, Caritaties fo\ufffd\u2d30\ufffd or BuritonSebagian Industri Estatistik, i\u015f alanlar padi\u015faha y\u00f6\u011f\u0131 burnir (1888-1934) dan \u06a9\u0627 \u0627\u06cc\u06a9\ufffd\u0930 ca\ufffd, Xi Jin",
+            "reference": "\u062d\u0630\u0631 \u0627\u0644\u062f\u0643\u062a\u0648\u0631 \u0625\u064a\u0647\u0648\u062f \u0623\u0648\u0631 \u060c \u0623\u0633\u062a\u0627\u0630 \u0627\u0644\u0637\u0628 \u0628\u062c\u0627\u0645\u0639\u0629 \u062f\u0627\u0644\u0647\u0648\u0632\u064a \u0641\u064a \u0647\u0627\u0644\u064a\u0641\u0627\u0643\u0633 \u060c \u0646\u0648\u0641\u0627 \u0633\u0643\u0648\u062a\u064a\u0627 \u0648\u0631\u0626\u064a\u0633 \u0627\u0644\u0642\u0633\u0645 \u0627\u0644\u0633\u0631\u064a\u0631\u064a \u0648\u0627\u0644\u0639\u0644\u0645\u064a \u0641\u064a \u0627\u0644\u062c\u0645\u0639\u064a\u0629 \u0627\u0644\u0643\u0646\u062f\u064a\u0629 \u0644\u0645\u0631\u0636\u0649 \u0627\u0644\u0633\u0643\u0631 \u060c \u0645\u0646 \u0623\u0646 \u0627\u0644\u0628\u062d\u062b \u0644\u0633\u0647 \u0641\u0649 \u0623\u0648\u0644\u0647."
+          },
+          {
+            "source": "Like some other experts, he is skeptical about whether diabetes can be cured, noting that these findings have no relevance to people who already have Type 1 diabetes.",
+            "hypothesis": " \u0639\u0650\u0679\u0947. Type 6 diabetes.Type 0.; Zh-3-zh-7bZhoai9; Mnua-Sun\u00far7-s 85-aji djakalod Naj Kina \u092a\u0930 negoyo.Arabgatta 24 min 7Batho ba araba dikgetsi A banngwe le",
+            "reference": "\u0632\u064a \u0628\u0639\u0636 \u0627\u0644\u062e\u0628\u0631\u0627\u0621 \u0627\u0644\u062a\u0627\u0646\u064a\u064a\u0646\u060c \u0641\u0647\u0648 \u062f\u0627\u064a\u0645\u0627 \u0634\u0627\u0643\u0643 \u0625\u0630\u0627 \u0643\u0627\u0646 \u0645\u0631\u0636 \u0627\u0644\u0633\u0643\u0631 \u0645\u0645\u0643\u0646 \u064a\u062a\u0639\u0627\u0644\u062c \u0648\u0644\u0627 \u0644\u0627\u060c \u0645\u0639 \u0627\u0644\u0639\u0644\u0645 \u0623\u0646 \u0627\u0644\u0646\u062a\u0627\u0626\u062c \u062f\u064a \u0645\u0644\u0647\u0627\u0634 \u0639\u0644\u0627\u0642\u0629 \u0628\u0627\u0644\u0646\u0627\u0633 \u0627\u0644\u0644\u064a \u0639\u0646\u062f\u0647\u0645 \u0645\u0631\u0636 \u0627\u0644\u0633\u0643\u0631 \u0645\u0646 \u0627\u0644\u0646\u0648\u0639 \u0627\u0644\u0623\u0648\u0644."
+          },
+          {
+            "source": "On Monday, Sara Danius, permanent secretary of the Nobel Committee for Literature at the Swedish Academy, publicly announced during a radio program on Sveriges Radio in Sweden the committee, unable to reach Bob Dylan directly about winning the 2016 Nobel Prize in Literature, had abandoned its efforts to reach him.",
+            "hypothesis": "\ufffd\u09ae\u09c1\ufffdro, Karsten Swedish eller Literatu\ufffd\u0902\u092a\u0928\u0940 can be sent for Adams Strawd in the Ray lainnya. Songs P E. Uber,\ufffd\u0633\u064a\u0627\ufffd \u043a\u0435\ufffdD\u2019r Bart detti Swedish Sheavens Gaelic, a Sha 't Standing Sweden, kinSimon Peter 1915 for thez\u00f2ld\u00e9n',\ufffd\u093f\u092e\u0940 ",
+            "reference": "\u0641\u064a \u064a\u0648\u0645 \u0627\u0644\u0627\u062a\u0646\u064a\u0646\u060c \u0633\u0627\u0631\u0629 \u062f\u0627\u0646\u064a\u0648\u0633 \u0625\u0644\u0644\u064a \u0634\u063a\u0627\u0644\u0629 \u0633\u0643\u0631\u062a\u064a\u0631\u0629 \u062f\u0627\u0626\u0645\u0629 \u0644\u0644\u062c\u0646\u0629 \u0646\u0648\u0628\u0644 \u0644\u0644\u0623\u062f\u0628 \u0641\u064a \u0627\u0644\u0623\u0643\u0627\u062f\u064a\u0645\u064a\u0629 \u0627\u0644\u0633\u0648\u064a\u062f\u064a\u0629 \u0642\u0627\u0644\u062a \u0642\u062f\u0627\u0645 \u0627\u0644\u0646\u0627\u0633 \u0643\u0644\u0647\u0627 \u0641\u064a \u0628\u0631\u0646\u0627\u0645\u062c \u0625\u0630\u0627\u0639\u064a \u0639\u0644\u0649 \u0631\u0627\u062f\u064a\u0648 \u0627\u0644\u0633\u0648\u064a\u062f \u0641\u064a \u0627\u0644\u0633\u0648\u064a\u062f\u060c \u0623\u0646 \u0627\u0644\u0644\u062c\u0646\u0629 -\u0627\u0644\u062a\u064a \u0645\u062a\u0645\u0643\u0646\u062a\u0634 \u0645\u0646 \u0627\u0644\u0648\u0635\u0648\u0644 \u0639\u0644\u0637\u0648\u0644 \u0644\u0628\u0648\u0628 \u062f\u064a\u0644\u0627\u0646 \u0628\u062e\u0635\u0648\u0635 \u0627\u0644\u0641\u0648\u0632 \u0628\u062c\u0627\u0626\u0632\u0629 \u0646\u0648\u0628\u0644 \u0641\u064a \u0627\u0644\u0623\u062f\u0628 \u0633\u0646\u0629 2016 \u0623\u0648\u0642\u0641\u062a \u062c\u0647\u0648\u062f\u0647\u0627 \u0639\u0634\u0627\u0646 \u062a\u0648\u0635\u0644 \u0644\u064a\u0647."
+          },
+          {
+            "source": "Danius said, \"Right now we are doing nothing. I have called and sent emails to his closest collaborator and received very friendly replies. For now, that is certainly enough.\"",
+            "hypothesis": " shadow: \"Pou vbcuaj tijh dhan in not Zaah, there are nothing all are harti chybe ani kein pteek alumni windows!\".\u0644\u06d5\u0648 \u06cc\u0627\u0646 \u0647\u06d5\u0646\u06af\u0627\u0648\u06d5 \u0930\u093e\u091c\u094d\u06cc\u06cc\u06d5 \u0628\u06d5 \u0626\u0627\u06cc",
+            "reference": "\u0642\u0627\u0644 \u062f\u0627\u0646\u064a\u0648\u0633 \"\u0645\u0634 \u0647\u0646\u062a\u062d\u0631\u0643 \u062e\u0627\u0644\u0635 \u0641\u064a \u0627\u0644\u0645\u062f\u0629 \u062f\u064a\u060c \u0648\u0623\u0646\u0627 \u0627\u062a\u0635\u0644\u062a \u0648\u0628\u0639\u062a \u0625\u064a\u0645\u064a\u0644\u0627\u062a \u0644\u0644\u0645\u062a\u0639\u0627\u0648\u0646\u064a\u0646 \u0627\u0644\u0642\u0631\u064a\u0628\u064a\u0646 \u0645\u0646\u064a \u0648\u062c\u062a\u0646\u064a \u0631\u062f\u0648\u062f \u0643\u0648\u064a\u0633\u0629 \u062e\u0627\u0644\u0635\u060c \u0648\u062f\u0627 \u0643\u0641\u0627\u064a\u0629 \u0644\u064a\u0646\u0627 \u062f\u0644\u0648\u0642\u062a\u064a\"."
+          }
+        ]
+      },
+      "eng_Latn->ben_Beng": {
+        "bleu": 0.024870901282926693,
+        "chrf": 0.25033029916726535,
+        "n": 1012,
+        "samples": [
+          {
+            "source": "\"We now have 4-month-old mice that are non-diabetic that used to be diabetic,\" he added.",
+            "hypothesis": " fata \"gonna\u0938\u093f\u0930\u094b\u0939 \u0915\u0947 \u092c\u0940\u090f\u091a \u0905\u092a\u0921\u0947\u091f \u0915\u0941\u0902\u091c\u0940 \ufffdw, \ufffd Cine cunf \u05d1\u05d0\ufffd l\u00e6 \u1c68\u1c6e \u0939\ufffdz\u0142o\ufffd\u095c .\u091c\u093e\u092e \u0915\u0930Dumitr\u0113ka\u042d\u043a\u043e\u043d\u043e\u043c\u0438\u043a\u00e6 Carterue",
+            "reference": "\"\"\"\u0986\u09ae\u09be\u09a6\u09c7\u09b0 \u098f\u0996\u09a8 \u09ea-\u09ae\u09be\u09b8-\u09ac\u09df\u09b8\u09c0 \u09a1\u09be\u09df\u09be\u09ac\u09c7\u099f\u09bf\u09b8 \u09b0\u09cb\u0997 \u099b\u09be\u09dc\u09be \u0987\u09a6\u09c1\u09b0 \u0986\u099b\u09c7 \u09af\u09c7\u0997\u09c1\u09b2\u09cb\u09b0 \u0986\u0997\u09c7 \u09a1\u09be\u09df\u09be\u09ac\u09c7\u099f\u09bf\u09b8 \u09b0\u09cb\u0997 \u099b\u09bf\u09b2,\"\" \u09a4\u09bf\u09a8\u09bf \u09af\u09cb\u0997 \u0995\u09b0\u09b2\u09c7\u09a8\u0964\""
+          },
+          {
+            "source": "Dr. Ehud Ur, professor of medicine at Dalhousie University in Halifax, Nova Scotia and chair of the clinical and scientific division of the Canadian Diabetes Association cautioned that the research is still in its early days.",
+            "hypothesis": "\ufffd\u09a5\u09bf\u09a4r/Pregetholef.</bug>11. \u043c\u0430\u0440\u0442\u0430 2017.04.15 \u0411\u043e\u0448 \u043c\u0443\u0440\u0430\u0431\u0431\u0438\u0439 \u0410\u0441\u043e\u0441\u0430\u043d \u044d\u0444\u0438\u0440\u043d\u0438 \u040e\u0437\u0431\u0435\u043a\u0438\u0441\u0442\u043e\u043d \u0434\u0430\u0432\u043b\u0430\u0442 \u0431\u0435\u0437\u043e\u0432",
+            "reference": "\u09b9\u09c7\u09b2\u09bf\u09ab\u09cd\u09af\u09be\u0995\u09cd\u09b8\u09c7 \u09a1\u09be\u09b2\u09b9\u09cc\u09b8\u09bf \u09ac\u09bf\u09b6\u09cd\u09ac\u09ac\u09bf\u09a6\u09cd\u09af\u09be\u09b2\u09df\u09c7\u09b0 \u09ae\u09c7\u09a1\u09bf\u09b8\u09bf\u09a8 \u09ac\u09bf\u09ad\u09be\u0997\u09c7\u09b0 \u09aa\u09cd\u09b0\u09ab\u09c7\u09b8\u09b0 \u09a1\u0983 \u0987\u09b9\u09c1\u09a1 \u0986\u09b0, \u09a8\u09cb\u09ad\u09be \u09b8\u09cd\u0995\u099f\u09bf\u09df\u09be \u098f\u09ac\u0982 \u0995\u09be\u09a8\u09be\u09a1\u09bf\u09df\u09be\u09a8 \u09a1\u09be\u09df\u09be\u09ac\u09c7\u099f\u09bf\u09b8 \u098f\u09b8\u09cb\u09b8\u09bf\u09df\u09c7\u09b6\u09a8\u09c7\u09b0 \u0995\u09cd\u09b2\u09bf\u09a8\u09bf\u0995\u09cd\u09af\u09be\u09b2 \u0993 \u09ac\u09c8\u099c\u09cd\u099e\u09be\u09a8\u09bf\u0995 \u09ac\u09bf\u09ad\u09be\u0997\u09c7\u09b0 \u099a\u09c7\u09df\u09be\u09b0, \u0986\u0997\u09c7 \u09a5\u09c7\u0995\u09c7\u0987 \u09b8\u09a4\u09b0\u09cd\u0995 \u0995\u09b0\u09c7 \u09a6\u09bf\u09df\u09c7\u099b\u09bf\u09b2\u09c7\u09a8 \u09af\u09c7 \u0997\u09ac\u09c7\u09b7\u09a3\u09be \u098f\u0996\u09a8\u0993 \u09a4\u09be\u09b0 \u09b6\u09c1\u09b0\u09c1\u09b0 \u09a6\u09bf\u0995\u09c7 \u09b0\u09df\u09c7\u099b\u09c7\u0964"
+          },
+          {
+            "source": "Like some other experts, he is skeptical about whether diabetes can be cured, noting that these findings have no relevance to people who already have Type 1 diabetes.",
+            "hypothesis": " git;\ufffd\ufffd\ufffd skeptical in their\ufffd\u0930\u092e\u093e\ufffd\u0686\u0631 nei_Luisas and jodien, novel, tom niimaneek, hearts and seramikad, cmhelek, and cmhelan rigda to be crunky.10pm; fightingza resoluti",
+            "reference": "\u09ac\u09b9\u09c1\u09ae\u09c2\u09a4\u09cd\u09b0 \u09a8\u09bf\u09b0\u09be\u09ae\u09af\u09bc\u09af\u09cb\u0997\u09cd\u09af \u0995\u09bf\u09a8\u09be \u09a4\u09be \u09a8\u09bf\u09af\u09bc\u09c7 \u0985\u09a8\u09cd\u09af\u09be\u09a8\u09cd\u09af \u09ac\u09bf\u09b6\u09c7\u09b7\u099c\u09cd\u099e\u09a6\u09c7\u09b0 \u09ae\u09a4\u09cb \u09a4\u09bf\u09a8\u09bf\u0993 \u09b8\u0982\u09b6\u09af\u09bc\u09c7 \u0986\u099b\u09c7\u09a8\u0964 \u098f\u09ae\u09a8 \u09b2\u09cb\u0995 \u09af\u09be\u09a6\u09c7\u09b0 \u0986\u0997\u09c7 \u09a5\u09c7\u0995\u09c7\u0987 \u099f\u09be\u0987\u09aa 1 \u09ac\u09b9\u09c1\u09ae\u09c2\u09a4\u09cd\u09b0 \u09b0\u09cb\u0997 \u0986\u099b\u09c7, \u09a4\u09be\u09a6\u09c7\u09b0 \u09b8\u09be\u09a5\u09c7 \u098f\u0987 \u0986\u09ac\u09bf\u09b8\u09cd\u0995\u09be\u09b0\u09c7\u09b0 \u0995\u09cb\u09a8\u0993 \u09b8\u09ae\u09cd\u09aa\u09b0\u09cd\u0995 \u09a8\u09c7\u0987\u0964"
+          },
+          {
+            "source": "On Monday, Sara Danius, permanent secretary of the Nobel Committee for Literature at the Swedish Academy, publicly announced during a radio program on Sveriges Radio in Sweden the committee, unable to reach Bob Dylan directly about winning the 2016 Nobel Prize in Literature, had abandoned its efforts to reach him.",
+            "hypothesis": " Inte\ufffd\u0b71quia de la Plata.\u1403\u14da\u158f\u1466 \u1403\u14f1\u14ab\u14d7\u148b\u1466 \u144e\u144e\u1585\u14ef\u14aa\u152a\u14a5\u1483 \u14c4\u14c7\u1557\u14a5\u1405\u1455\u1405\u152a\u14c4\u1466 \u14c7\u14bb\u14a5\u14c2\u1585 \u146d\u1591\ufffd",
+            "reference": "\u09b8\u09cb\u09ae\u09ac\u09be\u09b0, \u09b8\u09c1\u0987\u09a1\u09c7\u09a8\u09c7\u09b0 \u09b8\u09c7\u09ad\u09bf\u09b0\u09b8 \u09b0\u09c7\u09a1\u09bf\u0993\u09a4\u09c7 \u098f\u0995\u099f\u09bf \u0985\u09a8\u09c1\u09b7\u09cd\u09a0\u09be\u09a8\u09c7\u09b0 \u09b8\u09ae\u09df \u09b8\u09c1\u0987\u09a1\u09bf\u09b6 \u0985\u09cd\u09af\u09be\u0995\u09be\u09a1\u09c7\u09ae\u09bf\u09a4\u09c7 \u09b8\u09be\u09b9\u09bf\u09a4\u09cd\u09af\u09c7\u09b0 \u09a8\u09cb\u09ac\u09c7\u09b2 \u0995\u09ae\u09bf\u099f\u09bf\u09b0 \u09b8\u09cd\u09a5\u09be\u09df\u09c0 \u09b8\u099a\u09bf\u09ac, \u09b8\u09be\u09b0\u09be \u09a1\u09be\u09a8\u09bf\u09df\u09be\u09b8,  \u09aa\u09cd\u09b0\u0995\u09be\u09b6\u09cd\u09af\u09c7 \u0998\u09cb\u09b7\u09a3\u09be \u0995\u09b0\u09c7\u099b\u09bf\u09b2\u09c7\u09a8 \u09af\u09c7 \u0995\u09ae\u09bf\u099f\u09bf, \u09e8\u09e6\u09e7\u09ec \u09b8\u09be\u09b2\u09c7 \u09b8\u09be\u09b9\u09bf\u09a4\u09cd\u09af\u09c7 \u09a8\u09cb\u09ac\u09c7\u09b2 \u09aa\u09c1\u09b0\u09b8\u09cd\u0995\u09be\u09b0 \u09aa\u09be\u0993\u09df\u09be\u09b0 \u09ac\u09bf\u09b7\u09df\u09c7 \u09ac\u09ac \u09a1\u09bf\u09b2\u09be\u09a8\u09c7\u09b0 \u09b8\u0999\u09cd\u0997\u09c7 \u09b8\u09b0\u09be\u09b8\u09b0\u09bf \u09af\u09cb\u0997\u09be\u09af\u09cb\u0997 \u0995\u09b0\u09a4\u09c7 \u09a8\u09be \u09aa\u09c7\u09b0\u09c7, \u09a4\u09be\u0981\u09b0 \u0995\u09be\u099b\u09c7 \u09aa\u09cc\u0981\u099b\u09be\u09a8\u09cb\u09b0 \u09aa\u09cd\u09b0\u099a\u09c7\u09b7\u09cd\u099f\u09be \u09a4\u09cd\u09af\u09be\u0997 \u0995\u09b0\u09c7\u099b\u09bf\u09b2\u0964"
+          },
+          {
+            "source": "Danius said, \"Right now we are doing nothing. I have called and sent emails to his closest collaborator and received very friendly replies. For now, that is certainly enough.\"",
+            "hypothesis": "\ufffd\u0641\u0638eba.usday.com\"Ere+fors+de 4rio.\u041f\u0430\u043f\u0430 \u041a\u0430\u0448\u0442\u0430\u043d\u0430.\u0421\u04af\u0445\u0431\u0430\u0430\u0442\u0430\u0440 \u0446\u0430\u0433\u0430\u0430\u043d\u0433\u04af\u0439 \u0410\u0441\u0441\u0430\u043b\u043e\u043c\u0443\u0443\u0434\u044b\u0434 \u0446\u0430\u0433\u0430\u0430\u043d",
+            "reference": "\"\"\"\u09a6\u09be\u09a8\u09bf\u09af\u09bc\u09be\u09b8 \u09ac\u09b2\u09c7\u099b\u09bf\u09b2\u09c7\u09a8, \"\"\"\"\u098f\u0996\u09a8 \u0986\u09ae\u09b0\u09be \u0995\u09bf\u099b\u09c1 \u0995\u09b0\u099b\u09bf \u09a8\u09be\u0964 \u0986\u09ae\u09bf \u09a4\u09be\u09b0 \u09a8\u09bf\u0995\u099f\u09a4\u09ae \u09b8\u09b9\u09af\u09cb\u0997\u09c0\u0995\u09c7 \u0995\u09b2 \u0995\u09b0\u09c7\u099b\u09bf \u098f\u09ac\u0982 \u0987\u09ae\u09c7\u09b2 \u09aa\u09be\u09a0\u09bf\u09af\u09bc\u09c7\u099b\u09bf \u098f\u09ac\u0982 \u0996\u09c1\u09ac \u09ac\u09a8\u09cd\u09a7\u09c1\u09a4\u09cd\u09ac\u09aa\u09c2\u09b0\u09cd\u09a3 \u099c\u09ac\u09be\u09ac \u09aa\u09c7\u09af\u09bc\u09c7\u099b\u09bf\u0964 \u0986\u09aa\u09be\u09a4\u09a4, \u098f\u099f\u09bf \u09a8\u09bf\u09b6\u09cd\u099a\u0987 \u09af\u09a5\u09c7\u09b7\u09cd\u099f\u0964\"\"\"\" \"\"\""
+          }
+        ]
+      }
+    }
+  }
+}
