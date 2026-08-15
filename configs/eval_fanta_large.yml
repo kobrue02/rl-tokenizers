@@ -1,0 +1,14 @@
+# pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_fanta_large.yml
+checkpoint: checkpoints/pretrain_fanta_large/final.pt
+system: fanta
+tokenizer_checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
+benchmark: "xnli,xcopa,flores_mt"
+# The union of XNLI_LANGS (15) and XCOPA_LANGS (11) -- same list as
+# configs/eval_fanta_50k.yml, carried forward unchanged.
+langs: "ar,bg,de,el,en,es,et,fr,hi,ht,id,it,qu,ru,sw,ta,th,tr,ur,vi,zh"
+lang_pairs: "eng:spa,eng:arz,eng:ben"
+max_examples: 4000
+output: results/all_fanta_large.json
+use_wandb: true
+run_name: fanta_large_450k_steps

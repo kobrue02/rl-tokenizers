@@ -1,0 +1,25 @@
+# pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data_gpu.sh -c configs/prep_fanta_large.yml
+dataset: glot500
+langs: all
+system: fanta
+# same tokenizer as the small run -- see configs/prep_fanta_50k.yml's own
+# comment for why these are the real checkpoint/vocab paths (job 6284655).
+checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
+output_dir: pretrain_data/glot500_fanta_large
+# Raised from the small run's 5,000,000,000 cap. That run averaged only
+# ~10-12M tokens/language across all 411 glot500 languages (langs: all) --
+# nowhere near enough for even the 85M-param model it fed, let alone the
+# ~700M-param "large" preset this data is now for. _round_robin
+# (common/data/corpora.py) advances one document at a time across all 411
+# language streams and drops each once ITS OWN data is exhausted (no
+# repetition) -- so raising this cap gives every language proportionally
+# more real tokens, up to whichever language's own corpus runs out first,
+# rather than just repeating the same 5B tokens more times. Check the new
+# run's shards_meta.json lang_counts after prep finishes: any language
+# whose token count sits well below max_tokens / 411 already exhausted its
+# own data before the cap, which is the real ceiling for that language
+# regardless of how high this number goes.
+max_tokens: 30000000000
+use_wandb: true
+run_name: fanta_large_data_prep

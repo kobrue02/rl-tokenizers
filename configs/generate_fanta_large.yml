@@ -1,0 +1,14 @@
+# pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_fanta_large.yml
+checkpoint: checkpoints/pretrain_fanta_large/final.pt
+system: fanta
+tokenizer_checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
+prompt:
+  - "The quick brown fox"
+  - "Once upon a time"
+  - "The history of the Roman Empire"
+max_new_tokens: 100
+num_samples: 3
+output: results/samples_fanta_large.json
+use_wandb: true
+run_name: fanta_large_450k_steps

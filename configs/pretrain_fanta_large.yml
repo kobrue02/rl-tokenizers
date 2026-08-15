@@ -1,0 +1,33 @@
+# pretraining/cli.py -- sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
+# (--gres=gpu:4 on the sbatch command line overrides the job script's own
+# default #SBATCH --gres=gpu:1 pragma -- see jobs/train_pretraining.sh's own
+# comment on this. It also auto-detects SLURM_GPUS_ON_NODE > 1 and launches
+# via torchrun instead of a plain python3 call, no other change needed.)
+shard_dir: pretrain_data/glot500_fanta_large
+model_size: large
+total_steps: 450000
+seq_len: 1024
+per_device_batch_size: 16
+output_dir: checkpoints/pretrain_fanta_large
+use_wandb: true
+run_name: fanta_large_450k_steps
+# --- scale rationale (rough planning estimate, not a verified benchmark) ---
+# effective_batch_size = per_device_batch_size(16) * grad_accum_steps(1) *
+# world_size(4 GPUs) = 64 -> 64 * seq_len(1024) = 65,536 tokens/step ->
+# 450,000 steps ~= 29.5B tokens total, matching prep_fanta_large.yml's
+# raised 30B-token shard cap. A Chinchilla-style ~20 tokens/param ratio for
+# a ~700M-param "large" preset floors near 14B tokens; this roughly doubles
+# that to offset the extra dilution from spreading it across 411 languages.
+#
+# Standard ~6*params*tokens FLOPs/token scaling (Kaplan/Chinchilla) puts
+# large's per-token cost at roughly ~8.2x small's (700M/85M params) times
+# ~1.3x more for grad_checkpointing's recompute overhead (on by default for
+# "large", see model_configs.py) -- offset by ~4x from the 4 GPUs here vs.
+# the small run's 1. Net ballpark: ~230-250 hours (~10 days) of wall clock
+# for the full 450,000 steps, i.e. roughly 10 resubmits of this job's 24h
+# SLURM time limit via --resume-from checkpoints/pretrain_fanta_large/
+# step_<N>.pt (see train.py's resume_from field/load_checkpoint). Treat
+# this as a rough estimate to plan around, not a guarantee -- watch the
+# first job's own step-rate in its wandb run (fanta_large_450k_steps) and
+# re-derive a tighter ETA from real throughput once it's running.
+resume_from: ""

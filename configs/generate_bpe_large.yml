@@ -1,0 +1,13 @@
+# pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_bpe_large.yml
+checkpoint: checkpoints/pretrain_bpe_large/final.pt
+system: bpe
+tokenizer_checkpoint: checkpoints/bpe_50k.json
+prompt:
+  - "The quick brown fox"
+  - "Once upon a time"
+  - "The history of the Roman Empire"
+max_new_tokens: 100
+num_samples: 3
+output: results/samples_bpe_large.json
+use_wandb: true
+run_name: bpe_large_450k_steps

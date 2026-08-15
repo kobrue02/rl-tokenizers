@@ -1,0 +1,12 @@
+# pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data_gpu.sh -c configs/prep_bpe_large.yml
+dataset: glot500
+langs: all
+system: bpe
+checkpoint: checkpoints/bpe_50k.json
+output_dir: pretrain_data/glot500_bpe_large
+# see configs/prep_fanta_large.yml's own comment -- same rationale, raised
+# from the small run's 5,000,000,000 cap so per-language exposure actually
+# increases rather than just repeating the same tokens more times.
+max_tokens: 30000000000
+use_wandb: true
+run_name: bpe_large_data_prep

@@ -1,0 +1,13 @@
+# pretraining/cli.py -- sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_bpe_large.yml
+# see configs/pretrain_fanta_large.yml's own comment for the --gres=gpu:4
+# override and the scale/time rationale (identical here -- same model_size,
+# same step/token budget, just bpe's own shard_dir/output_dir).
+shard_dir: pretrain_data/glot500_bpe_large
+model_size: large
+total_steps: 450000
+seq_len: 1024
+per_device_batch_size: 16
+output_dir: checkpoints/pretrain_bpe_large
+use_wandb: true
+run_name: bpe_large_450k_steps
+resume_from: ""
