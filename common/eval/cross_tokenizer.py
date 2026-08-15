@@ -141,6 +141,120 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     }
 
 
+def evaluate_on_indigenous_panel(induce_spans_fn_by_lang, eval_groups):
+    """Dedicated entry point for common.data.indigenous_panel's DELIBERATELY
+    mixed-anchor panel (English for crk-en/iu-en, Spanish for the nine
+    AmericasNLP pairs -- see that module's own docstring for why). Naively
+    pooling every pair's groups into one plain evaluate_on_groups(...,
+    anchor_lang="eng") call would silently give every Spanish-anchored
+    language token_parity=1.0 (never paired with "eng" in any group, the
+    same "no evidence of a disparity" fallback evaluate_on_groups already
+    documents) -- not wrong, but uninformative for 9 of this panel's 11
+    languages. Just as importantly, naively MERGING ratios computed against
+    two DIFFERENT anchors into one anchor_invariant_parity call would
+    silently reintroduce anchor bias in a subtler form: a tokenizer's own
+    cost for "en" text isn't guaranteed equal to its cost for "es" text, so
+    ratio-vs-en and ratio-vs-es aren't on a common scale even after each
+    subgroup's own GM-normalization -- exactly the kind of anchor-dependence
+    anchor_invariant_parity exists to eliminate, not something to smuggle
+    back in.
+
+    eval_groups: list[dict[lang -> text]], the SAME flat shape every other
+    evaluate_on_* consumer already produces -- e.g. list(common.data.
+    corpora.stream_groups("indigenous_panel", config="all")). Each group's
+    own anchor is inferred directly from its own keys (every group
+    genuinely contains its own anchor language as one of its two keys, by
+    construction) against the CURRENT set of anchors in common.data.
+    indigenous_panel.PAIRS, not a hardcoded {"en", "es"} pair -- adding a
+    pair with a new anchor language to that manifest later needs no change
+    here.
+
+    Returns {
+      "combined": <one evaluate_on_groups result over every pair's groups
+        pooled together -- token_freq/renyi/gini/per_lang_compression/
+        avg_compression/fertility are all per-language, unpaired
+        quantities with no anchor concept at all, so these ARE meaningful
+        pooled across the whole mixed-anchor panel. Its own token_parity/
+        token_parity_anchor/token_parity_gm/token_parity_spread fields are
+        NOT meaningful here (see above) and are dropped from this dict>,
+      "token_parity_by_anchor": {anchor_lang: <that anchor's own subset's
+        evaluate_on_groups result -- token_parity/token_parity_gm/
+        token_parity_spread ARE meaningful within each of these, scoped
+        strictly to the languages sharing that one anchor>},
+      "morphology_spread": {"fertility_spread": max/min fertility across
+        every language in the whole panel, "compression_spread": same for
+        per_lang_compression} -- the panel-wide "how unfair is this
+        tokenizer" headline number that avoids the mixed-anchor problem
+        entirely, since fertility/compression need no anchor at all.
+    }
+    """
+    from ..data.indigenous_panel import PAIRS
+
+    known_anchors = {meta["anchor"] for meta in PAIRS.values()}
+    groups_by_anchor = defaultdict(list)
+    for group in eval_groups:
+        anchors_present = known_anchors & set(group)
+        if not anchors_present:
+            raise ValueError(
+                f"indigenous_panel group has none of this panel's known anchor languages "
+                f"({sorted(known_anchors)}) as a key: {sorted(group)} -- see "
+                "common.data.indigenous_panel.PAIRS"
+            )
+        for anchor in anchors_present:
+            groups_by_anchor[anchor].append(group)
+
+    combined = evaluate_on_groups(induce_spans_fn_by_lang, eval_groups)
+    for key in ("token_parity", "token_parity_anchor", "token_parity_gm", "token_parity_spread"):
+        combined.pop(key, None)
+
+    token_parity_by_anchor = {
+        anchor: evaluate_on_groups(induce_spans_fn_by_lang, anchor_groups, anchor_lang=anchor)
+        for anchor, anchor_groups in groups_by_anchor.items()
+    }
+
+    fertility_vals = [v for v in combined["fertility"].values() if v > 0]
+    compression_vals = [v for v in combined["per_lang_compression"].values() if v > 0]
+    morphology_spread = {
+        "fertility_spread": (max(fertility_vals) / min(fertility_vals)) if fertility_vals else 1.0,
+        "compression_spread": (max(compression_vals) / min(compression_vals)) if compression_vals else 1.0,
+    }
+
+    return {
+        "combined": combined,
+        "token_parity_by_anchor": token_parity_by_anchor,
+        "morphology_spread": morphology_spread,
+    }
+
+
+def report_indigenous_panel_eval(results, label=""):
+    prefix = f"[{label}] " if label else ""
+    print(f"\n{prefix}indigenous_panel evaluation (mixed-anchor -- see evaluate_on_indigenous_panel's own docstring):")
+    print(
+        f"  panel-wide fertility_spread={results['morphology_spread']['fertility_spread']:.3f}  "
+        f"compression_spread={results['morphology_spread']['compression_spread']:.3f}"
+    )
+    combined = results["combined"]
+    print(f"  avg_compression={combined['avg_compression']:.2f}  gini={combined['gini']:.4f}")
+    print("  per-language compression / renyi efficiency / fertility (anchor-free, comparable across the whole panel):")
+    for lang in sorted(combined["renyi"]):
+        print(
+            f"    {lang}: compression={combined['per_lang_compression'].get(lang, 0.0):.2f}  "
+            f"renyi={combined['renyi'][lang]:.4f}  "
+            f"fertility={combined['fertility'].get(lang, 0.0):.2f}"
+        )
+    for anchor, anchor_results in sorted(results["token_parity_by_anchor"].items()):
+        print(f"  token_parity vs anchor={anchor!r} (only comparable within this anchor's own languages):")
+        token_parity = anchor_results["token_parity"]
+        token_parity_gm = anchor_results["token_parity_gm"]
+        for lang in sorted(token_parity):
+            if lang == anchor:
+                continue
+            print(
+                f"    {lang}: token_parity={token_parity[lang]:.3f}  "
+                f"token_parity_gm={token_parity_gm.get(lang, 1.0):.3f}"
+            )
+
+
 def report_eval(results, label=""):
     prefix = f"[{label}] " if label else ""
     print(f"\n{prefix}held-out evaluation:")

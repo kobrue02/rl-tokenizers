@@ -72,6 +72,21 @@ rather than papering over it:
     languages by construction, so intersecting too many at once risks the
     same "collapses to almost nothing" problem BOUQuET eval hit before
     switching to a union join).
+  - LOCAL_BITEXT_SOURCES = {indigenous_panel}: a small, DELIBERATELY curated
+    panel of Indigenous (mostly polysynthetic) language pairs for a
+    dedicated fairness comparison alongside BOUQuET -- see common.data.
+    indigenous_panel's own module docstring for the exact language list and
+    per-language provenance. Shaped like BITEXT_SOURCES (every group has
+    exactly TWO keys, `config` selects which pair), but like bible_nlp reads
+    from a LOCAL disk cache built by a one-time common.data.
+    prepare_indigenous_panel run first -- each source pair here has its own
+    bespoke access method (an HF dataset, a direct-download archive, a
+    cloned GitHub repo of line-aligned text files), unlike bible_nlp's
+    single homogeneous source, so there's no live-streaming fallback at all
+    (not even the "expensive scan every run" bible_nlp used to do). Unlike
+    bible_nlp's N-way join, no cross-language ID matching is needed here --
+    each pair's two languages are already row-aligned in their own source,
+    so the local cache stores them pre-paired, one JSONL file per pair.
 
 A single-language group runs fine through every systems/ trainer's plain
 next-byte CE loss, but contributes nothing to any FAIRNESS loss term that
@@ -97,8 +112,14 @@ PARALLEL_SOURCES = {"oldi_seed", "flores_dev"}
 MONOLINGUAL_SOURCES = {"glot500", "fineweb_edu", "olmo_mix"}
 BITEXT_SOURCES = {"smol", "ccmatrix", "un_pc", "europarl", "tatoeba_mt"}
 STREAMED_PARALLEL_SOURCES = {"bible_nlp"}
+LOCAL_BITEXT_SOURCES = {"indigenous_panel"}
 ALL_SOURCES = sorted(
-    PARALLEL_SOURCES | MONOLINGUAL_SOURCES | BITEXT_SOURCES | STREAMED_PARALLEL_SOURCES | {"synthetic"}
+    PARALLEL_SOURCES
+    | MONOLINGUAL_SOURCES
+    | BITEXT_SOURCES
+    | STREAMED_PARALLEL_SOURCES
+    | LOCAL_BITEXT_SOURCES
+    | {"synthetic"}
 )
 
 FINEWEB_EDU_CONFIGS = ["default", "sample-10BT", "sample-100BT", "sample-350BT"]
@@ -399,6 +420,48 @@ def _stream_bible_nlp(langs, output_dir=None):
     yield from _load_bible_nlp_local(output_dir or BIBLE_NLP_LOCAL_DIR, langs)
 
 
+INDIGENOUS_PANEL_LOCAL_DIR = "data/indigenous_panel"  # default local disk
+# cache -- see common.data.prepare_indigenous_panel, which must be run once
+# before this source is usable at all. No live fallback (not even
+# bible_nlp's "expensive scan every run" one): every pair in this panel has
+# its own bespoke access method (see common.data.indigenous_panel.PAIRS),
+# so there's no single live source this module could stream from directly.
+
+
+def list_indigenous_panel_pairs(output_dir=None):
+    """Every pair-code (e.g. "crk-en") that ACTUALLY has locally prepared
+    data right now -- reads the directory listing, not common.data.
+    indigenous_panel.PAIRS's full intended manifest, since prepare_
+    indigenous_panel may have been run with --pairs to prepare only some of
+    them so far."""
+    output_dir = output_dir or INDIGENOUS_PANEL_LOCAL_DIR
+    if not os.path.isdir(output_dir):
+        return []
+    return sorted(
+        fname[: -len(".jsonl")] for fname in os.listdir(output_dir) if fname.endswith(".jsonl")
+    )
+
+
+def _stream_indigenous_panel_single(pair, output_dir=None):
+    """Reads one pair's already-row-aligned {lang_a: text, lang_b: text}
+    JSONL file directly -- unlike bible_nlp, no cross-language ID join is
+    needed here (each pair's two languages come pre-aligned from their own
+    source; see common.data.prepare_indigenous_panel)."""
+    output_dir = output_dir or INDIGENOUS_PANEL_LOCAL_DIR
+    path = os.path.join(output_dir, f"{pair}.jsonl")
+    if not os.path.exists(path):
+        raise ValueError(
+            f"indigenous_panel needs a one-time local prep step before it can be used -- {path!r} "
+            f"doesn't exist. Run: python -m common.data.prepare_indigenous_panel --output-dir {output_dir}"
+        )
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            yield json.loads(line)
+
+
 def _round_robin(iterators):
     """Cycles through `iterators` one item at a time, dropping any that
     exhaust, until all are exhausted -- what makes multi-language requests
@@ -433,11 +496,18 @@ def stream_groups(source, langs=None, config=None, seed=0):
     OLMO_MIX_CONFIGS), a native pair name or "all"/omitted for smol/
     ccmatrix/un_pc/europarl (see list_smol_pairs/list_bitext_configs), or a
     "{split}/{pair-or-all}" string or bare "all"/omitted for tatoeba_mt (see
-    _parse_tatoeba_mt_config/list_tatoeba_mt_pairs).
+    _parse_tatoeba_mt_config/list_tatoeba_mt_pairs), or a pair-code or bare
+    "all"/omitted for indigenous_panel (see list_indigenous_panel_pairs;
+    same round-robin-over-pairs shape as smol/ccmatrix/un_pc/europarl, just
+    reading from a local disk cache instead of live HF streaming -- see
+    common.data.indigenous_panel's own module docstring for the panel
+    itself and common.data.prepare_indigenous_panel for the required
+    one-time prep step).
 
     Returns an iterator of {lang: text} dicts -- multi-key for
-    PARALLEL_SOURCES/STREAMED_PARALLEL_SOURCES, 2-key for BITEXT_SOURCES,
-    single-key for everything else (see module docstring).
+    PARALLEL_SOURCES/STREAMED_PARALLEL_SOURCES, 2-key for BITEXT_SOURCES/
+    LOCAL_BITEXT_SOURCES, single-key for everything else (see module
+    docstring).
     """
     if source == "synthetic":
         yield from make_synthetic_parallel_groups(
@@ -488,5 +558,12 @@ def stream_groups(source, langs=None, config=None, seed=0):
         if not langs:
             raise ValueError("bible_nlp requires --langs (an arbitrary subset -- no built-in default panel)")
         yield from _stream_bible_nlp(langs, output_dir=config)
+        return
+    if source == "indigenous_panel":
+        pairs = list_indigenous_panel_pairs() if config in (None, "all") else [config]
+        if len(pairs) == 1:
+            yield from _stream_indigenous_panel_single(pairs[0])
+            return
+        yield from _round_robin(iter(_stream_indigenous_panel_single(pair)) for pair in pairs)
         return
     raise ValueError(f"unknown source {source!r} -- choose from {ALL_SOURCES}")

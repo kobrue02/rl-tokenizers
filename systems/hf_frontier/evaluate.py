@@ -28,7 +28,13 @@ than losing every OTHER repo's already-completed results over one bad one.
 import json
 
 from common.config_file import parse_args_with_config
-from common.eval.cross_tokenizer import evaluate_on_groups, report_eval
+from common.eval.cross_tokenizer import (
+    evaluate_on_groups,
+    evaluate_on_indigenous_panel,
+    report_eval,
+    report_indigenous_panel_eval,
+)
+from common.data.corpora import stream_groups
 from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
 from systems.bpe.train import _SMOKE_TEST_GROUPS
 
@@ -65,14 +71,19 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--eval-data-source",
-        choices=["bouquet", "bouquet_test", "synthetic"],
+        choices=["bouquet", "bouquet_test", "synthetic", "indigenous_panel"],
         default="bouquet",
         help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
         "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
         "reported numbers, not repeated tuning checks; "
         "'synthetic': a small real-text placeholder (reuses systems.bpe.train's own "
         "_SMOKE_TEST_GROUPS -- NOT common.data.synthetic's byte generator, which isn't guaranteed "
-        "valid UTF-8), for a quick sanity check with no BOUQuET network access",
+        "valid UTF-8), for a quick sanity check with no BOUQuET network access; "
+        "'indigenous_panel': common.data.indigenous_panel's curated Indigenous-language panel "
+        "(needs a one-time common.data.prepare_indigenous_panel run first) -- scored via "
+        "evaluate_on_indigenous_panel, not evaluate_on_groups, since this panel is deliberately "
+        "mixed-anchor (see that function's own docstring); results have a different shape (see "
+        "_evaluate_one below), not directly comparable to a bouquet/bouquet_test/synthetic run's",
     )
     parser.add_argument(
         "--num-groups", type=int, default=None,
@@ -94,6 +105,9 @@ def _load_eval_groups(args):
     if args.eval_data_source == "synthetic":
         groups = _SMOKE_TEST_GROUPS
         return groups[: args.num_groups] if args.num_groups else groups
+    if args.eval_data_source == "indigenous_panel":
+        groups = list(stream_groups("indigenous_panel", config="all"))
+        return groups[: args.num_groups] if args.num_groups else groups
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
     groups = loader("all")
     if args.num_groups:
@@ -101,7 +115,7 @@ def _load_eval_groups(args):
     return groups
 
 
-def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token):
+def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token, indigenous_panel=False):
     wrapped = HFFrontierTokenizer.load(repo_id, trust_remote_code=trust_remote_code, hf_token=hf_token)
     print(f"\nhf_repo_id={repo_id} span_method={wrapped.span_method} native_vocab_size={wrapped.vocab_size}")
 
@@ -112,8 +126,12 @@ def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token):
         for group in eval_groups
         for lang in group
     }
-    results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
-    report_eval(results, label=repo_id)
+    if indigenous_panel:
+        results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups)
+        report_indigenous_panel_eval(results, label=repo_id)
+    else:
+        results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
+        report_eval(results, label=repo_id)
     return wrapped, results
 
 
@@ -124,12 +142,16 @@ def main(argv=None):
     eval_groups = _load_eval_groups(args)
     print(f"eval_data_source={args.eval_data_source} groups={len(eval_groups)} repos={repo_ids}")
 
+    is_indigenous_panel = args.eval_data_source == "indigenous_panel"
     all_results = {}
     all_wrapped = {}
     failed = {}
     for repo_id in repo_ids:
         try:
-            wrapped, results = _evaluate_one(repo_id, eval_groups, args.trust_remote_code, args.hf_token)
+            wrapped, results = _evaluate_one(
+                repo_id, eval_groups, args.trust_remote_code, args.hf_token,
+                indigenous_panel=is_indigenous_panel,
+            )
         except Exception as e:
             # One bad repo (gated-without-access, a tokenizer scheme model.py's
             # own span-detection can't handle, a transient network error) must
@@ -143,13 +165,27 @@ def main(argv=None):
         all_wrapped[repo_id] = wrapped
         # token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't
         # valid JSON, and aren't needed for the summary metrics this writes
-        # out (report_eval's own printed output already covers them);
-        # excluded here rather than left to crash json.dumps below on a
-        # real multi-repo run (confirmed directly: an earlier version of
-        # this file's own sibling, pretraining.cli_eval, hit the identical
-        # class of bug with tuple-keyed dicts -- checked for it here before
-        # shipping, not after).
-        all_results[repo_id] = {k: v for k, v in results.items() if k != "token_freq"}
+        # out (report_eval/report_indigenous_panel_eval's own printed output
+        # already covers them); excluded here rather than left to crash
+        # json.dumps below on a real multi-repo run (confirmed directly: an
+        # earlier version of this file's own sibling, pretraining.cli_eval,
+        # hit the identical class of bug with tuple-keyed dicts -- checked
+        # for it here before shipping, not after). indigenous_panel's own
+        # results are shaped differently (evaluate_on_indigenous_panel's own
+        # docstring) -- token_freq shows up nested inside "combined" and
+        # inside each anchor's own entry in "token_parity_by_anchor", not at
+        # the top level, so it needs stripping in both places.
+        if is_indigenous_panel:
+            all_results[repo_id] = {
+                "combined": {k: v for k, v in results["combined"].items() if k != "token_freq"},
+                "token_parity_by_anchor": {
+                    anchor: {k: v for k, v in anchor_results.items() if k != "token_freq"}
+                    for anchor, anchor_results in results["token_parity_by_anchor"].items()
+                },
+                "morphology_spread": results["morphology_spread"],
+            }
+        else:
+            all_results[repo_id] = {k: v for k, v in results.items() if k != "token_freq"}
 
     if failed:
         print(f"\n{len(failed)}/{len(repo_ids)} repo(s) failed: {list(failed)} -- see FAILED lines above for why")
@@ -179,9 +215,14 @@ def main(argv=None):
             },
         )
         successful = {r: res for r, res in all_results.items() if r != "_failed"}
+        # indigenous_panel's own results nest avg_compression/gini/renyi/
+        # per_lang_compression/fertility under "combined" (see
+        # evaluate_on_indigenous_panel's own docstring) -- everything else
+        # has them at the top level.
+        summary = (lambda r: r["combined"]) if is_indigenous_panel else (lambda r: r)
         summary_rows = [
             [repo_id, all_wrapped[repo_id].span_method, all_wrapped[repo_id].vocab_size,
-             r["avg_compression"], r["gini"]]
+             summary(r)["avg_compression"], summary(r)["gini"]]
             for repo_id, r in successful.items()
         ]
         run.log(
@@ -193,15 +234,27 @@ def main(argv=None):
             }
         )
         for repo_id, r in successful.items():
-            run.log(
-                {
-                    f"{repo_id}/avg_compression": r["avg_compression"],
-                    f"{repo_id}/gini": r["gini"],
-                    **{f"{repo_id}/renyi/{lang}": v for lang, v in r["renyi"].items()},
-                    **{f"{repo_id}/compression/{lang}": v for lang, v in r["per_lang_compression"].items()},
-                    **{f"{repo_id}/fertility/{lang}": v for lang, v in r["fertility"].items()},
-                }
-            )
+            c = summary(r)
+            log_dict = {
+                f"{repo_id}/avg_compression": c["avg_compression"],
+                f"{repo_id}/gini": c["gini"],
+                **{f"{repo_id}/renyi/{lang}": v for lang, v in c["renyi"].items()},
+                **{f"{repo_id}/compression/{lang}": v for lang, v in c["per_lang_compression"].items()},
+                **{f"{repo_id}/fertility/{lang}": v for lang, v in c["fertility"].items()},
+            }
+            if is_indigenous_panel:
+                log_dict.update(
+                    {f"{repo_id}/morphology_spread/{k}": v for k, v in r["morphology_spread"].items()}
+                )
+                for anchor, anchor_results in r["token_parity_by_anchor"].items():
+                    log_dict.update(
+                        {
+                            f"{repo_id}/token_parity_vs_{anchor}/{lang}": v
+                            for lang, v in anchor_results["token_parity"].items()
+                            if lang != anchor
+                        }
+                    )
+            run.log(log_dict)
         run.finish()
         print(f"logged comparison to wandb project={args.wandb_project!r}")
 

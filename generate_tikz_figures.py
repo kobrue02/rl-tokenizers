@@ -274,7 +274,11 @@ def _write_standalone_and_body(name, preamble_lines, body_lines, out_dir):
     return full_tex, body_tex
 
 
-def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
+def gen_spread_leaderboard_tex(
+    rows, families, out_dir, data_prefix="",
+    xlabel="Token-parity spread (max/min across all languages, anchor-invariant)",
+    fig_name="spread_leaderboard",
+):
     yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in rows)
     n = len(rows)
     preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
@@ -286,7 +290,7 @@ def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
         r"\begin{axis}[",
         r"    xbar,",
         r"    width=10cm, height=%.1fcm," % max(10.0, n * 0.65),
-        r"    xlabel={Token-parity spread (max/min across all languages, anchor-invariant)},",
+        r"    xlabel={%s}," % xlabel,
         r"    xmin=0,",
         r"    ytick={%s}," % ",".join(str(r["idx"]) for r in rows),
         r"    yticklabels={%s}," % yticklabels,
@@ -306,7 +310,7 @@ def gen_spread_leaderboard_tex(rows, families, out_dir, data_prefix=""):
         )
         body.append(r"\addlegendentry{%s}" % fam)
     body += [r"\end{axis}", r"\end{tikzpicture}"]
-    full_tex, _ = _write_standalone_and_body("spread_leaderboard", preamble, body, out_dir)
+    full_tex, _ = _write_standalone_and_body(fig_name, preamble, body, out_dir)
     return full_tex
 
 
@@ -528,6 +532,221 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     body.append(r"\end{tikzpicture}")
     full_tex, _ = _write_standalone_and_body("heatmap", preamble, body, out_dir)
     return full_tex, top_langs
+
+
+def load_indigenous_panel_rows(results_path):
+    """Loads a systems/*/evaluate.py --eval-data-source indigenous_panel
+    --output JSON (see common.eval.cross_tokenizer.evaluate_on_indigenous_panel's
+    own docstring for the per-model result shape: {"combined": ...,
+    "token_parity_by_anchor": ..., "morphology_spread": ...}) into the SAME
+    row shape load_rows produces, so gen_spread_leaderboard_tex/
+    write_bar_data/compute_families all work UNCHANGED. "spread" here is
+    morphology_spread["fertility_spread"] (max/min fertility across the
+    panel's own 11 languages), not token_parity_spread -- token_parity only
+    exists per-anchor-scope for this deliberately mixed-anchor panel (see
+    that same docstring), so there IS no single cross-panel token-parity
+    number the way there is for the BOUQuET-based comparison; fertility
+    fills that role here since it needs no anchor at all.
+    """
+    with open(results_path, encoding="utf-8") as f:
+        data = json.load(f)
+    models = {k: v for k, v in data.items() if k != "_failed" and isinstance(v, dict)}
+    missing = [k for k, m in models.items() if "morphology_spread" not in m]
+    if missing:
+        plural = len(missing) != 1
+        raise ValueError(
+            f"{len(missing)} entr{'ies' if plural else 'y'} in {results_path!r} "
+            f"{'have' if plural else 'has'} no morphology_spread -- expected "
+            f"--eval-data-source indigenous_panel results (see "
+            f"common.eval.cross_tokenizer.evaluate_on_indigenous_panel): {missing}"
+        )
+
+    rows = []
+    for name, m in models.items():
+        rows.append({
+            "name": name,
+            "short": short_name(name),
+            "family": family_of(name),
+            "avg_compression": m["combined"]["avg_compression"],
+            "gini": m["combined"]["gini"],
+            "spread": m["morphology_spread"]["fertility_spread"],
+        })
+    rows.sort(key=lambda r: r["spread"])
+    for i, r in enumerate(rows):
+        r["idx"] = i
+    return rows, models
+
+
+def gen_indigenous_panel_heatmap_tex(rows, models, families, out_dir, cell_cm=0.5, gap=0.7):
+    """Adapted from gen_heatmap_tex's own design (family-grouped rows,
+    YlOrRd color scale, real language names) but scoped to ALL 11 of
+    common.data.indigenous_panel.PAIRS's own languages (no worst-N
+    reduction needed -- 11 columns already fits comfortably) and colored by
+    FERTILITY (tokens/word), not token_parity: fertility is a per-language,
+    anchor-free quantity, directly comparable across this panel's own
+    deliberately mixed-anchor pairs in a way token_parity itself is not
+    (see evaluate_on_indigenous_panel's own docstring for why token_parity
+    stays split per-anchor instead of one merged column set here). Columns
+    ordered by morphology tag first (polysynthetic, then agglutinative --
+    see PAIRS's own "morphology" field and common.data.indigenous_panel's
+    own module docstring for why this is a best-effort tag, not a rigorous
+    typological survey), then language name, so the panel's own central
+    question ("do polysynthetic languages cost more?") reads directly off
+    the figure's left-right split rather than needing a legend lookup.
+    Unlike the token_parity heatmap's sqrt(v-1) transform (built around a
+    "1.0 = parity" floor that doesn't exist for fertility), this uses a
+    plain linear scale between the observed min and max fertility.
+    """
+    from common.data.indigenous_panel import PAIRS
+
+    code_to_meta = {meta["code"]: meta for meta in PAIRS.values()}
+    lang_order = sorted(
+        code_to_meta,
+        key=lambda code: (
+            0 if code_to_meta[code]["morphology"] == "polysynthetic" else 1,
+            code_to_meta[code]["language"],
+        ),
+    )
+    n_cols = len(lang_order)
+    n_buckets = 40
+
+    ordered, row_pos, blocks, total_height = _grouped_positions(rows, families, gap=gap)
+    all_vals = [
+        models[r["name"]]["combined"]["fertility"][lang]
+        for r in ordered
+        for lang in lang_order
+        if lang in models[r["name"]]["combined"]["fertility"]
+    ]
+    vmax = max(all_vals) if all_vals else 1.0
+    vmin = min(all_vals) if all_vals else 0.0
+    span = max(vmax - vmin, 1e-9)
+
+    def bucket_of(v):
+        return min(n_buckets - 1, max(0, int((v - vmin) / span * n_buckets)))
+
+    def y_of(pos):
+        return total_height - pos - 1
+
+    palette = [cost_color(i / (n_buckets - 1)) for i in range(n_buckets)]
+
+    preamble = [r"\documentclass{standalone}", r"\usepackage{tikz}", r"\usepackage{xcolor}"]
+    body = [r"\begin{tikzpicture}[x=%.2fcm, y=%.2fcm]" % (cell_cm, cell_cm)]
+    for i, (r_, g_, b_) in enumerate(palette):
+        body.append(r"\definecolor{ipheat%d}{RGB}{%d,%d,%d}" % (i, r_, g_, b_))
+    for fam in families:
+        r_, g_, b_ = _FAMILY_RGB.get(fam, _FAMILY_RGB["Other"])
+        body.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
+
+    # Cells -- blank (no \fill) for a model/language pair this tokenizer's
+    # own coverage never included, rather than crashing or faking a value.
+    for r in ordered:
+        y = y_of(row_pos[r["name"]])
+        fertility = models[r["name"]]["combined"]["fertility"]
+        for xi, lang in enumerate(lang_order):
+            if lang not in fertility:
+                continue
+            b = bucket_of(fertility[lang])
+            body.append(r"\fill[ipheat%d] (%d,%.2f) rectangle ++(1,1);" % (b, xi, y))
+
+    for _, y0, y1 in blocks:
+        body.append(r"\draw[white, line width=0.3pt] (0,%.2f) grid (%d,%.2f);" % (y_of(y1) + 1, n_cols, y_of(y0) + 1))
+
+    row_label_margin = max((_estimate_label_width_cm(r["short"]) for r in ordered), default=1.0) / cell_cm
+    header_x1 = -(0.3 + row_label_margin + 0.5)
+    header_x0 = header_x1 - 0.4
+    for fam, y0, y1 in blocks:
+        col = _FAMILY_COLORS.get(fam, "otherCol")
+        body.append(
+            r"\fill[%s] (%.2f,%.2f) rectangle (%.2f,%.2f);" % (col, header_x0, y_of(y1) + 1, header_x1, y_of(y0) + 1)
+        )
+        body.append(
+            r"\node[anchor=south, rotate=90, font=\tiny\bfseries] at (%.2f,%.2f) {%s};"
+            % (header_x0 - 0.1, (y_of(y1) + 1 + y_of(y0) + 1) / 2, esc(fam))
+        )
+
+    for r in ordered:
+        y = y_of(row_pos[r["name"]])
+        body.append(r"\node[anchor=east, font=\tiny] at (-0.2,%.2f) {%s};" % (y + 0.5, esc(r["short"])))
+
+    # Column labels: real language name + code, with a morphology-tag
+    # divider line between the polysynthetic and agglutinative blocks.
+    first_agglutinative = next(
+        (i for i, code in enumerate(lang_order) if code_to_meta[code]["morphology"] != "polysynthetic"),
+        None,
+    )
+    if first_agglutinative is not None and 0 < first_agglutinative < n_cols:
+        body.append(
+            r"\draw[dashed, gray] (%d,-0.1) -- (%d,%.2f);" % (first_agglutinative, first_agglutinative, total_height + 0.1)
+        )
+    for xi, lang in enumerate(lang_order):
+        body.append(
+            r"\node[anchor=south west, rotate=45, font=\tiny] at (%d,%.2f) {%s \textcolor{gray}{\texttt{\tiny(%s)}}};"
+            % (xi, total_height + 0.15, esc(code_to_meta[lang]["language"]), esc(lang))
+        )
+
+    legend_x0 = n_cols + 0.8
+    legend_steps = 20
+    for i in range(legend_steps):
+        frac = i / (legend_steps - 1)
+        b = min(n_buckets - 1, int(frac * n_buckets))
+        y0 = total_height * i / legend_steps
+        y1 = total_height * (i + 1) / legend_steps
+        body.append(r"\fill[ipheat%d] (%.2f,%.3f) rectangle (%.2f,%.3f);" % (b, legend_x0, y0, legend_x0 + 0.8, y1))
+    body.append(r"\draw (%.2f,0) rectangle (%.2f,%.2f);" % (legend_x0, legend_x0 + 0.8, total_height))
+    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,0) {%.2f (lowest fertility)};" % (legend_x0 + 0.9, vmin))
+    body.append(r"\node[anchor=west, font=\tiny] at (%.2f,%.2f) {%.2f (highest)};" % (legend_x0 + 0.9, total_height, vmax))
+    body.append(
+        r"\node[anchor=west, font=\tiny, align=left, text width=2.4cm] at (%.2f,%.2f) {fertility = tokens/word "
+        r"(pale = low/good, red = high/bad); dashed line splits polysynthetic vs.\ agglutinative languages};"
+        % (legend_x0 + 0.9, total_height * 0.5)
+    )
+    body.append(r"\end{tikzpicture}")
+    full_tex, _ = _write_standalone_and_body("indigenous_panel_heatmap", preamble, body, out_dir)
+    return full_tex, lang_order
+
+
+def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
+    """Sibling to generate() (see this module's own docstring for the main
+    5-figure BOUQuET-based pipeline) for a systems/*/evaluate.py
+    --eval-data-source indigenous_panel --output JSON instead -- see
+    common.data.indigenous_panel's own module docstring for the panel and
+    evaluate_on_indigenous_panel's for why its results need dedicated
+    loading/figure logic rather than reusing load_rows/gen_heatmap_tex
+    directly (this deliberately mixed-anchor panel has no single global
+    token_parity the way the BOUQuET comparison does). Two figures:
+      1. Leaderboard (reuses gen_spread_leaderboard_tex unchanged, just fed
+         morphology_spread["fertility_spread"] instead of token_parity_spread).
+      2. Heatmap (fertility per model x all 11 languages, morphology-grouped
+         columns -- see gen_indigenous_panel_heatmap_tex's own docstring).
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    base_prefix = out_dir.replace(os.sep, "/") if data_prefix is None else data_prefix
+    if base_prefix and not base_prefix.endswith("/"):
+        base_prefix += "/"
+
+    leaderboard_dir = os.path.join(out_dir, "leaderboard")
+    heatmap_dir = os.path.join(out_dir, "heatmap")
+    os.makedirs(leaderboard_dir, exist_ok=True)
+    os.makedirs(heatmap_dir, exist_ok=True)
+    leaderboard_prefix = f"{base_prefix}leaderboard/"
+
+    rows, models = load_indigenous_panel_rows(results_path)
+    families = compute_families(rows)
+
+    write_bar_data(rows, families, leaderboard_dir)
+    tex1 = gen_spread_leaderboard_tex(
+        rows, families, leaderboard_dir, data_prefix=leaderboard_prefix,
+        xlabel="Fertility spread (max/min tokens-per-word across the panel's 11 languages)",
+        fig_name="indigenous_panel_leaderboard",
+    )
+    tex2, lang_order = gen_indigenous_panel_heatmap_tex(rows, models, families, heatmap_dir)
+
+    _assert_well_formed(tex1, "fig_indigenous_panel_leaderboard.tex")
+    _assert_well_formed(tex2, "fig_indigenous_panel_heatmap.tex")
+
+    print(f"{len(rows)} models, {len(families)} families, {len(lang_order)} languages: {lang_order}")
+    print("wrote leaderboard/ and heatmap/ subdirectories under", out_dir)
+    return rows, families, lang_order
 
 
 def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
@@ -879,12 +1098,22 @@ def build_arg_parser():
         "(default: --output-dir itself) -- override only if your thesis's main .tex "
         "includes these figures from a different relative location",
     )
+    parser.add_argument(
+        "--indigenous-panel", action="store_true",
+        help="generate the 2-figure common.data.indigenous_panel comparison "
+        "(leaderboard + heatmap, see generate_indigenous_panel_figures) instead of the "
+        "main 5-figure BOUQuET-based pipeline -- --input must then be a "
+        "--eval-data-source indigenous_panel results JSON, not a BOUQuET one",
+    )
     return parser
 
 
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
-    generate(args.input, args.output_dir, data_prefix=args.data_prefix)
+    if args.indigenous_panel:
+        generate_indigenous_panel_figures(args.input, args.output_dir, data_prefix=args.data_prefix)
+    else:
+        generate(args.input, args.output_dir, data_prefix=args.data_prefix)
 
 
 if __name__ == "__main__":

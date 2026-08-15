@@ -1,0 +1,18 @@
+# systems/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier_indigenous_panel.yml
+#
+# Same 33 repos as configs/eval_hf_frontier.yml (see that file's own comment
+# for how each one was verified real before being added), scored instead on
+# common.data.indigenous_panel's curated Indigenous-language panel --
+# requires a one-time `python -m common.data.prepare_indigenous_panel` run
+# first (writes to data/indigenous_panel/, the default --output-dir). See
+# common.eval.cross_tokenizer.evaluate_on_indigenous_panel's own docstring
+# for why this panel's results have a different shape (combined/
+# token_parity_by_anchor/morphology_spread) than a bouquet/bouquet_test run's
+# -- generate_tikz_figures.py's own --indigenous-panel flag reads that shape
+# specifically, not load_rows.
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony"
+trust_remote_code: true
+eval_data_source: indigenous_panel
+output: results/indigenous_panel_comparison.json
+use_wandb: true
+run_name: hf_frontier_indigenous_panel_v1
