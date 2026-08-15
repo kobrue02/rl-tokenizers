@@ -27,6 +27,16 @@
 # (millions of documents) would be impractically slow -- this exists
 # specifically to avoid that, not as a blanket "always use GPU" preference.
 #
+# AUTO-RESUBMIT: mirrors jobs/train_pretraining.sh's own and
+# jobs/prep_pretraining_data.sh's own (see that script's own comment for the
+# full rationale) -- a run whose --max-tokens exceeds this job's own --time
+# limit gets killed mid-run; pretraining.data_prep.prep_dataset checkpoints
+# its own progress periodically and resumes automatically (no extra flag)
+# whenever rerun against the same --output-dir (see its own RESUME
+# docstring section), so this script resubmits itself when progress was
+# made but the run didn't finish, and refuses to when it wasn't (avoiding
+# an infinite resubmission loop on a real, persistent failure).
+#
 # Usage:
 #   sbatch jobs/prep_pretraining_data_gpu.sh --dataset glot500 --langs all \
 #       --system fanta --checkpoint checkpoints/fanta_50k.pt \
@@ -66,12 +76,61 @@ cd $PROJECT_ROOT
 uv sync
 mkdir -p logs pretrain_data
 
-# 5. Run
+# 5. Resolve this run's output_dir from the EXACT args this job received --
+# reuses pretraining.data_prep's own parsing so this can never drift from
+# what it actually uses.
+OUTPUT_DIR=$(python3 -c "
+import sys
+from pretraining.data_prep import build_arg_parser
+from common.config_file import parse_args_with_config
+args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
+print(args.output_dir)
+" "$@")
+CKPT_PATH="$OUTPUT_DIR/prep_checkpoint.json"
+
+checkpoint_tokens() {
+    python3 -c "
+import json
+try:
+    with open('$1') as f:
+        print(json.load(f).get('total_tokens', 0))
+except FileNotFoundError:
+    print(0)
+"
+}
+BEFORE_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
+
+# 6. Run
 echo "Starting GPU pretraining data prep with args: $@"
 python3 -m pretraining.data_prep --device cuda "$@"
+PREP_EXIT=$?
 
-if [ $? -eq 0 ]; then
+# 7. Done, or resubmit? See the AUTO-RESUBMIT comment at the top.
+if [ -f "$OUTPUT_DIR/shards_meta.json" ]; then
     echo "Data prep complete."
-else
-    echo "Data prep failed." && exit 1
+    exit 0
 fi
+
+echo "shards_meta.json not found in $OUTPUT_DIR (exited with code $PREP_EXIT) -- checking for progress to resume from."
+AFTER_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
+if [ "$AFTER_TOKENS" -le "$BEFORE_TOKENS" ]; then
+    echo "No progress made this run (before=$BEFORE_TOKENS after=$AFTER_TOKENS tokens) -- NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+    exit 1
+fi
+
+# This job's OWN actual --time limit (may have been overridden at
+# submission) -- a bare resubmit would otherwise silently fall back to this
+# script's #SBATCH --time=12:00:00 default. Same reasoning as
+# jobs/prep_pretraining_data.sh's own TIME_LIMIT/--gres preservation.
+TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
+
+echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
+sbatch --time="$TIME_LIMIT" jobs/prep_pretraining_data_gpu.sh "$@"
+SBATCH_EXIT=$?
+if [ "$SBATCH_EXIT" -ne 0 ]; then
+    echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
+    echo "  sbatch --time=$TIME_LIMIT jobs/prep_pretraining_data_gpu.sh $@" >&2
+    exit 1
+fi
+echo "Resubmitted successfully."
+exit 0

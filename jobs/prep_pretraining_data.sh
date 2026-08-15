@@ -28,6 +28,23 @@
 # scale (only tested locally against a single small Glot500 language) --
 # widen it if a --langs/--dataset-config/--max-tokens combination needs longer.
 #
+# AUTO-RESUBMIT: mirrors jobs/train_pretraining.sh's own -- a run whose
+# --max-tokens exceeds this job's own --time limit will get killed mid-run,
+# well before pretraining.data_prep.prep_dataset ever gets to write
+# shards_meta.json. See pretraining/data_prep.py's own RESUME docstring
+# section: prep_dataset checkpoints its own progress periodically and
+# resumes automatically (no extra flag) whenever it's rerun against the
+# same --output-dir. This script checks after each run:
+#   - shards_meta.json present in output_dir -> genuinely done, exit 0.
+#   - not present, but prep_checkpoint.json's total_tokens advanced past
+#     what it was before this run started -> real progress was made;
+#     resubmit the exact same command via sbatch (no --resume flag needed,
+#     prep_dataset detects the checkpoint on its own).
+#   - not present, and no progress beyond this run's own starting point ->
+#     treated as a genuine failure (e.g. a persistent crash before the
+#     first checkpoint), NOT resubmitted, so a real bug can't spin into an
+#     infinite resubmission loop burning allocation.
+#
 # Usage:
 #   sbatch jobs/prep_pretraining_data.sh --dataset glot500 --langs all \
 #       --system bpe --checkpoint checkpoints/bpe_12345.json \
@@ -78,12 +95,63 @@ cd $PROJECT_ROOT
 uv sync
 mkdir -p logs pretrain_data
 
-# 5. Run
+# 5. Resolve this run's output_dir from the EXACT args this job received
+# (config file + any prior state) -- reuses pretraining.data_prep's own
+# parsing so this can never drift from what it actually uses.
+OUTPUT_DIR=$(python3 -c "
+import sys
+from pretraining.data_prep import build_arg_parser
+from common.config_file import parse_args_with_config
+args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
+print(args.output_dir)
+" "$@")
+CKPT_PATH="$OUTPUT_DIR/prep_checkpoint.json"
+
+checkpoint_tokens() {
+    python3 -c "
+import json
+try:
+    with open('$1') as f:
+        print(json.load(f).get('total_tokens', 0))
+except FileNotFoundError:
+    print(0)
+"
+}
+BEFORE_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
+
+# 6. Run
 echo "Starting pretraining data prep with args: $@"
 python3 -m pretraining.data_prep "$@"
+PREP_EXIT=$?
 
-if [ $? -eq 0 ]; then
+# 7. Done, or resubmit? See the AUTO-RESUBMIT comment at the top.
+if [ -f "$OUTPUT_DIR/shards_meta.json" ]; then
     echo "Data prep complete."
-else
-    echo "Data prep failed." && exit 1
+    exit 0
 fi
+
+echo "shards_meta.json not found in $OUTPUT_DIR (exited with code $PREP_EXIT) -- checking for progress to resume from."
+AFTER_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
+if [ "$AFTER_TOKENS" -le "$BEFORE_TOKENS" ]; then
+    echo "No progress made this run (before=$BEFORE_TOKENS after=$AFTER_TOKENS tokens) -- NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+    exit 1
+fi
+
+# This job's OWN actual --time limit (which may have been overridden at
+# submission, e.g. `sbatch --time=72:00:00 ...` -- see configs/prep_bpe_large.yml's
+# own real OOM/timeout history) -- a bare resubmit would otherwise silently
+# fall back to this script's #SBATCH --time=12:00:00 default, the same
+# class of bug train_pretraining.sh's own --gres preservation guards
+# against.
+TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
+
+echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
+sbatch --time="$TIME_LIMIT" jobs/prep_pretraining_data.sh "$@"
+SBATCH_EXIT=$?
+if [ "$SBATCH_EXIT" -ne 0 ]; then
+    echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
+    echo "  sbatch --time=$TIME_LIMIT jobs/prep_pretraining_data.sh $@" >&2
+    exit 1
+fi
+echo "Resubmitted successfully."
+exit 0

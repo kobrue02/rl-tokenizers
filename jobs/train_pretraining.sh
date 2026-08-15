@@ -142,12 +142,17 @@ if [ "$AFTER_STEP" -le "$BEFORE_STEP" ]; then
     exit 1
 fi
 
+# This job's OWN actual --time limit (may have been overridden at
+# submission) -- a bare resubmit would otherwise silently fall back to this
+# script's #SBATCH --time=24:00:00 default, same reasoning as --gres above.
+TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
+
 echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."
-sbatch --gres=gpu:"$NUM_GPUS" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
+sbatch --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
 SBATCH_EXIT=$?
 if [ "$SBATCH_EXIT" -ne 0 ]; then
     echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-    echo "  sbatch --gres=gpu:$NUM_GPUS jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
+    echo "  sbatch --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
     exit 1
 fi
 echo "Resubmitted successfully."

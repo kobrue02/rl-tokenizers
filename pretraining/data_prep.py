@@ -144,6 +144,67 @@ encode_batch_size * bucket_pool_multiplier documents), a coarser version of
 the same batch-granularity tradeoff ENCODE_BATCH_SIZE already introduced.
 bucket_pool_multiplier=1 degrades to plain (unbucketed) batching -- useful
 for reproducing the original bug directly, not recommended for real runs.
+
+RESUME (--prep-checkpoint-path, default: "<output-dir>/prep_checkpoint.json"
+-- named distinctly from --checkpoint, which is the SYSTEM's own tokenizer
+checkpoint TokenizerAdapter.load reads, an unrelated file):
+a real cluster run at 30B-token/hundreds-of-millions-of-document Glot500
+scale can exceed a single SLURM job's time limit -- unlike pretraining.
+train's --resume-from (which this mirrors in spirit), there was previously
+no way to continue a prep_dataset call that got killed mid-run other than
+starting over from token 0.
+
+Checkpointed once per bucketing pool (see BUCKETING docstring section)
+that happens to cross a shard boundary -- roughly once per shard on a real
+run, not once per pool (encode_batch_size*bucket_pool_multiplier documents
+would be far too frequent at production scale). NEVER checkpointed
+mid-pool: bucketing processes a pool's documents in LENGTH-SORTED order,
+not the order they were pulled from the stream, so stream_docs_consumed
+(how many (lang, text) pairs have been pulled from the stream so far,
+REGARDLESS of whether each was kept, deduped, or truncated -- the exact
+count the skip-forward logic needs) only correctly corresponds to
+"everything up to here is fully, durably accounted for" once an ENTIRE
+pool has finished processing, not at some arbitrary point inside it.
+
+The checkpoint captures total_tokens, num_docs, shard_idx, shard_files,
+lang_counts, dedup/truncation counters, stream_docs_consumed, AND
+buffer_pos plus the buffer's own unflushed contents (written to a sibling
+"<prep_checkpoint_path>.buffer.bin" file) -- a shard boundary doesn't
+necessarily land exactly at a pool boundary, so rather than forcing an
+early, undersized shard flush just to keep buffer_pos always 0 at
+checkpoint time (which would fragment a real run into far more, far
+smaller shard files than shard_size intends), whatever's sitting in the
+buffer gets persisted and restored as-is. Both files written atomically
+(temp file + os.replace, buffer file first) so a crash mid-write never
+leaves a checkpoint referencing buffer content that isn't actually on disk.
+
+If prep_checkpoint_path exists when prep_dataset starts, it's loaded
+automatically and the stream is fast-forwarded (each (lang, text) pair
+discarded, uncounted against dedup/encode cost, until stream_docs_consumed
+is reached) before normal processing resumes -- no separate --resume flag
+needed, just rerun the same command against the same --output-dir. Deleted
+(both files) once shards_meta.json is written (a finished run is no longer
+resumable, and leaving it would make a later identical invocation waste
+time fast-forwarding through the entire stream for nothing).
+
+Two deliberate, minor tradeoffs, not oversights:
+  - the Deduplicator itself is NOT persisted (no serialized Bloom
+    filter/LSH state) -- resuming starts a FRESH deduplicator after
+    fast-forwarding past whatever was already shipped, so a duplicate that
+    straddles the resume boundary (one copy before, one after) could
+    theoretically slip through where an uninterrupted run would have
+    caught it. Serializing the Bloom filter's full bit array on every
+    shard flush would cost real I/O time proportional to its size for
+    negligible real-world benefit here.
+  - fast-forwarding assumes stream_groups yields the same documents in the
+    same order across separate process invocations -- already a known
+    caveat of this module's own "tokenize once" design (see this
+    docstring's own opening paragraph: "HF streaming order and network
+    conditions vary"), not a new assumption introduced by resume. If order
+    drifts, a resumed run may skip past slightly different documents than
+    it otherwise would have, or duplicate a few -- not a correctness
+    hazard for pretraining (shard_dataset.py samples random windows
+    regardless of corpus order anyway), just an accepted imprecision.
 """
 
 import argparse
@@ -221,6 +282,7 @@ def prep_dataset(
     max_doc_bytes=MAX_DOC_BYTES,
     encode_batch_size=ENCODE_BATCH_SIZE,
     bucket_pool_multiplier=BUCKET_POOL_MULTIPLIER,
+    prep_checkpoint_path=None,
 ):
     """dataset_name: one of common.data.corpora.ALL_SOURCES. langs: language
     codes for the language-selectable sources (synthetic/oldi_seed/
@@ -252,6 +314,8 @@ def prep_dataset(
     document, so a capped run may overshoot the exact target by up to one
     pool's worth of tokens/documents -- a deliberate, minor tradeoff for
     the throughput gain from bucketed batched encoding, not an oversight.
+    prep_checkpoint_path: see this module's own RESUME docstring section --
+    defaults to "<output_dir>/prep_checkpoint.json" if None.
 
     Returns the shards_meta.json dict this also writes to output_dir.
     """
@@ -260,17 +324,44 @@ def prep_dataset(
     dtype_name = _dtype_for_vocab(adapter.vocab_size)
     dtype = np.uint16 if dtype_name == "uint16" else np.uint32
 
+    if prep_checkpoint_path is None:
+        prep_checkpoint_path = os.path.join(output_dir, "prep_checkpoint.json")
+
     if dataset_name in ("fineweb_edu", "olmo_mix") or dataset_name in BITEXT_SOURCES:
         stream = stream_groups(dataset_name, config=dataset_config)
     else:
         stream = stream_groups(dataset_name, langs=langs)
 
-    shard_files = []
+    resume = os.path.exists(prep_checkpoint_path)
+    if resume:
+        with open(prep_checkpoint_path) as f:
+            _ckpt = json.load(f)
+        print(f"\nresuming from {prep_checkpoint_path}: {_ckpt['total_tokens']:,} tokens / "
+              f"{_ckpt['num_docs']:,} docs / {len(_ckpt['shard_files'])} shards already written")
+    else:
+        _ckpt = None
+
+    shard_files = list(_ckpt["shard_files"]) if resume else []
     buffer = np.empty(shard_size, dtype=dtype)
     buffer_pos = 0
-    total_tokens = 0
-    num_docs = 0
-    shard_idx = 0
+    if resume and _ckpt["buffer_pos"] > 0:
+        # Restore whatever was sitting in the buffer, not yet flushed to a
+        # shard, at checkpoint time -- see write_prep_checkpoint's own
+        # docstring for why this is persisted rather than forcing an early
+        # partial-shard flush on every checkpoint.
+        buffer_pos = _ckpt["buffer_pos"]
+        buffer[:buffer_pos] = np.fromfile(
+            prep_checkpoint_path + ".buffer.bin", dtype=dtype, count=buffer_pos
+        )
+    total_tokens = _ckpt["total_tokens"] if resume else 0
+    num_docs = _ckpt["num_docs"] if resume else 0
+    shard_idx = _ckpt["shard_idx"] if resume else 0
+    stream_docs_consumed = 0  # this RUN's own count of (lang, text) pairs
+    # pulled from a FRESH stream_groups(...) call above -- compared against
+    # skip_target below to fast-forward past whatever a prior run already
+    # consumed (see RESUME docstring section); unrelated to num_docs, which
+    # only counts KEPT (post-dedup) documents.
+    skip_target = _ckpt["stream_docs_consumed"] if resume else 0
     # {lang: {"docs": int, "tokens": int, "bytes": int}} -- the REALIZED
     # corpus makeup, not the requested `langs` (see module docstring's own
     # LANGUAGES ENCOUNTERED section for why this is tracked here, at the
@@ -283,7 +374,12 @@ def prep_dataset(
     # bytes-per-token compression rate (common.eval.metrics.compression_rate) at
     # actual pretraining-corpus scale, not just the much smaller sample a
     # systems/ tokenizer's own training-time smoke test measures against.
-    lang_counts = defaultdict(lambda: {"docs": 0, "tokens": 0, "bytes": 0})
+    lang_counts = defaultdict(
+        lambda: {"docs": 0, "tokens": 0, "bytes": 0}, _ckpt["lang_counts"] if resume else {}
+    )
+    # Deliberately NOT restored from the checkpoint -- see RESUME docstring
+    # section's own tradeoffs paragraph for why a fresh Deduplicator on
+    # resume is an accepted imprecision, not an oversight.
     deduper = (
         Deduplicator(
             near_dup_threshold=dedup_near_threshold,
@@ -294,11 +390,15 @@ def prep_dataset(
         if dedup
         else None
     )
-    dropped_dup_docs = 0
-    dropped_dup_bytes = 0
-    dropped_dup_by_lang = defaultdict(lambda: {"docs": 0, "bytes": 0})
-    num_truncated_docs = 0
-    num_truncated_by_lang = defaultdict(int)
+    dropped_dup_docs = _ckpt["dropped_duplicate_docs"] if resume else 0
+    dropped_dup_bytes = _ckpt["dropped_duplicate_bytes"] if resume else 0
+    dropped_dup_by_lang = defaultdict(
+        lambda: {"docs": 0, "bytes": 0}, _ckpt["dropped_duplicates_by_lang"] if resume else {}
+    )
+    num_truncated_docs = _ckpt["num_truncated_docs"] if resume else 0
+    num_truncated_by_lang = defaultdict(
+        int, _ckpt["num_truncated_by_lang"] if resume else {}
+    )
 
     def flush():
         nonlocal buffer_pos, shard_idx
@@ -309,6 +409,52 @@ def prep_dataset(
         shard_files.append(name)
         shard_idx += 1
         buffer_pos = 0
+
+    buffer_checkpoint_path = prep_checkpoint_path + ".buffer.bin"
+
+    def write_prep_checkpoint():
+        # Called only once per process_pending() call, right after its
+        # ENTIRE pending pool has been fully processed (see the call site
+        # below and RESUME docstring section) -- NEVER mid-pool. This
+        # matters because bucketing (see BUCKETING docstring section)
+        # processes a pool's documents in LENGTH-SORTED order, not stream
+        # order, so stream_docs_consumed (incremented in original stream
+        # order, in the outer loop below) only correctly corresponds to
+        # "everything up to here is fully accounted for" once the WHOLE
+        # pool that reordering was drawn from has been processed, not at
+        # some arbitrary partial point inside it.
+        #
+        # buffer_pos may be > 0 here (a shard boundary doesn't necessarily
+        # land exactly at a pool boundary) -- buffer[:buffer_pos] is
+        # persisted to a sibling .buffer.bin file rather than forcing an
+        # early (partial, undersized) shard flush just to keep this
+        # simpler, which would fragment real runs into far more, far
+        # smaller shard files than shard_size intends.
+        ckpt = {
+            "stream_docs_consumed": stream_docs_consumed,
+            "total_tokens": total_tokens,
+            "num_docs": num_docs,
+            "shard_idx": shard_idx,
+            "shard_files": shard_files,
+            "buffer_pos": buffer_pos,
+            "lang_counts": dict(lang_counts),
+            "dropped_duplicate_docs": dropped_dup_docs,
+            "dropped_duplicate_bytes": dropped_dup_bytes,
+            "dropped_duplicates_by_lang": dict(dropped_dup_by_lang),
+            "num_truncated_docs": num_truncated_docs,
+            "num_truncated_by_lang": dict(num_truncated_by_lang),
+        }
+        buffer_tmp_path = buffer_checkpoint_path + ".tmp"
+        buffer[:buffer_pos].tofile(buffer_tmp_path)
+        os.replace(buffer_tmp_path, buffer_checkpoint_path)
+        tmp_path = prep_checkpoint_path + ".tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(ckpt, f)
+        os.replace(tmp_path, prep_checkpoint_path)  # atomic on POSIX -- never
+        # leaves a half-written (unreadable-on-resume) checkpoint behind if
+        # the process dies mid-write. Written AFTER the buffer file so a
+        # crash between the two can never leave a checkpoint that references
+        # buffer content that isn't actually on disk yet.
 
     # (lang, encode_bytes, raw_byte_len) tuples awaiting a bucketed, batched
     # encode() call -- see this module's own PERFORMANCE / ENCODE_BATCH_SIZE
@@ -330,6 +476,7 @@ def prep_dataset(
         # section for why unsorted chunks pay a real, confirmed throughput
         # penalty, not just a memory risk.
         pending.sort(key=lambda p: len(p[1]))
+        flushed_this_call = False
         for start in range(0, len(pending), encode_batch_size):
             chunk = pending[start : start + encode_batch_size]
             langs_batch = [p[0] for p in chunk]
@@ -353,12 +500,39 @@ def prep_dataset(
                     pbar.update(n)
                     if buffer_pos == shard_size:
                         flush()
+                        flushed_this_call = True
         pending.clear()
+        # Checkpointed once here, AFTER the entire pool is done (not inside
+        # the loop above) -- see write_prep_checkpoint's own docstring for
+        # why mid-pool would be unsafe given bucketing's reordering.
+        # Throttled to "only when this pool happened to cross a shard
+        # boundary" so checkpoint frequency stays roughly one-per-shard on
+        # a real run (~every encode_batch_size*bucket_pool_multiplier
+        # documents would otherwise be far too frequent at production
+        # scale -- see RESUME docstring section). Skipped on the final
+        # call (final=True): prep_dataset finishes and deletes the
+        # checkpoint immediately afterward regardless, so writing one here
+        # would just be discarded unread.
+        if flushed_this_call and not final:
+            write_prep_checkpoint()
 
-    pbar = tqdm(desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True)
+    pbar = tqdm(
+        desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True,
+        initial=total_tokens if resume else 0,
+    )
     done = False
     for group in stream:
         for lang, text in group.items():
+            if stream_docs_consumed < skip_target:
+                # Fast-forwarding past a prior run's already-shipped
+                # documents -- see RESUME docstring section. Counted but
+                # otherwise untouched: not deduped, not encoded, not
+                # counted toward num_docs/total_tokens (those already
+                # reflect this document from the prior run's own
+                # checkpoint).
+                stream_docs_consumed += 1
+                continue
+            stream_docs_consumed += 1
             if not text:
                 continue
             if deduper is not None and deduper.is_duplicate(text):
@@ -482,6 +656,14 @@ def prep_dataset(
     }
     with open(os.path.join(output_dir, "shards_meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
+    if os.path.exists(prep_checkpoint_path):
+        # A finished run is no longer resumable -- see RESUME docstring
+        # section for why a stale checkpoint left behind would make a later
+        # identical invocation waste time fast-forwarding through the
+        # entire stream for nothing.
+        os.remove(prep_checkpoint_path)
+    if os.path.exists(buffer_checkpoint_path):
+        os.remove(buffer_checkpoint_path)
     print(
         f"\nwrote {total_tokens:,} tokens ({num_docs:,} documents) across "
         f"{len(shard_files)} shards to {output_dir}"
@@ -556,6 +738,13 @@ def build_arg_parser():
         "a real, confirmed fix for a padding-waste throughput regression (see this module's own "
         "BUCKETING docstring section), not just a memory optimization; 1 disables bucketing",
     )
+    parser.add_argument(
+        "--prep-checkpoint-path", type=str, default=None,
+        help="see this module's own RESUME docstring section -- defaults to "
+        "'<output-dir>/prep_checkpoint.json' if omitted. Rerunning the same command against the "
+        "same --output-dir after a mid-run interruption resumes automatically; no separate flag "
+        "needed to trigger it",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -597,6 +786,7 @@ def main(argv=None):
         max_doc_bytes=args.max_doc_bytes,
         encode_batch_size=args.encode_batch_size,
         bucket_pool_multiplier=args.bucket_pool_multiplier,
+        prep_checkpoint_path=args.prep_checkpoint_path,
     )
 
     if args.use_wandb:
