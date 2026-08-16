@@ -1,110 +1,78 @@
 """MAGNET-style neural tokenizer baseline (heavily scaled down).
 
-Ahia et al., "MAGNET: Improving the Multilingual Fairness of Language Models"
-(arxiv.org/abs/2407.08818). The reference implementation (MIT licensed) lives at
-github.com/orevaahia/magnet-tokenization -- specifically src/magnet.py
-(MagnetTransformerLM, BoundaryPredictor) and src/shortening.py. The overall
-architecture below (embed -> pre_layers -> boundary predictor -> downsample ->
-shortened_layers -> upsample -> post_layers -> byte head) is an independent,
-much smaller reimplementation of that paper's design, scaled to this project's
-compute budget -- but the downsample/upsample segment-pooling step itself
-(common.training.dynamic_pooling) is DIRECTLY REUSED from src/shortening.py (reused with
-the project owner's explicit authorization; see also flexitokens/model.py,
-which shares the exact same file -- both papers build on the same "dynamic
-pooling" lineage). Everything else (BoundaryPredictor, TransformerBlock, the
-per-script wiring) is this project's own code, not a port.
+Reimplements Ahia et al., "MAGNET: Improving the Multilingual Fairness of
+Language Models" (arxiv.org/abs/2407.08818), at much smaller scale. The
+downsample/upsample segment-pooling step (common.training.dynamic_pooling) is
+directly reused (with the project owner's authorization) from the reference
+repo's src/shortening.py (github.com/orevaahia/magnet-tokenization);
+flexitokens/model.py shares the same file, since both papers use the same
+"dynamic pooling" idea. Everything else (BoundaryPredictor, TransformerBlock,
+per-script wiring) is an independent reimplementation, not a port.
 
 Architecture (one forward call handles ONE script's sub-batch -- see
-MagnetTrainer in train.py for why a mixed-script training batch gets split by
-script before calling this):
+MagnetTrainer in train.py, which splits a mixed-script batch by script first):
 
-  1. byte embedding + learned absolute position embedding
-  2. `pre_layers`: a few CAUSAL self-attention transformer blocks over the full
-     byte sequence -- this is what makes every downstream boundary decision and
-     every downstream segment representation causally safe (a function of bytes
-     up to and including the position in question, never later ones).
-  3. `BoundaryPredictor` (one per SCRIPT, not per language -- languages that
-     share a script, e.g. arz_Arab/kas_Arab, share one predictor and one target
-     boundary rate; see common.data.oldi_data.LANG_SCRIPT, which is where the
-     lang -> script mapping is read from in train.py): a small MLP maps each
-     position's hidden state to a boundary logit, sigmoid to a probability, then
-     Gumbel-sigmoid (RelaxedBernoulli) reparameterized sampling gives a *soft*
-     boundary value with a real gradient path, and a straight-through estimator
-     hardens it to a genuine 0/1 in the forward pass while keeping that gradient
-     path intact for the backward pass:
+  1. byte embedding + learned absolute position embedding.
+  2. `pre_layers`: causal self-attention transformer blocks over the full byte
+     sequence, so every boundary decision and segment representation is a
+     function only of bytes up to that position.
+  3. `BoundaryPredictor` (one per SCRIPT, not per language -- languages
+     sharing a script, e.g. arz_Arab/kas_Arab, share one predictor and target
+     rate; see common.data.oldi_data.LANG_SCRIPT): MLP -> boundary logit ->
+     sigmoid -> Gumbel-sigmoid (RelaxedBernoulli) reparameterized soft sample
+     -> straight-through hard 0/1 in the forward pass, with the soft value's
+     gradient kept for the backward pass (Bengio et al. 2013):
          hard = (soft > 0.5).float()
          boundary = hard - soft.detach() + soft
-     (Bengio et al. 2013's straight-through trick; this is the exact formula the
-     cloned reference implementation's BoundaryPredictor.forward uses too.)
-  4. Downsample (common.training.dynamic_pooling.downsample, ported directly from the
-     reference's shortening.py): mean-pool hidden states within each predicted
-     segment via a dense, differentiable (B, T, S) assignment matrix built from
-     the straight-through boundary tensor -- gradient flows through the pooling
-     WEIGHTS themselves, not just the pooled values, which a hard-integer-index
-     scatter/gather approach (this module's own earlier version) cannot do.
-  5. `shortened_layers`: a few more CAUSAL transformer blocks, now over the much
-     shorter per-segment sequence.
-  6. Upsample (common.training.dynamic_pooling.upsample, same file): broadcast each
-     pooled segment's (post-shortened-layers) representation back out to its
-     member byte positions via the same kind of differentiable assignment
-     matrix (transposed), one-segment-shifted for causal safety (see below) +
-     a residual add of the pre_layers output, then `post_layers` (a couple
-     more causal transformer blocks) and a linear head to a 256-way byte
-     softmax.
+  4. Downsample (common.training.dynamic_pooling.downsample): mean-pools
+     hidden states per predicted segment via a differentiable (B, T, S)
+     assignment matrix built from the straight-through boundary tensor --
+     gradient flows through the pooling weights themselves, not just the
+     pooled values.
+  5. `shortened_layers`: more causal transformer blocks over the much shorter
+     per-segment sequence.
+  6. Upsample (common.training.dynamic_pooling.upsample): broadcasts each
+     pooled segment's representation back to its member byte positions
+     (transposed assignment matrix), one-segment-shifted for causal safety
+     (see below), residual-added to the pre_layers output, then `post_layers`
+     and a linear head to a 256-way byte softmax.
 
-Causal safety of the downsample/upsample round-trip (this is the one part of
-the mechanism that is easy to get subtly wrong, so it's worth spelling out):
-naively broadcasting a segment's pooled representation back to ALL of that
-segment's own byte positions would leak information from the END of the
-segment into predicting the byte immediately after its EARLIER positions (e.g.
-if segment = bytes [3,4,5] with a boundary at 5, giving position 3 that
-segment's pooled representation lets it "see" byte 5 when predicting byte 4 --
-a genuine leak, since byte 5 comes after byte 4). The fix, built into
-common.training.dynamic_pooling.downsample/upsample directly (see the comment there:
-"segment i's pooled representation is broadcast only to segment i+1's byte
-positions, never its own"), is a one-segment SHIFT: a position receives the
-pooled representation of the most recently *closed* segment strictly before
-it, never its own (possibly still-open, possibly just-closed) segment. The
-learned `null_segment` parameter (passed as `downsample`'s `null_group` arg)
-fills in for positions before any segment has closed yet.
+Causal safety of the downsample/upsample round-trip: naively broadcasting a
+segment's pooled representation to ALL its own byte positions would leak
+information from the segment's END into predicting the byte after its
+EARLIER positions (e.g. segment [3,4,5]: position 3 would "see" byte 5 when
+predicting byte 4). Fix, built into dynamic_pooling itself: a one-segment
+SHIFT -- a position receives the pooled representation of the most recently
+*closed* segment strictly before it, never its own. The learned
+`null_segment` parameter fills in before any segment has closed.
 
-Loss (computed in train.py, not here): next-byte cross-entropy on the
-reconstructed byte sequence, plus a per-script boundary-rate term -- the
-negative log-likelihood of the observed per-sequence boundary count under
-Binomial(real_length, prior), where `prior` is a configurable per-script target
-boundary probability (see train.py's MagnetConfig.default_boundary_prior).
+Loss (computed in train.py): next-byte cross-entropy + a per-script
+boundary-rate term -- negative log-likelihood of the observed per-sequence
+boundary count under Binomial(real_length, prior), `prior` being a
+configurable per-script target rate (see MagnetConfig.default_boundary_prior).
 
-Deliberate simplifications vs. the paper / reference implementation (this is a
-baseline sized to match fairtok's own BytePolicy compute budget, not a
-reproduction of the paper's 100M+ parameter model trained on 10B+ bytes):
+Deliberate simplifications vs. the paper (sized to match fairtok's own
+BytePolicy compute budget, not a reproduction of the paper's 100M+ parameter
+model trained on 10B+ bytes):
+  - Scale: d_model in the tens (default 64), 1-2 layers per stage, few
+    attention heads (see MagnetConfig in train.py, same order of magnitude as
+    fairtok.policy.BytePolicy's hidden_size/num_layers).
+  - Positional encoding: plain learned absolute embeddings, not the
+    reference's Transformer-XL-style relative attention -- not worth the
+    complexity at this scale.
+  - Boundary priors: a flat, hand-set per-script hyperparameter (default 0.3,
+    ~3.3 bytes/token) rather than measured per-script off a plain-BPE anchor
+    (contrast fairtok.train._plain_bpe_target_rate) -- an allowed
+    simplification.
+  - No temperature annealing: fixed Gumbel-sigmoid temperature
+    (MagnetConfig.boundary_temperature) rather than annealed over training.
+  - Attention: plain `nn.MultiheadAttention` with causal + padding masks, not
+    a hand-rolled relative-attention kernel.
 
-  - Scale: d_model in the tens (default 64), 1-2 layers per stage, a handful of
-    attention heads -- vs. the paper's much larger model. See MagnetConfig in
-    train.py for exact defaults, chosen to be the same order of magnitude as
-    fairtok.policy.BytePolicy's own hidden_size/num_layers.
-  - Positional encoding: plain learned absolute position embeddings, not the
-    reference implementation's Transformer-XL-style relative positional
-    attention (RelPartialLearnableMultiHeadAttn in the cloned magnet.py). At
-    this scale and these sequence lengths the extra machinery isn't worth the
-    complexity; a real production-scale reproduction would want it back.
-  - Boundary priors: exposed as a flat, hand-set per-script hyperparameter
-    (default 0.3, i.e. ~3.3 bytes/token on average -- roughly the ballpark a
-    real BPE tokenizer lands in) rather than measured per-script from a plain-
-    BPE anchor the way fairtok.train._plain_bpe_target_rate derives its single
-    global target_rate. Doing the equivalent per-script measurement here is
-    straightforward future work; the task explicitly allows this simplification.
-  - No temperature annealing: the paper/reference anneal the Gumbel-sigmoid
-    temperature over training (sharpening the relaxation as training
-    progresses); here it's a fixed hyperparameter (MagnetConfig.boundary_temperature).
-  - Attention implementation: plain `nn.MultiheadAttention` with a causal mask
-    plus a padding mask, not a hand-rolled relative-attention kernel.
-
-(Segment routing WAS a simplification here -- an earlier version cast segment
-ids to integers for scatter_add_/gather indexing, which severed the gradient
-path through the routing decision itself, leaving the boundary-rate loss as
-the only channel training the boundary predictor. Now that downsample/upsample
-are directly reused from the reference implementation, gradient flows through
-the pooling weights too, matching the reference exactly -- see point 4/6 above.)
+(An earlier version cast segment ids to integers for scatter/gather, which
+severed the gradient path through routing; the direct reuse of
+downsample/upsample above fixes this -- gradient now flows through the
+pooling weights too.)
 """
 
 import torch
@@ -114,14 +82,10 @@ from common.training.dynamic_pooling import downsample, upsample
 
 
 class TransformerBlock(nn.Module):
-    """Pre-norm causal self-attention + FFN block. Used, unmodified, for all
-    three stages (pre_layers, shortened_layers, post_layers) -- MAGNET's
-    reference implementation applies the exact same causal masking function to
-    all three stages too (see magnet.py's `_forward`, shared by every call
-    site), which is required here for the same reason: the shortened stage's
-    self-attention must ALSO stay causal, or a segment's post-shortened-layer
-    representation could mix in information from later segments, which would
-    then leak into upsample's broadcast (see module docstring)."""
+    """Pre-norm causal self-attention + FFN block, shared unmodified by all
+    three stages (pre/shortened/post_layers). The shortened stage must stay
+    causal too, or a segment's representation could leak info from later
+    segments into upsample's broadcast (see module docstring)."""
 
     def __init__(self, d_model, n_heads, d_ff=None, dropout=0.0):
         super().__init__()
@@ -140,14 +104,11 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(self, x, key_padding_mask=None):
-        """x: (B, L, D). key_padding_mask: (B, L) bool, True = position is PAD
-        (matches nn.MultiheadAttention's own convention, so it's passed straight
-        through with no inversion)."""
+        """x: (B, L, D). key_padding_mask: (B, L) bool, True = PAD (matches
+        nn.MultiheadAttention's own convention)."""
         L = x.size(1)
-        # Rebuilt every call rather than cached: L varies between calls (full byte
-        # length for pre/post_layers, much shorter segment count for
-        # shortened_layers), and at this model scale the cost of a fresh
-        # (L, L) triu is negligible next to the attention matmul itself.
+        # Rebuilt each call since L varies (full byte length vs. shortened
+        # segment count); cost is negligible next to the attention matmul.
         causal_mask = torch.triu(
             torch.ones(L, L, dtype=torch.bool, device=x.device), diagonal=1
         )
@@ -181,16 +142,13 @@ class BoundaryPredictor(nn.Module):
     def forward(self, hidden, sample=True):
         """hidden: (B, T, D). Returns (logits, probs, boundary), each (B, T).
 
-        sample=True (training): draws from RelaxedBernoulli(temperature, probs)
-        -- the reparameterized ("Concrete distribution", Jang et al. 2017 /
-        Maddison et al. 2017) relaxation of a Bernoulli draw, whose `.rsample()`
-        is differentiable w.r.t. `probs` (an ordinary `torch.bernoulli` draw is
-        not -- there'd be nothing for autograd to differentiate through).
+        sample=True (training): RelaxedBernoulli(temperature, probs).rsample()
+        -- the Concrete-distribution relaxation (Jang/Maddison 2017),
+        differentiable w.r.t. `probs` unlike a plain torch.bernoulli draw.
 
-        sample=False (deterministic inference, see segment.py): skips sampling
-        entirely and uses the raw probability as the "soft" value -- matching
-        fairtok.policy.segment_bytes's own `deterministic` flag, for the same
-        reason (reproducible segmentation of a frozen model, not exploration).
+        sample=False (deterministic inference): skips sampling, uses the raw
+        probability as the "soft" value -- matches fairtok.policy.segment_bytes's
+        `deterministic` flag (reproducible segmentation, not exploration).
         """
         logits = self.net(hidden).squeeze(-1)
         probs = torch.sigmoid(logits)
@@ -201,23 +159,19 @@ class BoundaryPredictor(nn.Module):
         else:
             soft = probs
         hard = (soft > self.threshold).float()
-        # Straight-through estimator (Bengio et al. 2013): the FORWARD value is
-        # `hard` (a genuine 0/1, so segment membership downstream is unambiguous),
-        # but d(boundary)/d(soft) == 1 everywhere, since `hard` and `soft.detach()`
-        # are both constants w.r.t. autograd once detached -- so gradient flows
-        # backward as if this had just been `soft`.
+        # Straight-through estimator (Bengio et al. 2013): forward value is
+        # `hard` (genuine 0/1), but d(boundary)/d(soft) == 1, so gradient
+        # flows as if this were just `soft`.
         boundary = hard - soft.detach() + soft
         return logits, probs, boundary
 
 
 def _seg_valid_mask(hard_boundaries, valid, num_pooled_slots):
-    """Which of downsample()'s (B, S+1) pooled slots are real segments for each
-    batch item, vs. padding slots that exist only because ANOTHER sequence in
-    this batch needed more segments. Slot 0 (the null segment, see
-    common.training.dynamic_pooling.downsample) is always real. A batch item's own real
-    segment count is exactly how many boundaries it fired among its REAL (non-
-    padding) positions -- segments are filled in order 0..count-1 with no gaps,
-    so "slot index < count" is exactly "slot is real" for that item."""
+    """Which of downsample()'s (B, S+1) pooled slots are real segments per
+    batch item vs. padding slots needed only because another sequence in the
+    batch had more segments. Slot 0 (null segment) is always real; segments
+    fill in order 0..count-1 with no gaps, so "slot index < count" means
+    "real" for that item."""
     real_segment_count = (hard_boundaries * valid).sum(dim=1, keepdim=True)  # (B, 1)
     slot_idx = torch.arange(
         num_pooled_slots - 1, device=hard_boundaries.device
@@ -232,12 +186,9 @@ def _seg_valid_mask(hard_boundaries, valid, num_pooled_slots):
 
 
 class MagnetModel(nn.Module):
-    """See module docstring for the full architecture description. One forward
-    call handles a single script's sub-batch (see train.py's MagnetTrainer for
-    why a mixed-script training batch is split by script before calling this) --
-    the pre/shortened/post transformer stages are shared nn.Module instances
-    reused for every script's forward call; only `boundary_predictors[script]`
-    differs."""
+    """See module docstring for the architecture. One forward call handles a
+    single script's sub-batch; pre/shortened/post stages are shared nn.Module
+    instances across scripts, only `boundary_predictors[script]` differs."""
 
     def __init__(
         self,
@@ -259,8 +210,8 @@ class MagnetModel(nn.Module):
 
         self.byte_embed = nn.Embedding(vocab_size, d_model)
         self.pos_embed = nn.Embedding(max_len, d_model)  # plain learned absolute
-        # position embedding -- see module docstring's "positional encoding"
-        # simplification for why this isn't the reference's relative attention
+        # position embedding, not the reference's relative attention (see
+        # module docstring's "positional encoding" simplification)
 
         self.pre_layers = nn.ModuleList(
             [
@@ -269,10 +220,9 @@ class MagnetModel(nn.Module):
             ]
         )
 
-        # One predictor per SCRIPT (see module docstring point 3) -- ModuleDict
-        # keys are fixed at construction time (scripts must be known up front,
-        # since adding a key later would need a fresh optimizer to see the new
-        # parameters).
+        # One predictor per SCRIPT (see module docstring point 3). ModuleDict
+        # keys are fixed at construction; scripts must be known up front since
+        # adding a key later would need a fresh optimizer to see the new params.
         self.boundary_predictors = nn.ModuleDict(
             {
                 script: BoundaryPredictor(d_model, temperature=boundary_temperature)
@@ -281,10 +231,9 @@ class MagnetModel(nn.Module):
         )
 
         self.null_segment = nn.Parameter(torch.randn(1, 1, d_model) * 0.02)
-        self.down_ln = nn.LayerNorm(d_model)  # normalize pooled segment reps before
-        # the shortened stage -- pooling changes the activation scale (mean of a
-        # variable number of vectors), LayerNorm re-stabilizes it; the reference
-        # implementation does the same (`self.down_ln` in magnet.py) at the same spot.
+        self.down_ln = nn.LayerNorm(d_model)  # normalizes pooled segment reps
+        # before the shortened stage -- pooling changes activation scale (mean
+        # of a variable number of vectors); matches the reference's placement.
         self.shortened_layers = nn.ModuleList(
             [
                 TransformerBlock(d_model, n_heads, d_ff, dropout)
@@ -300,21 +249,17 @@ class MagnetModel(nn.Module):
         self.output_head = nn.Linear(d_model, vocab_size)
 
     def forward(self, byte_ids, lengths, script, sample=True):
-        """byte_ids: (B, T) long, zero-padded. lengths: (B,) long, real
-        (unpadded) length of each sequence. script: str, a key of
-        self.boundary_predictors, selects which predictor governs this WHOLE
-        call (see class docstring -- a mixed-script batch must be split by
-        script by the caller before this is invoked). sample: see
+        """byte_ids: (B, T) long, zero-padded. lengths: (B,) real length per
+        sequence. script: key of self.boundary_predictors governing this whole
+        call (caller must split mixed-script batches first). sample: see
         BoundaryPredictor.forward.
 
         Returns (logits, boundary_probs, hard_boundaries, key_padding_mask):
-          logits: (B, T, vocab_size) -- byte prediction logits, NOT yet shifted
-            (train.py's caller does the next-byte shift itself).
-          boundary_probs: (B, T) -- pre-hardening sigmoid probabilities, for
-            logging/diagnostics only (not used in any loss).
-          hard_boundaries: (B, T) -- straight-through 0/1 boundary decisions,
-            used directly by train.py's boundary-rate loss and by
-            fairtok.policy.spans_from_boundaries for vocabulary harvesting.
+          logits: (B, T, vocab_size), not yet shifted (caller shifts for
+            next-byte prediction).
+          boundary_probs: pre-hardening probabilities, diagnostics only.
+          hard_boundaries: straight-through 0/1 decisions, used by the
+            boundary-rate loss and for vocabulary harvesting.
           key_padding_mask: (B, T) bool, True = PAD.
         """
         B, T = byte_ids.shape
@@ -322,16 +267,13 @@ class MagnetModel(nn.Module):
         pos_idx = torch.arange(T, device=device)
         key_padding_mask = pos_idx[None, :] >= lengths[:, None]  # True = PAD
 
-        # clamp BEFORE indexing pos_embed, not after -- pos_idx is also used above
-        # for key_padding_mask, which needs the true (unclamped) position to compare
-        # against `lengths` correctly. Without this clamp, any sequence longer than
-        # self.max_len (1024 by default) makes T > max_len, and pos_embed(pos_idx) --
-        # an nn.Embedding(max_len, d_model) -- does an out-of-bounds gather on CUDA
-        # (a silent, uncaught index error on CPU, but a hard "vectorized_gather_kernel
-        # index out of bounds" device-side assert on GPU, reported asynchronously
-        # at the next synchronizing call, which made it look like the CRASH SITE was
-        # somewhere unrelated further down the model). flexitokens/model.py's
-        # TransformerStage.forward already guards this exact case the same way.
+        # Clamp is applied to a copy, not pos_idx itself: pos_idx is also used
+        # above for key_padding_mask, which needs the true (unclamped)
+        # position. Without this clamp, T > max_len (1024 default) makes
+        # pos_embed's gather go out of bounds -- silently wrong on CPU, a
+        # device-side assert on GPU (reported async at the next sync point,
+        # misleadingly pointing elsewhere). Same guard in flexitokens/model.py's
+        # TransformerStage.forward.
         clamped_pos_idx = pos_idx.clamp(max=self.max_len - 1)
         x = self.byte_embed(byte_ids) + self.pos_embed(clamped_pos_idx)[None, :, :]
         for layer in self.pre_layers:
@@ -340,13 +282,11 @@ class MagnetModel(nn.Module):
         boundary_logits, boundary_probs, hard_boundaries = self.boundary_predictors[
             script
         ](x, sample=sample)
-        # Padded positions must never register as boundaries -- a phantom cut
-        # inside the padding region would corrupt the segment ids computed below
-        # (scatter/gather indices), and would double-count in the boundary-rate
-        # loss (which sums hard_boundaries per sequence). Multiplying by the
-        # valid mask AFTER the straight-through construction keeps the gradient
-        # path to boundary_logits intact for the real positions while making the
-        # forward value exactly 0 in the pad region.
+        # Padded positions must never register as boundaries (would corrupt
+        # segment ids and inflate the boundary-rate loss). Multiplying by the
+        # valid mask AFTER the straight-through construction keeps gradient
+        # flow to boundary_logits for real positions while zeroing the
+        # forward value in pad.
         valid = (~key_padding_mask).float()
         hard_boundaries = hard_boundaries * valid
 

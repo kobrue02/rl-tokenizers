@@ -1,16 +1,14 @@
-"""Held-out evaluation for a trained MAGNET checkpoint -- mirrors fairtok/evaluate.py's
-shape; see that module's docstring for the BOUQuET-as-held-out-set rationale.
+"""Held-out evaluation for a trained MAGNET checkpoint -- mirrors
+fairtok/evaluate.py's shape (see that module for the BOUQuET-as-held-out-set
+rationale).
 
-MAGNET's induce_spans needs an extra `script` argument per language (its boundary
-predictor is per-SCRIPT, not per-language -- see magnet/segment.py, magnet/train.py's
-lang_to_script), which is the one real difference from fairtok/flexitokens/manta's
-own evaluate.py here. BOUQuET's langs="all" mode keys groups by full lang_Script
-stem (e.g. "arz_Arab"), which lang_to_script's LANG_SCRIPT lookup can't resolve
-(only plain codes like "arz") -- eval_lang_to_script handles that; synthetic data
-still uses plain (if fake) profile names, so build_induce_fn_by_lang picks the
-resolver based on --eval-data-source rather than guessing from string shape (see
-eval_lang_to_script's own docstring for why that guess would be unsafe: "high_resource"
-also contains an underscore but isn't a real stem).
+MAGNET's induce_spans needs an extra `script` per language (its boundary
+predictor is per-SCRIPT, not per-language). BOUQuET's langs="all" mode keys
+groups by full lang_Script stem (e.g. "arz_Arab"), which lang_to_script's
+LANG_SCRIPT lookup can't resolve -- eval_lang_to_script handles that;
+synthetic data uses plain profile names instead, so build_induce_fn_by_lang
+picks the resolver from --eval-data-source rather than guessing from string
+shape (guessing is unsafe: "high_resource" also has an underscore).
 """
 
 from common.eval.cross_tokenizer import run_eval_cli
@@ -21,10 +19,9 @@ from .train import eval_lang_to_script, lang_to_script
 
 
 def build_induce_fn_by_lang(model, sequences_by_lang, args):
-    # Languages whose SCRIPT this checkpoint never saw during training have no
-    # entry in model.boundary_predictors -- skip them rather than erroring, same
-    # policy as common.eval.cross_tokenizer.evaluate_on_groups already applies to
-    # languages missing from induce_fn_by_lang entirely.
+    # Languages whose script this checkpoint never saw have no entry in
+    # model.boundary_predictors -- skip rather than error, same policy
+    # evaluate_on_groups applies to languages missing from induce_fn_by_lang.
     script_of = lang_to_script if args.eval_data_source == "synthetic" else eval_lang_to_script
     return {
         lang: (

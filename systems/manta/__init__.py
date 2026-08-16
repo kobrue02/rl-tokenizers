@@ -1,8 +1,7 @@
-"""MANTa-style gradient-based neural tokenizer baseline (see manta.model's
-module docstring for the architecture, citations, and every deviation from
-the original paper). Sibling package to fairtok/ -- imports FROM fairtok
-(data loaders, metrics, vocab extraction, byte<->tensor helpers), never the
-reverse, and never edits anything under fairtok/.
+"""MANTa-style gradient-based neural tokenizer baseline (see manta.model for
+architecture/citations). Sibling of fairtok/: imports from it (data loaders,
+metrics, vocab, byte<->tensor helpers) but never the reverse, and never edits
+fairtok/.
 """
 
 from .model import MantaModel, MantaOutput, next_byte_loss

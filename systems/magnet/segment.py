@@ -1,12 +1,9 @@
 """Deterministic boundary/span induction for a trained MagnetModel.
 
 Thresholds the boundary probability at 0.5 (no Gumbel-sigmoid sampling) --
-matches fairtok.policy.segment_bytes's own `deterministic=True` inference
-convention, for the same reason: a frozen model should induce the same
-tokenization every time it's asked to segment the same input, not a fresh
-stochastic draw each call. See MagnetModel.forward's `sample` flag / model.py's
-BoundaryPredictor.forward docstring for how sample=False turns off sampling
-inside the model itself.
+matches fairtok.policy.segment_bytes's `deterministic=True` convention, so a
+frozen model always induces the same tokenization for the same input. See
+BoundaryPredictor.forward for how sample=False disables sampling internally.
 """
 
 import torch
@@ -16,11 +13,10 @@ from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
 @torch.no_grad()
 def induce_boundaries(model, byte_seq, script, device="cpu"):
-    """byte_seq: a 1-D LongTensor of byte ids, or a str/bytes (UTF-8 encoded on
-    the fly via common.bytes_utils.bytes_to_tensor). Returns a list[int] of 0/1
-    boundary decisions, one per byte position -- exactly the format
-    common.bytes_utils.spans_from_boundaries expects, so it can be passed straight
-    through (see induce_spans below, which does exactly that)."""
+    """byte_seq: 1-D LongTensor of byte ids, or str/bytes (UTF-8 encoded via
+    common.bytes_utils.bytes_to_tensor). Returns a list[int] of 0/1 boundary
+    decisions, one per byte position -- the format spans_from_boundaries
+    expects."""
     if isinstance(byte_seq, (bytes, str)):
         byte_seq = bytes_to_tensor(byte_seq, device)
 
@@ -31,18 +27,15 @@ def induce_boundaries(model, byte_seq, script, device="cpu"):
     _, _, hard_boundaries, _ = model(ids, lengths, script, sample=False)
     model.train(was_training)
 
-    # hard_boundaries is exactly 0.0/1.0 here (sample=False -> no Gumbel noise,
-    # and under torch.no_grad() the straight-through "+ soft - soft.detach()"
-    # terms cancel exactly) -- .round() is a defensive no-op against floating
-    # point noise, not something expected to ever change a value.
+    # hard_boundaries is already exactly 0.0/1.0 (sample=False, no_grad cancels
+    # the straight-through terms exactly); .round() is a defensive no-op.
     return [int(v) for v in hard_boundaries[0, : lengths[0]].round().tolist()]
 
 
 def induce_spans(model, byte_seq, script, device="cpu"):
-    """Induced boundaries -> byte spans, reusing common.bytes_utils.spans_from_boundaries
-    unchanged -- this is what makes a MAGNET-tokenized corpus a drop-in input to
-    every existing fairtok tool (vocab.py's frequency-table builders,
-    metrics.py's compression/fairness metrics) with zero adapter code."""
+    """Induced boundaries -> byte spans via spans_from_boundaries, unchanged --
+    makes MAGNET output a drop-in input to fairtok's vocab/metrics tooling
+    with zero adapter code."""
     if isinstance(byte_seq, (bytes, str)):
         byte_tensor = bytes_to_tensor(byte_seq, device)
     else:

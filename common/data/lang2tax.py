@@ -1,46 +1,36 @@
 """Maps this project's lang_Script codes to Joshi et al.'s 6-level linguistic
-resource taxonomy (0 = "The Left-Behinds", ..., 5 = "The Winners" -- see "The
-State and Fate of Linguistic Diversity and Inclusion in the NLP World",
-Joshi et al. 2020), via Microsoft's published lang2tax.txt:
+resource taxonomy (0 = "The Left-Behinds", ..., 5 = "The Winners" -- Joshi
+et al. 2020, "The State and Fate of Linguistic Diversity and Inclusion in
+the NLP World"), via Microsoft's published lang2tax.txt (cached here
+verbatim, 2485 lines):
 https://microsoft.github.io/linguisticdiversity/assets/lang2tax.txt
 
-lang2tax.txt (cached here as lang2tax.txt, fetched verbatim, 2485 lines) maps
-plain lowercase English language NAMES to a resource level 0-5 -- NOT ISO
-codes -- so bridging it to our lang_Script codes requires a name lookup
-(via langcodes, CLDR-backed) plus alias handling, since ISO 639-3's own
-canonical name for a code frequently differs from the common glottonym
-Joshi et al. used (e.g. ISO calls kal "Kalaallisut", Joshi's file has
-"greenlandic"; ISO calls nya "Nyanja", Joshi's file has "chichewa").
+lang2tax.txt maps plain lowercase English language NAMES to a resource
+level 0-5 -- NOT ISO codes -- so bridging it to our lang_Script codes needs
+a name lookup (via langcodes, CLDR-backed) plus alias handling, since ISO
+639-3's canonical name for a code often differs from Joshi's glottonym
+(e.g. ISO "Kalaallisut" vs. Joshi's "greenlandic").
 
-Match strategy, in order, confirmed live against all 259 BOUQuET codes this
-project actually uses (217/259 resolved automatically + explicit overrides
-below for cases with NO derivable automatic match, verified individually
-against the real file before being added -- not guessed):
+Match strategy, in order (resolves 217/259 BOUQuET codes this project
+uses automatically):
   1. Exact match on the langcodes display name (lowercased, "(individual
      language)" clarifier stripped).
-  2. The same name with hyphens/apostrophes/diacritics normalized away
-     (langcodes' "Kara-Kalpak" vs the file's "karakalpak").
-  3. A qualifier word (standard/western/eastern/northern/southern/central/
-     coastal/north/south/east/west/upper/lower/greater) stripped from the
-     front, OR just the first or last word alone -- covers most ISO
-     "<region> <language>" dialect names against Joshi's bare language name
-     (e.g. "Western Frisian" -> "frisian", "Mandarin Chinese" -> "mandarin").
-_MANUAL_ALIASES below covers the remainder: codes where the ISO name and
-Joshi's glottonym share no derivable substring at all (e.g. "Ika" for the
-Arhuaco language, "Jingpho" for Kachin), each verified via a direct grep
-against lang2tax.txt before being added, plus two upgrades from an
-accurate-but-generic automatic match to a more specific one Joshi's file
-also has at a DIFFERENT level (kmr/ckb resolve to bare "kurdish"=0
-automatically, but Joshi's file separately lists "kurdish (kurmanji)"=1 and
-"kurdish (sorani)"=1 -- the dialect-specific entries are more accurate for
-these codes specifically than the generic fallback).
+  2. The same name with hyphens/apostrophes/diacritics normalized away.
+  3. A qualifier word (standard/western/eastern/.../upper/lower/greater)
+     stripped from the front, OR just the first or last word alone (e.g.
+     "Western Frisian" -> "frisian", "Mandarin Chinese" -> "mandarin").
+_MANUAL_ALIASES covers the remainder: codes where the ISO name and Joshi's
+glottonym share no derivable substring at all (e.g. "Ika" for Arhuaco,
+"Jingpho" for Kachin), each verified against lang2tax.txt before being
+added, plus two upgrades from an accurate-but-generic automatic match to a
+more specific entry Joshi's file also has at a DIFFERENT level (kmr/ckb
+resolve to bare "kurdish"=0 automatically, but "kurdish (kurmanji)"=1 and
+"kurdish (sorani)"=1 are more accurate for those codes specifically).
 
-The remaining ~42/259 codes (mostly very low-resource languages -- Chhattisgarhi,
-Dogon-family varieties, Purepecha, Kekchí, ...) are NOT in Joshi's 2483-entry
-taxonomy at all -- a real coverage gap in that external resource, not a
-mapping failure here. load_resource_levels() reports these explicitly rather
-than silently dropping them; callers decide whether to exclude them or treat
-them as missing data.
+The remaining ~42/259 codes (mostly very low-resource languages) are NOT in
+Joshi's taxonomy at all -- a real coverage gap in that external resource.
+load_resource_levels() reports these explicitly rather than silently
+dropping them.
 """
 
 import os
@@ -56,10 +46,9 @@ _QUALIFIERS = {
     "coastal", "north", "south", "east", "west", "upper", "lower", "greater",
 }
 
-# Verified individually against lang2tax.txt (grep, not guessed) -- see
-# module docstring for which fall into "no derivable automatic match" vs.
-# "a more specific entry exists at a different level than the automatic
-# generic fallback".
+# Verified individually against lang2tax.txt -- see module docstring for
+# which have no derivable automatic match vs. which override a generic
+# automatic match with a more specific one.
 _MANUAL_ALIASES = {
     "ben_Beng": "bengali", "ben_Latn": "bengali",
     "pan_Guru": "eastern punjabi",
@@ -95,11 +84,10 @@ def _load_tax(_cache={}):
             name = name.strip().lower()
             level = int(level)
             _cache[name] = level
-            # A handful of the file's own entries are themselves
-            # parenthesized ("norwegian (nynorsk)", "kurdish (kurmanji)")
-            # -- register the paren-stripped ("norwegian nynorsk") form too,
-            # but never LET it override an already-distinct entry (bare
-            # "kurdish" is its own real, differently-leveled entry).
+            # A few entries are themselves parenthesized ("norwegian
+            # (nynorsk)") -- register the paren-stripped form too, but never
+            # let it override an already-distinct entry (bare "kurdish" is
+            # its own separately-leveled entry).
             if "(" in name:
                 stripped = re.sub(r"[()]", "", name)
                 stripped = re.sub(r"\s+", " ", stripped).strip()
@@ -115,17 +103,13 @@ def _normalize(s):
 
 
 def _candidates(name):
-    """Returns candidate lookup keys in EXPLICIT, deterministic priority
-    order (most-specific first) -- confirmed live that returning a set here
-    instead is a real bug: set iteration order depends on Python's
-    per-process string-hash randomization (PYTHONHASHSEED), so whenever two
-    candidates both happened to be valid (but differently-leveled) tax-file
-    entries, which one won was non-deterministic across separate process
-    runs -- reproduced directly (three separate invocations of the same
-    resolution logic over the same 259 codes gave three different resource-
-    level distributions). A plain list, order-preserving and de-duplicated,
-    fixes this: always prefer the fullest/most specific name form, only
-    falling back to single-word grabs last."""
+    """Returns candidate lookup keys in explicit, deterministic priority
+    order (most specific first) -- returning a set here instead is a real
+    bug: set iteration order depends on PYTHONHASHSEED, so when two
+    candidates were both valid but differently-leveled tax-file entries,
+    which one won was non-deterministic across process runs (reproduced
+    directly: repeated runs over the same 259 codes gave different
+    resource-level distributions)."""
     name = re.sub(r"\(.*?\)", "", name.lower()).strip()
     normalized = _normalize(name)
     ordered = [name, normalized]

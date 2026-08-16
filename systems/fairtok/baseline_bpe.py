@@ -1,12 +1,8 @@
-"""Plain byte-level BPE, trained from scratch on raw byte sequences.
+"""Plain byte-level BPE baseline, trained from scratch on raw byte sequences.
 
-This is the control every comparison needs. It's a minimal from-scratch
-implementation (not HuggingFace `tokenizers`) because the synthetic corpus in
-data.py is raw byte values, not valid UTF-8 text -- HF's ByteLevel pre-tokenizer
-re-encodes strings as UTF-8 bytes internally, which breaks the 1:1 correspondence
-with our raw bytes for values >127. Once real text corpora (FLORES+ etc.) are
-wired in, this can be swapped for HuggingFace `tokenizers`, where that mismatch
-doesn't arise.
+Not HuggingFace `tokenizers`: HF's ByteLevel pre-tokenizer re-encodes strings as
+UTF-8 internally, which breaks the 1:1 byte correspondence our synthetic (non-UTF-8)
+corpus needs for values >127. Swap in HF `tokenizers` once real text corpora are wired in.
 """
 
 from collections import Counter
@@ -35,9 +31,8 @@ def train_byte_bpe(byte_sequences, vocab_size):
     next_id = 256
     merges = []
 
-    # Naive from-scratch trainer: rescans every sequence on every merge, so this
-    # is O(vocab_size * corpus_size) -- fine for a few thousand sample sentences
-    # (see _plain_bpe_target_rate's sampling), NOT fine over a full real corpus.
+    # O(vocab_size * corpus_size): rescans every sequence on every merge. Fine for a
+    # few thousand sample sentences (see _plain_bpe_target_rate), not for a full corpus.
     pbar = tqdm(
         total=vocab_size - 256, desc="plain-BPE baseline (merges)", unit="merge"
     )

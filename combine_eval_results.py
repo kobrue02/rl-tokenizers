@@ -1,18 +1,9 @@
 """Merges multiple systems/*/evaluate.py --output JSON result files into one
-combined comparison -- e.g. systems/hf_frontier/evaluate.py's own
-results/hf_frontier_comparison.json (renyi/gini/compression/fertility/
-token_parity per repo) and systems/claude_tokenizer/evaluate.py's own
-results/claude_comparison.json (compression/fertility/token_parity only --
-see that module's own docstring for why renyi/gini aren't available for it).
-
-This works as a plain dict merge, keyed by tokenizer/model name, because
-every source already writes this SAME per-tokenizer results shape (see
-common.eval.cross_tokenizer.evaluate_on_groups's own docstring) -- nothing
-here reformats or recomputes anything, it just combines files that already
-agree on shape. Warns (doesn't silently drop) on a name collision between
-input files, and reports which combined entries lack renyi/gini so a
-downstream consumer (e.g. a dashboard) doesn't mistake a genuinely
-unavailable metric for a zero/perfect one.
+combined comparison, keyed by tokenizer/model name -- a plain dict merge, since
+every source already writes the same per-tokenizer results shape. Warns (doesn't
+silently drop) on name collisions between input files, and reports which combined
+entries lack renyi/gini (some sources, e.g. claude_tokenizer, genuinely can't
+compute them) so a downstream consumer doesn't mistake that for zero/perfect.
 
 Usage:
     python3 combine_eval_results.py \\
@@ -45,11 +36,9 @@ def combine_results(paths):
             combined[key] = value
             sources_by_key[key] = path
 
-    # A key can be recorded as "_failed" in one input file (e.g. an earlier,
-    # buggy run) and appear as a real successful entry in another (e.g. a
-    # later re-run of just that one model) -- regardless of which file came
-    # first, a genuine success anywhere must win, or downstream consumers
-    # see the same model listed as both successful and failed at once.
+    # A key can be "_failed" in one file and a real success in another (e.g. a
+    # re-run of just that model) -- success anywhere must win, or a model ends
+    # up listed as both successful and failed.
     stale_failures = [k for k in failed if k in combined]
     for key in stale_failures:
         del failed[key]

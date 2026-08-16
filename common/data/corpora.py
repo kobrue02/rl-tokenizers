@@ -1,102 +1,63 @@
 """Single registry of every text corpus this project draws on for TRAINING
-(as opposed to common.data.oldi_data's own BOUQuET dev/test, which stays a
-dedicated held-out-evaluation concern, untouched here) -- used identically
-by tokenizer training (common.data.cli_data.load_groups) and LLM pretraining
-(pretraining.data_prep). One shared interface, not two separate per-purpose
-registries: every source exposes the exact same shape,
+(as opposed to common.data.oldi_data's own BOUQuET dev/test, a dedicated
+held-out-eval concern, untouched here) -- used identically by tokenizer
+training (common.data.cli_data.load_groups) and LLM pretraining
+(pretraining.data_prep). One shared interface for every source:
 
     stream_groups(source, langs=None, config=None, seed=0) -> Iterator[dict[str, str]]
 
-regardless of how differently each one is actually fetched underneath, and
-regardless of which of the two consumers is asking. Two genuinely different
-kinds of source exist, and this module is explicit about which is which
-rather than papering over it:
+Source categories:
 
-  - PARALLEL_SOURCES = {oldi_seed, flores_dev}: a group's dict has every
-    requested language's own translation of the SAME content -- see
-    common.data.oldi_data for the actual cross-lingual join logic. These already
-    need to fully materialize to compute that join, so "streaming" here
-    means "iterate an already-fully-loaded list", not lazy network
-    streaming -- stated plainly, not hidden. Both default to `langs="all"`
-    now (every language the source natively offers) -- common.data.
-    oldi_data.LANGS, a specific fixed 9-code list still used elsewhere (see
-    that module's own docstring), stays available as an explicit `--langs`
-    override, it just isn't the default here any more.
+  - PARALLEL_SOURCES = {oldi_seed, flores_dev}: a group has every requested
+    language's own translation of the SAME content (see common.data.
+    oldi_data for the join logic). These fully materialize to compute that
+    join, so "streaming" here means iterating an already-loaded list, not
+    lazy network streaming. Both default to `langs="all"`; common.data.
+    oldi_data.LANGS (a fixed 9-code list, still used elsewhere) remains
+    available as an explicit override.
   - MONOLINGUAL_SOURCES = {glot500, fineweb_edu, olmo_mix}: no cross-lingual
-    alignment exists to preserve, so every yielded group has exactly ONE
-    key. Lazily streamed from the HF Hub (datasets.load_dataset(streaming=
-    True)); when more than one language/config is requested, INTERLEAVED
-    round-robin rather than concatenated, so a downstream consumer that
-    only takes the first N groups still sees a balanced mix across
-    languages rather than all of language A followed by all of language B
-    -- confirmed this matters directly: an earlier version of this
-    interleaving (for glot500 specifically) filled language 1 to its cap
-    before touching language 2, and a --num-groups cap smaller than the
-    per-language cap silently returned only the first language.
-  - BITEXT_SOURCES = {smol, ccmatrix, un_pc, europarl, tatoeba_mt}: genuinely
-    parallel like PARALLEL_SOURCES, but each yielded group has exactly TWO
-    keys (one specific language pair), lazily streamed like
-    MONOLINGUAL_SOURCES rather than fully joined ahead of time -- `config`
-    selects WHICH pair (the source's own native config/pair naming, not
-    this project's own short codes -- see list_bitext_configs/
-    list_tatoeba_mt_pairs/list_smol_pairs), the same role `config` already
-    plays for fineweb_edu/olmo_mix. `config="all"` (or omitted) round-robins
-    every available pair for that source. smol lives here rather than in
-    PARALLEL_SOURCES despite being genuinely N-way-joinable in principle
-    (it's English-pivot bilingual pairs, structurally identical to
-    ccmatrix) -- confirmed live that intersecting IDs across its ~120
-    language pairs simultaneously doesn't work: the more languages
-    forced into one join, the smaller the surviving intersection gets,
-    exactly the bug BOUQuET eval already hit and fixed by switching to a
-    union join (see _load_bouquet_split's own docstring) -- per-pair
-    streaming sidesteps this the same way ccmatrix/un_pc/europarl/
-    tatoeba_mt already do, at the cost of each group only ever covering 2
-    languages instead of however many a training run requests. ahelk/
-    ccaligned_multilingual was investigated for this same list and
-    deliberately excluded: its HF repo only ships a deprecated Python
-    dataset-loading script, which the installed `datasets` library refuses
-    to run at all (not a trust_remote_code gate -- confirmed live, it raises
-    unconditionally), and no clean modern replacement or mirror of
-    adequate/verified completeness was found (unlike tatoeba below).
-  - STREAMED_PARALLEL_SOURCES = {bible_nlp}: like PARALLEL_SOURCES, every
-    yielded group has one key per requested language (fully joined before
-    yielding) -- but reads from a LOCAL disk cache that must be built first
-    via a one-time run of common.data.prepare_bible_nlp (which does the
-    genuinely expensive part -- scanning the ~5.2GB source file, picking one
-    canonical translation per language -- ONCE, offline, not on every
-    training run any more), rather than a small dataset this module can
-    fetch directly the way oldi_seed/flores_plus can. `langs` names an
-    arbitrary subset of the ~1000+ languages available (no "all" default,
-    even now that it's local and fast to read -- see _load_bible_nlp_local
-    for why: bible_nlp's translations don't share verse segmentation across
-    languages by construction, so intersecting too many at once risks the
-    same "collapses to almost nothing" problem BOUQuET eval hit before
-    switching to a union join).
-  - LOCAL_BITEXT_SOURCES = {indigenous_panel}: a small, DELIBERATELY curated
-    panel of Indigenous (mostly polysynthetic) language pairs for a
-    dedicated fairness comparison alongside BOUQuET -- see common.data.
-    indigenous_panel's own module docstring for the exact language list and
-    per-language provenance. Shaped like BITEXT_SOURCES (every group has
-    exactly TWO keys, `config` selects which pair), but like bible_nlp reads
-    from a LOCAL disk cache built by a one-time common.data.
-    prepare_indigenous_panel run first -- each source pair here has its own
-    bespoke access method (an HF dataset, a direct-download archive, a
-    cloned GitHub repo of line-aligned text files), unlike bible_nlp's
-    single homogeneous source, so there's no live-streaming fallback at all
-    (not even the "expensive scan every run" bible_nlp used to do). Unlike
-    bible_nlp's N-way join, no cross-language ID matching is needed here --
-    each pair's two languages are already row-aligned in their own source,
-    so the local cache stores them pre-paired, one JSONL file per pair.
+    alignment, one key per group. Lazily streamed from the HF Hub; multiple
+    languages/configs are INTERLEAVED round-robin (not concatenated) so a
+    --num-groups cap smaller than the per-language cap still sees a
+    balanced mix rather than all of language A before language B.
+  - BITEXT_SOURCES = {smol, ccmatrix, un_pc, europarl, tatoeba_mt}: parallel
+    like PARALLEL_SOURCES, but each group has exactly TWO keys (one
+    language pair), lazily streamed like MONOLINGUAL_SOURCES -- `config`
+    selects which pair (source-native naming, see list_bitext_configs/
+    list_tatoeba_mt_pairs/list_smol_pairs); "all"/omitted round-robins
+    every pair. smol lives here rather than in PARALLEL_SOURCES because
+    intersecting IDs across its ~120 pairs simultaneously collapses the
+    surviving intersection -- the same failure mode BOUQuET eval hit (fixed
+    there by a union join, see _load_bouquet_split); per-pair streaming
+    sidesteps it, at the cost of only 2 languages per group. ahelk/
+    ccaligned_multilingual was considered and excluded: its HF repo only
+    ships a deprecated loading script the installed `datasets` library
+    refuses to run, and no adequate modern mirror was found.
+  - STREAMED_PARALLEL_SOURCES = {bible_nlp}: like PARALLEL_SOURCES (one key
+    per language, fully joined before yielding), but reads from a LOCAL
+    disk cache built by a one-time common.data.prepare_bible_nlp run (which
+    does the expensive part -- scanning the ~5.2GB source, picking one
+    canonical translation per language -- once, offline). `langs` names an
+    arbitrary subset of the ~1000+ available languages (no "all" default,
+    even now that it's local: bible_nlp's translations don't share verse
+    segmentation across languages, so intersecting too many risks the same
+    "collapses to nothing" problem).
+  - LOCAL_BITEXT_SOURCES = {indigenous_panel}: a small, curated panel of
+    Indigenous (mostly polysynthetic) language pairs for a fairness
+    comparison alongside BOUQuET (see common.data.indigenous_panel).
+    Shaped like BITEXT_SOURCES, but like bible_nlp reads from a local disk
+    cache (built by common.data.prepare_indigenous_panel) since each pair
+    has its own bespoke access method with no live-streaming fallback.
+    Unlike bible_nlp, no cross-language ID join is needed -- each pair's two
+    languages are already row-aligned in their own source.
 
-A single-language group runs fine through every systems/ trainer's plain
-next-byte CE loss, but contributes nothing to any FAIRNESS loss term that
-compares languages within one batch (fanta's Gini/anchor loss, flexitokens'
+A single-language group runs fine through any trainer's plain next-byte CE
+loss, but contributes nothing to a FAIRNESS loss term that compares
+languages within a batch (fanta's Gini/anchor loss, flexitokens' boundary
 hinge loss, fairtok's group-relative reward) -- those need genuinely
 parallel content. This module draws that line by SOURCE, not by consumer:
-nothing here stops training fanta on fineweb_edu, it just won't do anything
-useful for that specific loss term if you do -- the caller's job to pick a
-source that fits what they're training, this module's job only to be
-honest about which sources can supply what.
+nothing stops training fanta on fineweb_edu, it just won't help that loss
+term.
 """
 
 import json
@@ -135,9 +96,8 @@ OLMO_MIX_CONFIGS = [
 ]
 
 # repo_id for each BITEXT_SOURCES/STREAMED_PARALLEL_SOURCES entry -- kept
-# named/together so a reader can see every external repo this module talks
-# to in one place, same convention as FINEWEB_EDU_CONFIGS/OLMO_MIX_CONFIGS
-# above.
+# together so a reader can see every external repo this module talks to in
+# one place.
 SMOL_REPO = "google/smol"
 CCMATRIX_REPO = "sentence-transformers/parallel-sentences-ccmatrix"
 UN_PC_REPO = "Helsinki-NLP/un_pc"
@@ -146,35 +106,29 @@ TATOEBA_MT_REPO = "Helsinki-NLP/tatoeba_mt"
 BIBLE_NLP_REPO = "bible-nlp/biblenlp-corpus"
 
 # ccmatrix/un_pc/europarl configs live in card_data, discovered the same way
-# list_glot500_configs discovers Glot500's; tatoeba_mt has no card_data
-# configs (it ships plain per-pair TSV files, not HF-native configs) so it
-# gets its own file-listing-based lister below instead.
+# as Glot500's; tatoeba_mt has no card_data configs (plain per-pair TSV
+# files) so it gets its own file-listing-based lister below.
 _CONFIG_BASED_BITEXT_REPOS = {"ccmatrix": CCMATRIX_REPO, "un_pc": UN_PC_REPO, "europarl": EUROPARL_REPO}
 
 
 def list_glot500_configs():
     """All ~411 Glot500 language-script config names (e.g. "eng_Latn"),
-    discovered live via the HF Hub API -- no hardcoded snapshot, the same
-    "ask the source, don't hardcode a copy of it" convention
-    common.data.oldi_data._list_all_stems already uses for oldi_seed/flores_plus."""
+    discovered live via the HF Hub API rather than a hardcoded snapshot."""
     info = HfApi().dataset_info("cis-lmu/Glot500")
     return sorted(c["config_name"] for c in info.card_data["configs"])
 
 
 def _resolve_glot500_config(lang):
-    """Accepts either a Glot500-native config name directly ("eng_Latn") or,
-    as a convenience, one of this project's own curated short codes ("eng")
-    via common.data.oldi_data.LANG_SCRIPT -- anything else passes through
-    unchanged and fails clearly at load_dataset time if it isn't a real
-    Glot500 config."""
+    """Accepts either a Glot500-native config name ("eng_Latn") or one of
+    this project's own short codes ("eng") via common.data.oldi_data.
+    LANG_SCRIPT; anything else passes through unchanged and fails at
+    load_dataset time if it isn't a real Glot500 config."""
     return LANG_SCRIPT.get(lang, lang)
 
 
 def list_bitext_configs(source):
     """Live pair-config names for ccmatrix/un_pc/europarl (e.g. "en-af",
-    "ar-en", "bg-cs") -- discovered via card_data, confirmed present for all
-    three repos, the same "ask the source, don't hardcode a copy of it"
-    convention list_glot500_configs already uses."""
+    "ar-en", "bg-cs"), discovered via card_data."""
     if source not in _CONFIG_BASED_BITEXT_REPOS:
         raise ValueError(
             f"{source!r} has no card_data configs -- choose from {sorted(_CONFIG_BASED_BITEXT_REPOS)} "
@@ -185,17 +139,12 @@ def list_bitext_configs(source):
 
 
 def list_tatoeba_mt_pairs(split="test"):
-    """Live file-listing discovery of available language pairs for one
-    tatoeba_mt split -- confirmed live this repo has no card_data configs
-    (it ships plain per-pair TSV files directly, one file per
-    split/pair: "{split}/tatoeba-{split}.{pair}.tsv"), and no "train" split
-    at all (only "dev"/"test" -- it's a held-out-sized comparison corpus,
-    not a bulk training source). Returns pair strings in the dataset's own
-    native naming (mostly ISO 639-3, occasionally with a "_Script" suffix
-    like "ber_Latn" mirroring this project's own Glot500-style stems, and a
-    handful of non-ISO codes like "toki" for Toki Pona -- confirmed live,
-    not guessed -- so pairs are opaque strings here, not validated against
-    LANG_SCRIPT/LANGS)."""
+    """Live file-listing discovery of available pairs for one tatoeba_mt
+    split -- this repo has no card_data configs, just per-pair TSV files
+    ("{split}/tatoeba-{split}.{pair}.tsv"), and no "train" split (only
+    dev/test). Returns pairs in the dataset's own native naming (mostly ISO
+    639-3, occasionally "_Script"-suffixed, a few non-ISO codes like "toki")
+    -- opaque strings here, not validated against LANG_SCRIPT/LANGS."""
     if split not in ("dev", "test"):
         raise ValueError(f"tatoeba_mt has no {split!r} split -- choose 'dev' or 'test'")
     prefix, suffix = f"{split}/tatoeba-{split}.", ".tsv"
@@ -204,26 +153,18 @@ def list_tatoeba_mt_pairs(split="test"):
 
 
 def list_smol_pairs():
-    """Live file-listing discovery of every language pair google/smol's own
-    smolsent/ directory offers -- confirmed live this repo also has no
-    card_data configs (plain per-pair JSONL files, "smolsent/{a}_{b}.jsonl"),
-    the same reason tatoeba_mt gets its own file-listing lister rather than
-    list_bitext_configs.
+    """Live file-listing discovery of every pair google/smol's smolsent/
+    directory offers (plain per-pair JSONL files, no card_data configs).
 
-    Confirmed live: BOTH directions of most pairs exist as separate files
-    (e.g. "af_en.jsonl" AND "en_af.jsonl" -- verified byte-for-byte identical
-    content with src/trg swapped, not independently collected data, for
-    119 of 120 pairs; "en_tig" is the one pair with no mirror). Returning
-    both would silently double-count every shared pair as two "different"
-    training sources of the exact same sentences, so this dedupes to ONE
-    canonical stem per unordered pair (whichever of the two names sorts
-    first alphabetically -- an arbitrary but deterministic and reproducible
-    tiebreak, same spirit as LANG_SCRIPT's "one canonical script" choice).
-    Not exclusively English-pivot despite the historical "smol" naming --
-    also includes a handful of Russian-pivot pairs (e.g. "abq_ru") and a
-    Cantonese/Chinese pair with its own different, non-parallel-sentence
-    row schema (see _stream_smol_single, which skips rows it can't parse
-    rather than guessing).
+    Both directions of most pairs exist as separate files (byte-for-byte
+    identical content with src/trg swapped, verified for 119 of 120 pairs;
+    "en_tig" has no mirror) -- returning both would double-count each pair,
+    so this dedupes to ONE canonical stem per unordered pair (whichever
+    name sorts first alphabetically, an arbitrary but deterministic
+    tiebreak). Not exclusively English-pivot despite the "smol" name --
+    also includes Russian-pivot pairs and one Cantonese/Chinese pair with a
+    different, non-parallel-sentence row schema (see _stream_smol_single,
+    which skips rows it can't parse).
     """
     files = HfApi().list_repo_files(SMOL_REPO, repo_type="dataset")
     prefix, suffix = "smolsent/", ".jsonl"
@@ -238,12 +179,10 @@ def list_smol_pairs():
 def _stream_smol_single(pair):
     """One pair's own JSONL rows, normalized to {lang: text} 2-key dicts --
     reads each row's own "sl"/"src"/"tl"/"trg" fields directly rather than
-    deriving the two language codes from the filename (robust to either
-    mirror direction being the one list_smol_pairs happened to keep).
-    Silently skips rows missing "trg" (confirmed live: the one Cantonese/
-    Chinese pair in this dataset uses a different schema entirely --
-    "trgs": a list of references, no "id" -- rather than one sentence per
-    row; not worth a special case for a single non-parallel-sentence pair)."""
+    deriving language codes from the filename (robust to whichever mirror
+    direction list_smol_pairs kept). Silently skips rows missing "trg" (the
+    one Cantonese/Chinese pair uses a different schema -- "trgs": a list, no
+    "id" -- not worth special-casing for a single pair)."""
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(SMOL_REPO, f"smolsent/{pair}.jsonl", repo_type="dataset")
@@ -264,7 +203,7 @@ def _stream_hf(repo_id, config, split="train"):
 
 def _stream_monolingual_single(source, config_or_lang):
     """One language/config's own row stream, normalized to {lang: text}
-    dicts -- the per-source shape MONOLINGUAL_SOURCES all reduce to."""
+    dicts -- the shape MONOLINGUAL_SOURCES all reduce to."""
     if source == "glot500":
         lang = config_or_lang
         for row in _stream_hf("cis-lmu/Glot500", _resolve_glot500_config(lang)):
@@ -277,10 +216,8 @@ def _stream_monolingual_single(source, config_or_lang):
         for row in _stream_hf("HuggingFaceFW/fineweb-edu", config):
             if row.get("text"):
                 # FineWeb-Edu is primarily English web text (filtered for
-                # educational quality) -- "eng" here reflects that, not a
-                # per-row language detection (the dataset DOES carry its
-                # own "language" column, used for its own QA filtering, but
-                # this module doesn't re-check it per row).
+                # educational quality) -- "eng" reflects that, not a
+                # per-row language detection.
                 yield {"eng": row["text"]}
     elif source == "olmo_mix":
         config = config_or_lang or "default"
@@ -289,9 +226,8 @@ def _stream_monolingual_single(source, config_or_lang):
         for row in _stream_hf("allenai/olmo-mix-1124", config):
             if row.get("text"):
                 # Predominantly English, but unlike fineweb_edu this is a
-                # SIMPLIFICATION, not a verified per-row claim -- OLMo-mix
-                # has no reliable per-row language field across all 8
-                # configs to check against.
+                # simplification, not a verified per-row claim -- OLMo-mix
+                # has no reliable per-row language field to check.
                 yield {"eng": row["text"]}
     else:
         raise ValueError(f"{source!r} is not a monolingual source")
@@ -299,12 +235,11 @@ def _stream_monolingual_single(source, config_or_lang):
 
 def _stream_bitext_single(source, config):
     """One pair-config's own row stream for ccmatrix/un_pc/europarl,
-    normalized to {lang: text} 2-key dicts -- confirmed live per source:
-    ccmatrix's own columns are always the generic "english"/"non_english"
-    regardless of config (the actual non-English code has to come from the
-    config name itself, e.g. "en-af" -> "af"); un_pc/europarl both already
-    yield a {translation: {code1: text1, code2: text2}} row keyed by the
-    real pair codes, so `row["translation"]` IS the group, unchanged."""
+    normalized to {lang: text} 2-key dicts. ccmatrix's own columns are
+    always the generic "english"/"non_english" regardless of config (the
+    non-English code comes from the config name, e.g. "en-af" -> "af");
+    un_pc/europarl already yield a {translation: {code1: text1, code2:
+    text2}} row, so `row["translation"]` IS the group, unchanged."""
     if source == "ccmatrix":
         _, other = config.split("-", 1)
         for row in _stream_hf(CCMATRIX_REPO, config):
@@ -322,15 +257,11 @@ def _stream_bitext_single(source, config):
 
 
 def _parse_tatoeba_mt_config(config):
-    """tatoeba_mt has no card_data configs (see list_tatoeba_mt_pairs), so
-    its own `config` string is a small "{split}/{pair-or-all}" DSL instead
-    of a bare HF config name -- e.g. "test/deu-eng", "dev/all", or bare
-    "all" (defaults to split "test", the larger of the two and the
-    convention this project already uses elsewhere for held-out-style
-    splits treated as a plain training source -- see flores_dev's own
-    "dev is for training, devtest is reserved" split discipline; tatoeba_mt
-    has no "train" split at all so this doesn't create any actual eval
-    leakage, nothing else in this project reads tatoeba_mt as held-out)."""
+    """tatoeba_mt has no card_data configs, so its `config` is a small
+    "{split}/{pair-or-all}" DSL instead of a bare HF config name -- e.g.
+    "test/deu-eng", "dev/all", or bare "all" (defaults to split "test", the
+    larger split; tatoeba_mt has no "train" split so this creates no eval
+    leakage)."""
     if config is None or config == "all":
         return "test", "all"
     if "/" not in config:
@@ -343,9 +274,9 @@ def _parse_tatoeba_mt_config(config):
 
 def _stream_tatoeba_mt_single(split, pair):
     """One pair's own TSV rows, normalized to {lang: text} 2-key dicts.
-    Trusts each row's own embedded language codes (columns 1/2) over
-    re-deriving them from the filename -- confirmed live these always
-    agree, but the row is the ground truth if they ever didn't."""
+    Trusts each row's own embedded language codes over re-deriving them
+    from the filename (they always agree in practice, but the row is
+    ground truth if they ever didn't)."""
     from huggingface_hub import hf_hub_download
 
     path = hf_hub_download(TATOEBA_MT_REPO, f"{split}/tatoeba-{split}.{pair}.tsv", repo_type="dataset")
@@ -361,32 +292,23 @@ def _stream_tatoeba_mt_single(split, pair):
 
 BIBLE_NLP_LOCAL_DIR = "data/bible_nlp"  # default local disk cache -- see
 # common.data.prepare_bible_nlp, which must be run once before this source
-# is usable at all (no live fallback -- see _load_bible_nlp_local).
+# is usable (no live fallback -- see _load_bible_nlp_local).
 
 
 def _load_bible_nlp_local(output_dir, langs):
     """Local disk N-way intersect-by-id join across `langs`, reading the
-    per-language JSONL files common.data.prepare_bible_nlp already wrote --
-    the exact same {"id": ..., "text": ...} per-line shape common.data.
-    oldi_data._load_ngram_parallel's own oldi_seed/flores_plus files use, so
-    this is an ordinary local join, not a live remote scan any more (that
-    expensive full-file scan now happens ONCE, in the prep script, not on
-    every training run -- see that module's own docstring for why, and for
-    the canonical-translation-per-language choice already baked into these
-    files).
+    per-language JSONL files common.data.prepare_bible_nlp already wrote
+    (same {"id":..., "text":...} shape oldi_seed/flores_plus use) -- an
+    ordinary local join now, not a live remote scan (the expensive
+    full-file scan happens once in the prep script; see that module's
+    docstring for the canonical-translation-per-language choice).
 
-    Still requires an explicit, SMALL `langs` list (no "all" default) even
-    though the data is now local and fast to read: bible_nlp's various
-    translations don't share verse segmentation across languages by
-    construction the way oldi_seed/flores_plus do, so intersecting many
-    languages at once risks the exact same "collapses to almost nothing"
-    problem BOUQuET eval hit before switching to a union join (see
-    common.data.oldi_data._load_bouquet_split's own docstring) -- this
-    module doesn't attempt that fix here since, unlike BOUQuET eval, TRAINING
-    genuinely needs an N-way intersection (see corpora.py's own module
-    docstring on why PARALLEL_SOURCES groups must be aligned parallel
-    content), so the real mitigation is "ask for few languages at a time",
-    not a different join strategy.
+    Still requires an explicit, SMALL `langs` list (no "all" default):
+    bible_nlp translations don't share verse segmentation across
+    languages, so intersecting many at once risks the same "collapses to
+    almost nothing" problem BOUQuET eval hit (see _load_bouquet_split) --
+    training genuinely needs an N-way intersection, so the mitigation here
+    is "ask for few languages," not a different join strategy.
     """
     if not os.path.isdir(output_dir):
         raise ValueError(
@@ -422,18 +344,16 @@ def _stream_bible_nlp(langs, output_dir=None):
 
 INDIGENOUS_PANEL_LOCAL_DIR = "data/indigenous_panel"  # default local disk
 # cache -- see common.data.prepare_indigenous_panel, which must be run once
-# before this source is usable at all. No live fallback (not even
-# bible_nlp's "expensive scan every run" one): every pair in this panel has
-# its own bespoke access method (see common.data.indigenous_panel.PAIRS),
-# so there's no single live source this module could stream from directly.
+# before this source is usable. No live fallback: every pair here has its
+# own bespoke access method (see common.data.indigenous_panel.PAIRS), so
+# there's no single live source to stream from directly.
 
 
 def list_indigenous_panel_pairs(output_dir=None):
     """Every pair-code (e.g. "crk-en") that ACTUALLY has locally prepared
-    data right now -- reads the directory listing, not common.data.
-    indigenous_panel.PAIRS's full intended manifest, since prepare_
-    indigenous_panel may have been run with --pairs to prepare only some of
-    them so far."""
+    data right now -- reads the directory listing, not PAIRS's full
+    intended manifest, since prepare_indigenous_panel may have been run
+    with --pairs for only some of them."""
     output_dir = output_dir or INDIGENOUS_PANEL_LOCAL_DIR
     if not os.path.isdir(output_dir):
         return []
@@ -445,8 +365,8 @@ def list_indigenous_panel_pairs(output_dir=None):
 def _stream_indigenous_panel_single(pair, output_dir=None):
     """Reads one pair's already-row-aligned {lang_a: text, lang_b: text}
     JSONL file directly -- unlike bible_nlp, no cross-language ID join is
-    needed here (each pair's two languages come pre-aligned from their own
-    source; see common.data.prepare_indigenous_panel)."""
+    needed (each pair's two languages come pre-aligned from their own
+    source)."""
     output_dir = output_dir or INDIGENOUS_PANEL_LOCAL_DIR
     path = os.path.join(output_dir, f"{pair}.jsonl")
     if not os.path.exists(path):
@@ -464,9 +384,8 @@ def _stream_indigenous_panel_single(pair, output_dir=None):
 
 def _round_robin(iterators):
     """Cycles through `iterators` one item at a time, dropping any that
-    exhaust, until all are exhausted -- what makes multi-language requests
-    an interleaved, balanced mix rather than a sequential concatenation
-    (see module docstring)."""
+    exhaust, until all are exhausted -- makes multi-language requests an
+    interleaved, balanced mix rather than a sequential concatenation."""
     active = list(iterators)
     while active:
         for it in list(active):
@@ -482,32 +401,22 @@ def stream_groups(source, langs=None, config=None, seed=0):
 
     source: one of ALL_SOURCES.
     langs: language codes for synthetic/oldi_seed/flores_dev/glot500 --
-    defaults to "all" (every language the source natively offers) for
-    oldi_seed/flores_dev/glot500 when omitted; synthetic defaults to its own
-    small fake profile set instead. Also an arbitrary (small -- see
-    _load_bible_nlp_local) language subset for bible_nlp
-    (STREAMED_PARALLEL_SOURCES, no "all" default even now that it's disk-
-    cached -- see _stream_bible_nlp); `config` optionally overrides
-    bible_nlp's own local disk cache directory (default BIBLE_NLP_LOCAL_DIR,
-    "data/bible_nlp" -- see common.data.prepare_bible_nlp, which must be run
-    once before this source is usable at all). Ignored for fineweb_edu/olmo_mix and every
-    BITEXT_SOURCES entry, which select what they load via `config` instead:
-    an HF config name for fineweb_edu/olmo_mix (see FINEWEB_EDU_CONFIGS/
-    OLMO_MIX_CONFIGS), a native pair name or "all"/omitted for smol/
-    ccmatrix/un_pc/europarl (see list_smol_pairs/list_bitext_configs), or a
-    "{split}/{pair-or-all}" string or bare "all"/omitted for tatoeba_mt (see
-    _parse_tatoeba_mt_config/list_tatoeba_mt_pairs), or a pair-code or bare
-    "all"/omitted for indigenous_panel (see list_indigenous_panel_pairs;
-    same round-robin-over-pairs shape as smol/ccmatrix/un_pc/europarl, just
-    reading from a local disk cache instead of live HF streaming -- see
-    common.data.indigenous_panel's own module docstring for the panel
-    itself and common.data.prepare_indigenous_panel for the required
-    one-time prep step).
+    defaults to "all" for oldi_seed/flores_dev/glot500 when omitted;
+    synthetic defaults to its own fake profile set. Also an arbitrary
+    (small) language subset for bible_nlp (no "all" default -- see
+    _stream_bible_nlp); `config` optionally overrides bible_nlp's local
+    disk cache directory (default BIBLE_NLP_LOCAL_DIR). Ignored for
+    fineweb_edu/olmo_mix and BITEXT_SOURCES, which select what they load
+    via `config` instead: an HF config name for fineweb_edu/olmo_mix, a
+    native pair name or "all"/omitted for smol/ccmatrix/un_pc/europarl, a
+    "{split}/{pair-or-all}" string or "all"/omitted for tatoeba_mt, or a
+    pair-code or "all"/omitted for indigenous_panel (same round-robin-
+    over-pairs shape, reading from a local disk cache instead of live HF
+    streaming).
 
     Returns an iterator of {lang: text} dicts -- multi-key for
     PARALLEL_SOURCES/STREAMED_PARALLEL_SOURCES, 2-key for BITEXT_SOURCES/
-    LOCAL_BITEXT_SOURCES, single-key for everything else (see module
-    docstring).
+    LOCAL_BITEXT_SOURCES, single-key for everything else.
     """
     if source == "synthetic":
         yield from make_synthetic_parallel_groups(

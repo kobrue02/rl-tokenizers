@@ -1,24 +1,20 @@
 """One-time local prep for common.data.indigenous_panel's curated pair
-manifest -- see that module's own docstring for the panel itself and each
-pair's real, verified provenance. Each pair has its own bespoke access
-method (an HF dataset, a direct-download archive, individual files fetched
-straight from a GitHub repo), unlike bible_nlp's single homogeneous source,
-so this script is three small loaders sharing one CLI, not one generic
-downloader.
+manifest (see that module for the panel and its provenance). Each pair has
+its own bespoke access method (HF dataset, direct-download archive, or
+files fetched from GitHub), unlike bible_nlp's single homogeneous source --
+so this is three small loaders sharing one CLI, not one generic downloader.
 
 Usage (run once):
 
     python -m common.data.prepare_indigenous_panel --output-dir data/indigenous_panel
 
-Writes one "{output_dir}/{pair_code}.jsonl" per pair -- each row already the
-2-key {lang_a: text, lang_b: text} shape common.data.corpora.
-_stream_indigenous_panel_single reads directly (no per-language join
-needed at read time: every source here already row-aligns its own two
-languages, unlike bible_nlp's cross-translation verse IDs) -- and a
-combined "{output_dir}/metadata.json" (per-pair row count, source,
-license, family, morphology tag). Re-run (safe to overwrite) if any
-upstream source updates; --pairs restricts to a subset for a quicker test
-run.
+Writes one "{output_dir}/{pair_code}.jsonl" per pair (already the 2-key
+{lang_a: text, lang_b: text} shape common.data.corpora reads directly --
+every source here row-aligns its own two languages already, unlike
+bible_nlp's cross-translation verse IDs) and a combined
+"{output_dir}/metadata.json" (per-pair row count, source, license, family,
+morphology tag). Safe to re-run; --pairs restricts to a subset for a
+quicker test run.
 """
 
 import argparse
@@ -48,10 +44,10 @@ def _write_pairs_jsonl(path, rows):
 
 
 def _prepare_cree(output_dir):
-    """KonradBRG/plains-cree-figurative -- both "gold" (228, human-verified)
-    and "silver" (10,619, LLM-labeled) splits combined; the figurative-
-    language annotation columns (label/rationale/footnote_en) are unused
-    here, only text_cree/text_en matter for tokenizer fairness."""
+    """KonradBRG/plains-cree-figurative -- combines "gold" (228,
+    human-verified) and "silver" (10,619, LLM-labeled) splits. Only
+    text_cree/text_en are used; the figurative-language annotation columns
+    are ignored."""
     rows = []
     for config in ("gold", "silver"):
         ds = load_dataset(HF_CREE_REPO, config)
@@ -65,9 +61,7 @@ def _prepare_cree(output_dir):
 
 def _extract_nrc_hansard_test_split(tgz_path):
     """Split out so a test can point this at an already-downloaded local
-    .tgz instead of re-fetching ~202MB over the network every run -- the
-    extraction logic (what actually needs verifying) is identical either
-    way."""
+    .tgz instead of re-fetching ~202MB over the network every run."""
     en_member = f"{NRC_HANSARD_ARCHIVE_ROOT}/split/test.en"
     iu_member = f"{NRC_HANSARD_ARCHIVE_ROOT}/split/test.iu"
     with tarfile.open(tgz_path, "r:gz") as tar:
@@ -83,12 +77,11 @@ def _extract_nrc_hansard_test_split(tgz_path):
 
 def _prepare_inuktitut(output_dir, request_timeout=1800):
     """Nunavut Hansard Inuktitut-English Parallel Corpus 3.0.1 -- downloads
-    the full ~202MB archive to a temp file (its own Accept-Ranges support
-    isn't useful here: tar has no central directory, so extracting two
-    specific members still needs the whole stream read through), extracts
-    only the corpus's OWN held-out split/test.{en,iu} (13,082 pairs -- see
-    indigenous_panel's own docstring for why the test split, not the full
-    ~1.3M-pair training-scale corpus), then removes the temp archive."""
+    the full ~202MB archive to a temp file (tar has no central directory, so
+    extracting two members still requires reading the whole stream),
+    extracts only the held-out split/test.{en,iu} (13,082 pairs, not the
+    full ~1.3M-pair training-scale corpus), then removes the temp
+    archive."""
     with tempfile.NamedTemporaryFile(suffix=".tgz", delete=False) as tmp:
         tmp_path = tmp.name
     try:
@@ -110,13 +103,11 @@ def _prepare_inuktitut(output_dir, request_timeout=1800):
 
 
 def _prepare_americasnlp_pair(pair_code, meta, output_dir, request_timeout=60):
-    """One AmericasNLP 2021 shared-task language, fetched directly via
-    raw.githubusercontent.com (no git clone -- this repo also ships a large
-    PDF and per-language ipynb/csv files this project has no use for; a
-    full clone would pull all of that for nothing). train.{code}/train.es
-    are line-aligned -- confirmed by direct inspection of all nine of this
-    shared task's language dirs, same line count, same file naming
-    convention throughout."""
+    """One AmericasNLP 2021 shared-task language, fetched via
+    raw.githubusercontent.com rather than a git clone (the repo also ships
+    a large PDF and per-language ipynb/csv files not needed here).
+    train.{code}/train.es are line-aligned (verified across all nine of
+    this shared task's language dirs)."""
     base = f"https://raw.githubusercontent.com/{AMERICASNLP_REPO}/{AMERICASNLP_BRANCH}/data/{meta['dir']}"
     indigenous_resp = requests.get(f"{base}/train.{meta['code']}", timeout=request_timeout)
     indigenous_resp.raise_for_status()
@@ -143,9 +134,9 @@ def _prepare_americasnlp_pair(pair_code, meta, output_dir, request_timeout=60):
 
 
 def prepare_indigenous_panel(output_dir, pairs=None):
-    """pairs: subset of common.data.indigenous_panel.PAIRS's own keys to
-    prepare (default: every pair in PAIRS). Returns the metadata dict this
-    also writes to output_dir/metadata.json.
+    """pairs: subset of common.data.indigenous_panel.PAIRS's keys to prepare
+    (default: every pair). Returns the metadata dict this also writes to
+    output_dir/metadata.json.
     """
     os.makedirs(output_dir, exist_ok=True)
     pair_codes = list(pairs) if pairs else list(PAIRS)

@@ -1,8 +1,7 @@
 """CLI: apply a trained (frozen) policy checkpoint to a real corpus to build
-the final tokenizer vocabulary. Separate entry point from fairtok.cli (which
-trains the policy on the Phase 1 fairness data) -- this step needs no
-parallel groups, no reward, no gradients, just the corpus you'll actually
-pretrain the downstream LM on.
+the final tokenizer vocabulary. Separate from fairtok.cli (Phase 1 training) --
+this step needs no parallel groups, reward, or gradients, just the corpus to
+segment for the downstream LM's vocab.
 """
 
 import argparse
@@ -14,11 +13,9 @@ from .inference import build_and_save_vocab, load_checkpoint
 
 
 def _iter_corpus(path):
-    """Generic line-delimited text loader: one document per line, from a single
-    file or every .txt file in a directory. A stand-in for whatever the real
-    pretraining-corpus loader will be -- this project only has the Phase 1
-    fairness-training data wired up (see common.data.oldi_data), not the actual
-    downstream pretraining corpus, which lives outside this repo."""
+    """Line-delimited text loader: one document per line, from a single file or
+    every .txt file in a directory. Placeholder for the real pretraining-corpus
+    loader, which lives outside this repo."""
     p = Path(path)
     files = [p] if p.is_file() else sorted(f for f in p.iterdir() if f.suffix == ".txt")
     for f in files:

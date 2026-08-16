@@ -1,18 +1,17 @@
 """Fairness/efficiency metrics, implemented once and reused unchanged across every
-tokenizer in this repo (fairtok's RL policy, and the magnet/flexitokens/manta
-baselines) -- comparing them meaningfully requires scoring them all the same way.
+tokenizer in this repo (fairtok, magnet, flexitokens, manta) so comparisons score
+them all the same way.
 
 Rényi efficiency: Zouhar et al., "Tokenization and the Noiseless Channel" (ACL 2023).
-Gini coefficient: Foroutan et al., "Parity-aware Byte-Pair Encoding" (2025), Eq. 5 -- the
-closed form here is algebraically identical to theirs (derived independently, then checked).
+Gini coefficient: Foroutan et al., "Parity-aware Byte-Pair Encoding" (2025), Eq. 5
+(closed form here derived independently, then checked identical).
 Fertility: Ahia et al., "Do All Languages Cost the Same?" (EMNLP 2023); also the
-headline metric of Lundin et al.'s "The Token Tax" (AfricaNLP 2026) -- included
-alongside Rényi efficiency/Gini for comparability with that wider literature, most of
-which reports fertility rather than an entropy-based measure.
-Boundary stability: adapted from "Proxy Compression for Language Modeling" (Zheng et
-al. 2026)'s "compressor stability" diagnostic (Sec 3.4) -- there used to explain why
-gzip-compressed training proxies fail to transfer while tokenizer/neural-compressor
-proxies succeed; repurposed here as a per-language fairness check (see common.eval.stability).
+headline metric of Lundin et al.'s "The Token Tax" (AfricaNLP 2026) -- included for
+comparability with that literature, which mostly reports fertility rather than an
+entropy-based measure.
+Boundary stability: adapted from "Proxy Compression for Language Modeling" (Zheng
+et al. 2026), Sec 3.4 -- repurposed here as a per-language fairness check (see
+common.eval.stability).
 """
 
 import numpy as np
@@ -31,9 +30,9 @@ def renyi_entropy(probs, alpha):
 def renyi_efficiency(freqs, alpha=2.5, vocab_size=None):
     """freqs: raw counts (or probabilities) per token type for one language.
 
-    vocab_size defaults to len(freqs) -- i.e. the number of vocabulary slots the
-    caller is normalizing against, INCLUDING zero-frequency entries. Pass it
-    explicitly if `freqs` has already been filtered to nonzero entries only.
+    vocab_size defaults to len(freqs) (the number of vocab slots normalized
+    against, including zero-frequency entries) -- pass it explicitly if `freqs`
+    has already been filtered to nonzero entries only.
     """
     freqs = np.asarray(list(freqs), dtype=np.float64)
     v = vocab_size if vocab_size is not None else freqs.size
@@ -65,27 +64,23 @@ def compression_rate(num_bytes, num_tokens):
 
 
 def fertility(num_tokens, num_words):
-    """Tokens per word -- see module docstring. Higher = more tokens needed per word =
-    a language this tokenizer serves less efficiently. num_tokens/num_words are
-    corpus-level totals (summed over every sentence for one language), not a
-    per-sentence average, matching how the tokenizer-fairness literature reports it."""
+    """Tokens per word (higher = less efficient for that language). num_tokens/
+    num_words are corpus-level totals, not a per-sentence average, matching how
+    the tokenizer-fairness literature reports it."""
     if num_words <= 0:
         return 0.0
     return num_tokens / num_words
 
 
 def boundary_stability(spans_before, spans_after):
-    """1 - normalized Levenshtein distance between two span sequences (each a list of
-    byte-string spans, e.g. from common.bytes_utils.spans_from_boundaries) -- 1.0 means
-    an input perturbation left the induced segmentation completely unchanged, 0.0 means
-    maximally different. See module docstring for where this is adapted from, and
-    common.eval.stability for the perturb-and-compare machinery that produces
-    spans_before/spans_after in the first place.
+    """1 - normalized Levenshtein distance between two span sequences (byte-string
+    spans, e.g. from common.bytes_utils.spans_from_boundaries). 1.0 = perturbation
+    left the segmentation unchanged, 0.0 = maximally different. See common.eval.stability
+    for the perturb-and-compare machinery that produces spans_before/spans_after.
 
-    Treats each span as one atomic symbol (two spans are "equal" iff their bytes are
-    identical), not a byte-level edit distance -- a single boundary shift several bytes
-    into a long span should count as roughly ONE segmentation change, not one change
-    per byte it happens to touch.
+    Treats each span as one atomic symbol (equal iff bytes are identical), not a
+    byte-level edit distance -- a boundary shift inside one long span should count
+    as roughly ONE change, not one per byte it touches.
     """
     n, m = len(spans_before), len(spans_after)
     if n == 0 and m == 0:

@@ -1,41 +1,27 @@
 """Turning MANTa's soft assignment matrix into discrete token boundaries.
 
-MANTa itself never needs discrete boundaries -- the paper's whole point is
-that the soft (byte, block) assignment matrix (see manta.model.MantaModel)
-is enough to train an end-to-end language model without ever materializing
-a hard segmentation. But common.eval.metrics (compression_rate, renyi_efficiency,
-gini_coefficient) and common.vocab all expect actual token COUNTS -- there
-is no way to plug a soft assignment matrix into "how many tokens did this
-sentence take," so *something* has to collapse it to hard boundaries for
-evaluation. This module is that something, and it is entirely this
-project's own modeling choice, not something the MANTa paper specifies.
+MANTa never needs discrete boundaries to train, but common.eval.metrics and
+common.vocab expect actual token counts, so something has to collapse the
+soft (byte, block) assignment matrix (manta.model.MantaModel) into hard
+boundaries for evaluation. This is entirely this project's own modeling
+choice, not specified by the paper.
 
-The rule (as given in the task spec): for each byte position i, take
-`argmax_b P(byte i in block b)` -- the single most likely block, per the
-assignment matrix's own softmax. Block indices are monotonically
-non-decreasing along the sequence by construction (mu_i is a running
-cumulative sum, so mu_i <= mu_{i+1} for all i, and the whole Gaussian family
-shifts right as i increases) -- so wherever the argmax block index INCREASES
-from position i to i+1, that's a boundary: byte i is the last byte of its
-block, byte i+1 starts a new one.
+Rule: for each byte i, take `argmax_b P(byte i in block b)`. Since mu_i is a
+running cumsum (mu_i <= mu_{i+1}), the argmax block index is monotonically
+non-decreasing along the sequence -- so wherever it increases from i to i+1,
+that's a boundary.
 
-Encoded in fairtok's own convention (common.bytes_utils.spans_from_boundaries):
-boundary_actions[i] == 1 means "byte i is the LAST byte of a span" -- so a
-block-index increase from i to i+1 sets boundary_actions[i] = 1, not
-boundary_actions[i+1]. The very last position doesn't need an explicit 1:
-spans_from_boundaries always closes a span there regardless of its own
-action value, matching fairtok.policy.segment_bytes's own convention.
+Convention (common.bytes_utils.spans_from_boundaries): boundary_actions[i]==1
+means byte i is the LAST byte of a span, so a block-index increase from i to
+i+1 sets boundary_actions[i]=1. The last position needs no explicit 1 --
+spans_from_boundaries always closes a span there (matches
+fairtok.policy.segment_bytes).
 
-Caveat surfaced deliberately, not hidden: early in training the soft
-assignment matrix is blurry (frontier probabilities near their random
-initialization, sigma_i large relative to the spacing between candidate
-blocks), so the argmax can be noisy or nearly degenerate -- e.g. almost
-every byte argmaxing to the same one or two blocks (near full-sentence
-collapse) or the argmax flickering block-to-block almost every byte
-(near single-byte collapse). That is EXPECTED behavior for an undertrained
-model, not a bug in this discretization -- see manta/train.py's smoke test,
-which prints exactly this statistic over the course of training so the
-effect is visible rather than papered over.
+Caveat: early in training the assignment matrix is blurry (frontier probs
+near random init, sigma_i large), so the argmax can look near-degenerate --
+e.g. everything collapsing to one block, or flickering every byte. Expected
+for an undertrained model, not a discretization bug (manta/train.py's smoke
+test prints this statistic over training).
 """
 
 import torch
@@ -44,28 +30,24 @@ from common.bytes_utils import bytes_to_tensor, spans_from_boundaries
 
 
 def _to_tensor(byte_seq, device="cpu"):
-    """Accepts str/bytes (delegates to common.bytes_utils.bytes_to_tensor, so the
-    byte<->tensor convention is identical to fairtok's own) or an
-    already-built LongTensor (just moved to `device`, unchanged) -- the
-    latter matters for manta.train.py, which already holds padded tensors
-    it wants to reuse without a decode/re-encode round trip."""
+    """Accepts str/bytes (via common.bytes_utils.bytes_to_tensor) or an
+    already-built LongTensor (moved to `device` unchanged) -- the latter lets
+    manta.train.py reuse tensors it already holds without a decode/re-encode
+    round trip."""
     if torch.is_tensor(byte_seq):
         return byte_seq.to(device)
     return bytes_to_tensor(byte_seq, device)
 
 
 def boundaries_from_assignment(assignment, lengths):
-    """Lower-level primitive: given an ALREADY-COMPUTED assignment matrix
-    (B, T, num_blocks) and each row's real length, apply the hard-argmax
-    discretization rule (see module docstring) without running the model
-    again. Split out from induce_boundaries_batch so manta.train.py's
-    training loop -- which already has `output.assignment` sitting around
-    from the forward pass it needed for the loss anyway -- can reuse it
-    for free instead of paying for a second, redundant forward pass just
-    to track token-frequency statistics during training.
+    """Applies the hard-argmax discretization rule (module docstring) to an
+    already-computed assignment matrix (B, T, num_blocks), without a model
+    forward pass. Split out from induce_boundaries_batch so train.py's loop
+    can reuse the `output.assignment` it already has for the loss, instead of
+    a redundant second forward pass to track token-frequency stats.
 
-    Returns: list of 0/1 boundary-action lists, one per batch row, each
-    directly usable by common.bytes_utils.spans_from_boundaries.
+    Returns: list of 0/1 boundary-action lists, one per batch row, usable by
+    common.bytes_utils.spans_from_boundaries.
     """
     block_idx = assignment.argmax(dim=-1)  # (B, T)
     results = []
@@ -82,16 +64,12 @@ def boundaries_from_assignment(assignment, lengths):
 
 @torch.no_grad()
 def induce_boundaries_batch(model, byte_seqs, device="cpu"):
-    """Run the model once over a padded batch and hard-discretize every
-    sequence's assignment matrix into its own boundary list (see module
-    docstring for the exact rule). Batching this (rather than calling the
-    single-sequence version in a Python loop) means building a vocabulary
-    or scoring many sentences at evaluation time costs one forward pass per
-    batch, not one per sentence.
+    """Runs the model once over a padded batch and hard-discretizes every
+    sequence's assignment matrix into its own boundary list. One forward pass
+    per batch instead of per sentence.
 
     byte_seqs: list of str/bytes/1-D LongTensor (mixed is fine).
-    Returns: list of 0/1 boundary-action lists, same order/length as
-    byte_seqs, each directly usable by common.bytes_utils.spans_from_boundaries.
+    Returns: list of 0/1 boundary-action lists, same order as byte_seqs.
     """
     tensors = [_to_tensor(s, device) for s in byte_seqs]
     lengths = torch.tensor(
@@ -116,35 +94,26 @@ def induce_boundaries(model, byte_seq, device="cpu"):
 
 
 def induce_spans(model, byte_seq, device="cpu"):
-    """Model + one raw byte sequence -> a list of byte-string spans, via
-    common.bytes_utils.spans_from_boundaries (reused unmodified, so the spans
-    this produces are byte-for-byte the same kind of object fairtok's own
-    vocab/metrics pipeline already consumes)."""
+    """Model + one raw byte sequence -> list of byte-string spans, via
+    common.bytes_utils.spans_from_boundaries (same span objects fairtok's
+    vocab/metrics pipeline consumes)."""
     tensor = _to_tensor(byte_seq, device)
     actions = induce_boundaries(model, tensor, device=device)
     return spans_from_boundaries(tensor, actions)
 
 
 def induce_spans_batch(model, byte_seqs, device="cpu"):
-    """Batched counterpart to induce_spans -- ONE model forward pass for the
-    WHOLE list (via induce_boundaries_batch, which already does the
-    padding/batching work) instead of one call per document. Returns a
-    list of span-lists, same order as byte_seqs -- byte-for-byte identical
-    to calling induce_spans once per item, just far fewer GPU calls.
+    """Batched counterpart to induce_spans: one model forward pass for the
+    whole list instead of one per document. Same results as calling
+    induce_spans per item, far fewer GPU calls.
 
-    Added for pretraining.data_prep, which previously called induce_spans
-    (or, via induce_boundaries -> induce_boundaries_batch(model, [x]), this
-    same batched machinery with a batch size of exactly 1) once per
-    document -- confirmed on a real cluster run to badly underutilize the
-    GPU (each single-document forward pass pays full kernel-launch/sync
-    overhead for a tiny amount of actual compute). PADDING CAVEAT: every
-    sequence in one call is padded to the LONGEST member of that specific
-    batch, so this batch's memory cost is (this batch's max length)^2 x
-    batch_size, not just max length^2 -- pretraining.data_prep's own
-    --max-doc-bytes cap (applied to every document before it ever reaches
-    here) bounds the worst case, but a larger --encode-batch-size makes
-    that worst case correspondingly larger; the two settings interact and
-    should be tuned together, not independently."""
+    Added for pretraining.data_prep, whose previous per-document calls
+    (confirmed on a cluster run) badly underutilized the GPU via per-call
+    kernel-launch/sync overhead. PADDING CAVEAT: each call pads to the
+    longest member of that batch, so memory cost is (batch max length)^2 x
+    batch_size -- --max-doc-bytes bounds the worst case, but a larger
+    --encode-batch-size scales it up; tune the two together.
+    """
     tensors = [_to_tensor(s, device) for s in byte_seqs]
     actions_list = induce_boundaries_batch(model, tensors, device=device)
     return [spans_from_boundaries(t, a) for t, a in zip(tensors, actions_list)]

@@ -1,12 +1,11 @@
 """Checkpoint save/load for a trained MagnetModel -- mirrors fairtok.inference's
-save_checkpoint/load_checkpoint naming convention.
+naming convention.
 
-Unlike FlexiTokens/MANTa, MagnetModel needs one extra piece of state beyond its
-MagnetConfig: `scripts` -- the ISO 15924 script codes its `boundary_predictors`
-ModuleDict was actually built with (see magnet/train.py's MagnetTrainer.train,
-lang_to_script). That set is derived from the TRAINING corpus's languages, not a
-fixed config field, so it has to be saved alongside the config to reconstruct the
-model at all.
+Unlike FlexiTokens/MANTa, MagnetModel needs one extra piece of state beyond
+MagnetConfig: `scripts`, the ISO 15924 script codes its boundary_predictors
+ModuleDict was built with (derived from the training corpus's languages, not
+a fixed config field) -- must be saved alongside the config to reconstruct
+the model.
 """
 
 import dataclasses

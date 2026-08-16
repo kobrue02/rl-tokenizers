@@ -4,150 +4,71 @@ Paper: Godey, Castagné, de la Clergerie & Sagot, "MANTa: Efficient
 Gradient-Based Tokenization for Robust End-to-End Language Modeling"
 (Findings of EMNLP 2022, aclanthology.org/2022.findings-emnlp.207).
 
-The core idea (Eq. 1 of the paper): instead of a hard, non-differentiable
-segmentation step (BPE, or fairtok's own sampled-Bernoulli boundaries in
-fairtok/policy.py), predict a per-byte "frontier" probability p_i and treat
-the *block index* of byte i as the cumulative count of frontier events up to
-i, i.e. a sum of Bernoulli(p_k) variables (a Poisson-Binomial distribution).
-That distribution is approximated by a Gaussian with matching mean/variance,
-which makes "the probability that byte i belongs to block b" a closed-form,
-differentiable quantity for every (i, b) pair -- a soft (T, num_blocks)
-assignment matrix, never a discrete cut, so gradients from the language-
-modeling loss flow straight back through the segmentation itself. This is
-the "gradient-based" part of the paper's title, and the one piece of MANTa
-this file is really about; everything else (embeddings, block-level layers,
-upsampling) is standard sequence-model plumbing around it.
+Core idea (Eq. 1): instead of a hard, non-differentiable segmentation step
+(BPE, or fairtok's sampled-Bernoulli boundaries), predict a per-byte
+"frontier" probability p_i and treat byte i's block index as the cumulative
+count of frontier events up to i -- a sum of Bernoulli(p_k) variables
+(Poisson-Binomial), approximated by a moment-matched Gaussian. This makes
+P(byte i in block b) closed-form and differentiable for every (i, b) pair: a
+soft (T, num_blocks) assignment matrix instead of a discrete cut, so the LM
+loss backprops straight through the segmentation. Everything else
+(embeddings, block-level GRU, upsampling) is standard plumbing around this.
 
-This is a faithful-in-spirit but DELIBERATELY SCALED-DOWN and SIMPLIFIED
-reimplementation, built to sit next to fairtok/ as a comparison baseline at
-fairtok's own compute scale (a CPU-trainable smoke test), not the paper's
-~200M-parameter T5-scale model pretrained on C4. Concretely, vs. the paper:
+Deliberately scaled down vs. the paper, to sit next to fairtok/ as a
+CPU-trainable comparison baseline rather than reproducing the paper's
+~200M-param T5-scale model:
 
-  1. No Longformer. The paper's frontier predictor is a Longformer encoder.
-     fairtok has zero dependency on `transformers` (see fairtok/policy.py,
-     fairtok/train.py -- everything is plain torch), and this project keeps
-     that property, so the frontier predictor below is a small bidirectional
-     sliding-window self-attention block implemented from scratch
-     (`SlidingWindowAttention`): each position attends only to positions
-     within +/- `window` of itself. This is a real architectural difference
-     from fairtok's own BytePolicy (fairtok/policy.py), which is CAUSAL (a
-     GRU that only ever sees the past) -- MANTa's segmentation looks in BOTH
-     directions before deciding where a boundary probably is, which is only
-     possible because nothing downstream needs autoregressive sampling of
-     the boundaries themselves (unlike fairtok's REINFORCE-trained policy,
-     MANTa's boundaries are a deterministic, differentiable function of the
-     whole sequence, so there is no causality requirement to preserve).
-     For simplicity, the O(T^2) full attention matrix is computed and then
-     masked down to the local band, rather than a true banded-attention
-     kernel that only computes the O(T * window) entries that survive the
-     mask -- at the sequence lengths used here (tens to low hundreds of
-     bytes) this costs nothing extra in practice, but it would need
-     revisiting before running this on long documents.
+  1. No Longformer. Frontier predictor is a from-scratch bidirectional
+     sliding-window attention (`SlidingWindowAttention`, +/- `window`) to
+     keep zero dependency on `transformers`, matching fairtok. Unlike
+     fairtok's causal GRU policy, this looks both directions since MANTa's
+     boundaries are a deterministic function of the whole sequence (nothing
+     downstream needs autoregressive sampling). Implemented as a full (T,T)
+     score matrix masked to the local band rather than a true banded
+     kernel -- fine at this project's sequence lengths, would need
+     revisiting for long documents.
 
-  2. No T5 span-corruption denoising objective. The paper attaches this
-     mechanism to the front of a full T5 encoder-decoder and pretrains with
-     span-corruption denoising. This file only implements the tokenization
-     mechanism, paired with plain next-byte cross-entropy (a causal LM
-     loss) -- the same objective family fairtok, MAGNET, and FlexiTokens all
-     use -- so that a comparison between baselines is a comparison of
-     TOKENIZATION MECHANISMS, not confounded by two totally different
-     pretraining objectives. This is a deliberate, explicit deviation from
-     the paper, not an oversight.
+  2. No T5 span-corruption objective; trained with plain next-byte
+     cross-entropy instead, so baselines compare tokenization mechanism
+     alone, not pretraining objective.
 
-     EMPIRICAL CONSEQUENCE, observed when actually running this (see
-     manta.train.run_smoke_test's printed span-length histogram): pairing
-     this mechanism's bidirectionality (the frontier predictor MUST look
-     both ways -- point 1 above; the block-level layers mirror the paper's
-     bidirectional T5 encoder -- point 5 below) with a plain CAUSAL next-
-     byte loss removes a safety property the paper's own training scheme
-     relies on. In the paper, the encoder never sees the corrupted spans
-     the decoder is asked to predict, so its bidirectionality can't leak
-     the prediction target. Here, there is no such masking: byte i's
-     assignment row (and, through the block-level GRU/upsampling, byte i's
-     final hidden state) can be influenced by byte i+1 -- the very target
-     next-byte cross-entropy is trying to predict -- via attention/GRU
-     paths that look forward as well as back. The finer the segmentation
-     (more, smaller blocks), the more directly that channel can carry
-     information about a specific upcoming byte. In the actual smoke test
-     run recorded in this project, this shows up as the model rapidly (within
-     ~10 of 80 steps) driving average induced span length down to ~1.06
-     bytes (~95% single-byte spans) even though the LOSS keeps falling --
-     i.e. the model is not learning to compress, it's partly exploiting this
-     leakage channel, and finer blocks make that channel wider. A quick
-     ablation (forcing the block-level GRU to be unidirectional/causal
-     instead of bidirectional) reduced but did not eliminate the effect
-     (~88% singleton spans instead of ~95%), confirming the frontier
-     predictor's OWN required bidirectionality is the dominant leak, not
-     just the block-level layers. This is reported here deliberately, not
-     patched over: the frontier predictor can't be made causal without
-     contradicting the paper's own design (point 1), and inventing a rate
-     loss to mask the symptom would contradict point 3 below and defeat the
-     purpose of comparing MANTa's mechanism, as specified, against fairtok's
-     rate-regularized one on equal footing. Read as a finding, not a bug:
-     "a bidirectional, boundary-free tokenizer front end paired with a
-     naive causal LM objective has a structural incentive toward
-     degenerate, near-character-level segmentation" is exactly the kind of
-     result a baseline comparison like this one is supposed to surface.
+     EMPIRICAL CONSEQUENCE: the paper's encoder never sees the spans the
+     decoder predicts, so its bidirectionality can't leak the target. Here
+     it can -- byte i's assignment/hidden state is influenced by byte i+1,
+     the very target the causal loss predicts. Confirmed live: average span
+     length collapsed to ~1.06 bytes (~95% singletons) within ~10/80
+     smoke-test steps even as loss kept falling, i.e. the model partly
+     exploits the leak rather than learning to compress. Forcing the block
+     GRU to be causal only reduced this to ~88% singletons, so the frontier
+     predictor's own required bidirectionality (point 1) is the dominant
+     leak. Reported as a finding, not patched: a bidirectional boundary-free
+     tokenizer + naive causal LM loss has a structural incentive toward
+     degenerate segmentation.
 
-  3. No auxiliary loss of any kind. This is actually a genuine property of
-     the paper, not a simplification: MANTa's loss is language-modeling
-     cross-entropy ONLY. Segmentation emerges purely from backpropagating
-     that loss through the soft assignment matrix. There is no boundary-rate
-     target, no entropy regularizer, no fairness term -- worth flagging
-     explicitly because fairtok (a rate-consistency loss + a fairness term)
-     and MAGNET/FlexiTokens (their own rate losses) all need one, and MANTa
-     conspicuously does not. See manta/train.py's loss function: it really
-     is just cross-entropy, nothing summed in alongside it.
+  3. No auxiliary loss -- true to the paper: pure LM cross-entropy, no
+     rate/entropy/fairness term (unlike fairtok, MAGNET, FlexiTokens).
 
-  4. Pooling simplification. The paper pools a small depthwise 1-D
-     convolution over byte embeddings before the weighted-average pooling
-     step. This implementation skips the convolution and pools the raw byte
-     embeddings directly (a straight weighted average, batched as a single
-     matmul against the assignment matrix -- see `MantaModel.forward`). This
-     is an accepted simplification per the task spec, not a correctness bug;
-     it costs some local-context sharpening in the pooled block embeddings
-     that the depthwise conv would otherwise provide.
+  4. Pooling simplification: skips the paper's depthwise conv before
+     pooling, pools raw byte embeddings directly (weighted-average matmul
+     against the assignment matrix). Accepted simplification; costs some
+     local-context sharpening.
 
-  5. Block-level layers: GRU, not transformer. The paper runs a further T5
-     encoder stack over the pooled block sequence. This implementation uses
-     a small bidirectional GRU instead (`nn.GRU`), matching fairtok's own
-     house style (fairtok/policy.py's BytePolicy is GRU-based throughout)
-     and avoiding writing a second, full self-attention stack when one
-     already exists here for the frontier predictor. Block order still
-     matters (a GRU is a fine inductive bias for "this block's meaning
-     depends on its neighbors in sequence"), so this is a reasonable
-     architecture swap, not a downgrade in kind.
+  5. Block-level layers use a GRU, not a second transformer stack --
+     matches fairtok's house style and avoids a redundant attention
+     implementation. Order still matters, so this is a reasonable swap.
 
-  6. Upsampling: soft during training, hard only for evaluation. Byte-level
-     hidden states are recovered from block-level hidden states by
-     `assignment_matrix @ block_hidden` -- i.e. byte i's hidden state is the
-     SAME soft weighted combination over blocks that pooling used to build
-     them in the first place. This keeps the entire forward pass
-     differentiable end to end, which is the point of the whole exercise.
-     Hard-argmax discretization (turning the soft assignment into actual
-     0/1 boundaries) is a SEPARATE, inference-only operation implemented in
-     manta/segment.py -- it is never used inside the loss path, only to
-     extract token counts for common.eval.metrics after training. The paper
-     never needs discrete boundaries at all, so this discretization
-     heuristic is entirely this project's own addition; see segment.py's
-     docstring for the exact rule and its caveats.
+  6. Upsampling is soft (assignment_matrix @ block_hidden) throughout the
+     forward pass, keeping it fully differentiable. Hard-argmax
+     discretization into actual token boundaries is a separate,
+     inference-only step in manta/segment.py, never used in the loss path.
 
-  7. Numerical-stability floor on the Gaussian variance. `sigma_i^2 =
-     sum_{k<=i} p_k * (1 - p_k)` can be driven arbitrarily close to zero once
-     the frontier probabilities saturate near 0 or 1 (a real possibility
-     once training pushes p_i toward confident decisions), which would blow
-     up the Gaussian log-density used for the soft assignment. A small
-     additive epsilon floor is applied to the variance before taking the
-     square root (`_MIN_VARIANCE` below) -- purely a numerical guard, not a
-     detail specified by the paper's Eq. 1.
+  7. Numerical floor on the Gaussian variance (`_MIN_VARIANCE`): sigma_i^2
+     can approach 0 as frontier probabilities saturate, blowing up the
+     log-density. Pure numerical guard, not part of the paper's Eq. 1.
 
-  8. Scale. Byte embedding / hidden dim ~64, a couple of attention layers
-     with a small window, a single-layer bidirectional GRU -- sized to be
-     comparable in parameter count to fairtok's own BytePolicy (see
-     fairtok/policy.py, hidden_dim=64-128, num_layers=2-3), not the paper's
-     ~200M-parameter model. This is a baseline for comparison at fairtok's
-     own compute scale, explicitly not an attempt to reproduce the paper's
-     reported numbers.
+  8. Scale: dim~64, small attention window, single-layer bidirectional GRU
+     -- sized to match fairtok's own BytePolicy, not the paper's ~200M
+     params.
 """
 
 import dataclasses
@@ -157,25 +78,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Additive floor on the Poisson-Binomial-approximating Gaussian's variance
-# (see point 7 in the module docstring). This is deliberately tiny -- it
-# should never matter unless a frontier probability is genuinely saturated
-# very close to 0/1, in which case it's the difference between a legitimate
-# soft assignment and a NaN from dividing by ~0 variance.
+# Floor on the Poisson-Binomial-approximating Gaussian's variance (see point 7
+# above). Deliberately tiny -- only matters once a frontier probability
+# saturates near 0/1, where it's the difference between a valid soft
+# assignment and a NaN from dividing by ~0 variance.
 _MIN_VARIANCE = 1e-3
 
 
 def sinusoidal_positional_encoding(length, dim, device):
     """Standard Transformer (Vaswani et al. 2017) sinusoidal position encoding.
 
-    The frontier predictor's attention is local-window (see
-    SlidingWindowAttention) but still needs SOME signal that distinguishes
-    "the byte two positions to my left" from "the byte two positions to my
-    right" -- raw dot-product attention over content alone can't tell
-    left from right, only "how similar are our embeddings." Added once, to
-    the frontier predictor's input only (not to the raw byte embeddings used
-    for pooling -- see MantaModel.forward), matching the fact that only the
-    frontier decision, not the pooled block content, needs position info.
+    Content-only dot-product attention can't distinguish left from right, so
+    this is added to the frontier predictor's input only (not to the raw
+    byte embeddings used for pooling) -- only the frontier decision needs
+    position info.
     """
     position = torch.arange(length, device=device, dtype=torch.float32).unsqueeze(
         1
@@ -193,12 +109,11 @@ def sinusoidal_positional_encoding(length, dim, device):
 
 
 class SlidingWindowAttention(nn.Module):
-    """Bidirectional local-window multi-head self-attention, implemented directly
-    in torch (see module docstring, point 1, for why not `transformers`'
-    Longformer). Position i attends only to positions j with |i - j| <= window
-    -- both directions, unlike fairtok's causal GRU. Implemented by masking a
-    full (T, T) score matrix down to the local band rather than a true banded
-    kernel; see the module docstring for the complexity tradeoff this implies.
+    """Bidirectional local-window multi-head self-attention (module docstring,
+    point 1: from-scratch, no `transformers` Longformer). Position i attends
+    only to j with |i - j| <= window, both directions. Implemented by masking
+    a full (T, T) score matrix rather than a true banded kernel (see module
+    docstring for the complexity tradeoff).
     """
 
     def __init__(self, dim, num_heads, window):
@@ -271,10 +186,8 @@ class FrontierLayer(nn.Module):
 
 
 class FrontierPredictor(nn.Module):
-    """Stack of FrontierLayers producing one boundary logit per byte position.
-    This is a "frontier predictor" in the paper's terminology: it decides,
-    per byte, how likely it is that a new block starts there -- not a hard
-    decision, just a probability that feeds the Gaussian approximation in
+    """Stack of FrontierLayers producing one boundary logit per byte: how
+    likely a new block starts there, feeding the Gaussian approximation in
     MantaModel.forward."""
 
     def __init__(self, dim, num_heads, window, num_layers):
@@ -293,10 +206,9 @@ class FrontierPredictor(nn.Module):
 @dataclasses.dataclass
 class MantaOutput:
     """Everything downstream code needs off one forward pass. `assignment` is
-    kept around (rather than discarded once pooling/upsampling consume it)
-    because manta/segment.py's discretization heuristic reads it directly,
-    and manta/train.py uses it to update a running per-language token-
-    frequency table without a second forward pass."""
+    kept (not discarded after pooling/upsampling) since segment.py's
+    discretization and train.py's token-frequency tracking both read it
+    directly, avoiding a second forward pass."""
 
     logits: torch.Tensor  # (B, T, 256) next-byte logits
     assignment: torch.Tensor  # (B, T, num_blocks) soft P(byte i in block b)
@@ -324,22 +236,18 @@ class MantaModel(nn.Module):
     ):
         super().__init__()
         self.dim = dim
-        # How many standard deviations past the sequence-end mean block index to
-        # keep as candidate blocks (b ranges 0..num_blocks-1) -- the task spec's
-        # own truncation heuristic (mu_L + 3*sigma_L), kept as a config knob
-        # rather than a hardcoded constant since a wider/narrower margin trades
-        # off "never clip probability mass off the true tail" against "how many
-        # (mostly near-zero-weight) extra block columns the GRU has to chew
-        # through every step."
+        # How many stddevs past the sequence-end mean block index to keep as
+        # candidate blocks (mu_L + max_extra_sigma*sigma_L). A config knob since
+        # wider/narrower trades off clipping true tail mass vs. extra
+        # near-zero-weight block columns the GRU has to process.
         self.max_extra_sigma = max_extra_sigma
 
         self.byte_embed = nn.Embedding(256, dim)
         self.frontier = FrontierPredictor(
             dim, num_frontier_heads, window, num_frontier_layers
         )
-        # bidirectional: block b's representation can depend on blocks after it
-        # too, matching the paper's non-causal, encoder-style block-level layers
-        # (see module docstring, point 5, for why GRU rather than transformer here).
+        # Bidirectional: matches the paper's non-causal, encoder-style
+        # block-level layers (module docstring point 5).
         self.block_rnn = nn.GRU(
             dim,
             block_hidden_size,
@@ -347,23 +255,19 @@ class MantaModel(nn.Module):
             batch_first=True,
             bidirectional=True,
         )
-        # Bidirectional GRU output is 2*block_hidden_size wide; project back down
-        # to `dim` so the upsampled byte-level hidden state has the same width the
-        # output head expects, independent of how block_hidden_size is configured.
+        # Project bidirectional GRU's 2*block_hidden_size output back to `dim`.
         self.block_proj = nn.Linear(block_hidden_size * 2, dim)
         self.output_head = nn.Linear(dim, 256)
 
     def forward(self, byte_ids, lengths):
         """byte_ids: (B, T) LongTensor, right-padded with zeros past each
-        sequence's real length. lengths: (B,) LongTensor of real (unpadded)
-        lengths. Returns a MantaOutput.
+        sequence's real length. lengths: (B,) LongTensor of real lengths.
+        Returns a MantaOutput.
 
-        Padding convention: padding lives strictly at the END of each row, and
-        every cumulative-sum quantity below (mu, sigma) is computed left-to-
-        right, so padding after position i can never leak into i's own mu_i/
-        sigma_i -- only left-padding would break that invariant, which is why
-        this function assumes right-padding throughout (matching
-        fairtok.policy.batched_sample_rollout's own convention).
+        Assumes right-padding: mu/sigma below are left-to-right cumulative
+        sums, so padding after position i can't leak into i's own mu_i/
+        sigma_i -- left-padding would break that invariant (matches
+        fairtok.policy.batched_sample_rollout's convention).
         """
         B, T = byte_ids.shape
         device = byte_ids.device
@@ -376,37 +280,29 @@ class MantaModel(nn.Module):
             1
         )  # (B, T), True = pad
 
-        # Positional encoding is added ONLY for the frontier predictor's input --
-        # the raw byte_emb used for pooling below stays position-free (see
-        # sinusoidal_positional_encoding's docstring for why).
+        # Positional encoding only for the frontier predictor's input -- the raw
+        # byte_emb used for pooling stays position-free.
         frontier_input = byte_emb + sinusoidal_positional_encoding(
             T, self.dim, device
         ).unsqueeze(0)
         frontier_logit = self.frontier(frontier_input, padding_mask)  # (B, T)
         p = torch.sigmoid(frontier_logit)
-        # Padded positions never contribute frontier "events": zeroing them out
-        # here is belt-and-suspenders (right-padding + left-to-right cumsum
-        # already guarantees they can't affect any REAL position's mu/sigma) but
-        # keeps p itself clean/interpretable at pad positions instead of whatever
-        # the attention block happened to output there.
+        # Belt-and-suspenders: right-padding + left-to-right cumsum already keep
+        # pad positions from affecting real mu/sigma, but zero them here too so p
+        # itself stays clean at pad positions.
         p = p.masked_fill(padding_mask, 0.0)
 
         # --- Eq. 1: Gaussian approximation to the Poisson-Binomial block index ---
-        # block_index(i) := sum_{k<=i} Bernoulli(p_k)  ==>  approximate as
-        # Normal(mu_i, sigma_i^2) with mu_i/sigma_i^2 the exact mean/variance of
-        # that same sum (matching moments, the standard Gaussian approximation to
-        # a Poisson-Binomial distribution).
+        # block_index(i) := sum_{k<=i} Bernoulli(p_k); mu/sigma are its exact
+        # mean/variance (moment-matched Gaussian).
         mu = torch.cumsum(p, dim=1)  # (B, T)
         variance = torch.cumsum(p * (1 - p), dim=1).clamp_min(_MIN_VARIANCE)
         sigma = torch.sqrt(variance)
 
-        # Truncate the candidate block range using the LAST real position's own
-        # (mu, sigma) per sequence, then take the max across the batch so every
-        # sequence gets the same num_blocks (required to batch the GRU below).
-        # Shorter/lower-mu sequences in the same batch simply end up with some
-        # trailing block columns that carry ~zero probability mass for every one
-        # of their real bytes -- harmless (see pooling's epsilon guard below),
-        # not a correctness issue.
+        # Truncate the candidate block range using each sequence's LAST real
+        # (mu, sigma), then take the batch max so every sequence gets the same
+        # num_blocks (needed to batch the GRU below). Shorter/lower-mu sequences
+        # just get some trailing near-zero-weight block columns -- harmless.
         last_idx = (lengths - 1).clamp_min(0)
         mu_L = mu.gather(1, last_idx.unsqueeze(1)).squeeze(1)  # (B,)
         sigma_L = sigma.gather(1, last_idx.unsqueeze(1)).squeeze(1)  # (B,)
@@ -420,42 +316,35 @@ class MantaModel(nn.Module):
         )  # (1,1,nb)
         mu_exp = mu.unsqueeze(-1)  # (B, T, 1)
         sigma_exp = sigma.unsqueeze(-1)  # (B, T, 1)
-        # Gaussian log-density up to the (per-i, constant-over-b) normalizer,
-        # which softmax over b cancels out anyway -- exactly the "up to a
-        # normalizing constant" the task spec calls for.
+        # Log-density up to the per-i normalizer, which softmax over b cancels.
         log_density = -((block_idx - mu_exp) ** 2) / (2 * sigma_exp**2)
         assignment = torch.softmax(
             log_density, dim=-1
         )  # (B, T, num_blocks), soft P(byte i in block b)
-        # Zero out padded byte ROWS so they can't contribute weight to any
-        # block's pooled embedding below (softmax alone can't do this -- it only
-        # guarantees each ROW sums to 1, not that pad rows are all-zero).
+        # softmax alone only guarantees rows sum to 1, not that pad rows are
+        # zero, so mask padded byte rows explicitly.
         assignment = assignment.masked_fill(padding_mask.unsqueeze(-1), 0.0)
 
-        # --- Pooling: weighted average of RAW byte embeddings (module docstring,
-        # point 4) via one batched matmul, not a Python loop over blocks. ---
+        # --- Pooling: weighted average of raw byte embeddings (batched matmul,
+        # module docstring point 4) ---
         weighted_sum = torch.bmm(
             assignment.transpose(1, 2), byte_emb
         )  # (B, num_blocks, dim)
         block_weight = assignment.sum(dim=1, keepdim=True).transpose(
             1, 2
         )  # (B, num_blocks, 1)
-        # A block column with ~0 total weight (the "extra" truncation columns
-        # some sequences never really use, see num_blocks above) would divide
-        # ~0/~0 -> NaN without this epsilon; the numerator is equally tiny there,
-        # so the epsilon just pins the quotient to ~0 instead, which is exactly
-        # right since nothing meaningfully "belongs" to that block anyway.
+        # Epsilon guards ~0/~0 -> NaN for unused truncation-tail block columns;
+        # numerator is equally tiny there so the quotient just goes to ~0.
         pooled = weighted_sum / (block_weight + 1e-8)  # (B, num_blocks, dim)
 
         # --- Block-level context (module docstring, point 5) ---
         block_hidden, _ = self.block_rnn(pooled)  # (B, num_blocks, 2*block_hidden_size)
         block_hidden = self.block_proj(block_hidden)  # (B, num_blocks, dim)
 
-        # --- Upsample: SOFT weighted combination over blocks, same assignment
-        # matrix pooling used -- keeps the whole path differentiable end to end
-        # (module docstring, point 6). Hard-argmax discretization for actual
-        # token boundaries lives in manta/segment.py, entirely outside this
-        # forward pass. ---
+        # --- Upsample: soft weighted combination over blocks (same assignment
+        # matrix pooling used), keeping the path differentiable end to end
+        # (module docstring point 6). Hard-argmax discretization lives
+        # separately in manta/segment.py. ---
         byte_hidden = torch.bmm(assignment, block_hidden)  # (B, T, dim)
 
         logits = self.output_head(byte_hidden)  # (B, T, 256)
@@ -468,14 +357,11 @@ class MantaModel(nn.Module):
 
 
 def next_byte_loss(byte_ids, lengths, logits):
-    """Plain next-byte cross-entropy (module docstring, point 3: this is the
-    ENTIRE loss -- no auxiliary terms). Returns (loss, num_valid_positions,
-    num_correct) so callers can also report byte accuracy / bits-per-byte
-    without a second pass over the logits.
-
-    byte_ids/lengths/logits as returned by/passed to MantaModel.forward.
-    Position t predicts byte_ids[:, t+1], so the last real byte of each
-    sequence (no next byte to predict) is excluded via `valid_mask`.
+    """Plain next-byte cross-entropy -- the entire loss, no auxiliary terms
+    (module docstring point 3). Returns (loss, num_valid_positions,
+    num_correct) so callers can report accuracy/bits-per-byte without a
+    second pass. Position t predicts byte_ids[:, t+1]; each sequence's last
+    real byte has no next byte, so it's excluded via `valid_mask`.
     """
     B, T = byte_ids.shape
     device = byte_ids.device

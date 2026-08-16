@@ -1,24 +1,20 @@
-"""The FlexiTokens training loop: plain backprop, no REINFORCE/reward machinery at
-all (unlike fairtok.train.GRPOTrainer) -- every piece of the loss (next-byte
-cross-entropy, per-language boundary hinge) is differentiable end-to-end thanks to
-the straight-through Gumbel-sigmoid boundary relaxation in flexitokens/model.py.
+"""FlexiTokens training loop: plain backprop, no REINFORCE/reward machinery
+(unlike fairtok.train.GRPOTrainer) -- next-byte CE and the per-language
+boundary hinge are both differentiable end-to-end via model.py's
+straight-through Gumbel-sigmoid relaxation.
 
-Mirrors fairtok.train.GRPOConfig / GRPOTrainer's general shape (a HF-TrainingArguments
--styled config dataclass + a Trainer class with .train()) and field naming wherever a
-clean equivalent exists (max_steps, learning_rate, per_device_train_batch_size, seed,
-vocab_size, output_dir) -- see FlexiTokensConfig below for the FlexiTokens-specific
-knobs that have no GRPOConfig equivalent (d_model, gumbel_temperature, lambda_hinge,
-margin_lambda, alpha_anchor, anchor_lang).
+Mirrors GRPOConfig/GRPOTrainer's shape (HF-TrainingArguments-styled config +
+Trainer.train()) and field naming where an equivalent exists; FlexiTokens-
+specific knobs (d_model, gumbel_temperature, lambda_hinge, margin_lambda,
+alpha_anchor, anchor_lang) have no GRPOConfig analogue.
 
-One step = one batch of parallel groups, exactly like GRPOTrainer -- a fixed number
-of groups is drawn uniformly at random each step (with replacement across steps, not
-a shuffled epoch traversal like GRPOTrainer's DataLoader; simpler, and fine at this
-smoke-test scale where max_steps is small relative to corpus size). Every language in
-a sampled group contributes one sequence to the batch (capped by group_sample_size,
-same meaning as GRPOConfig's own field), and the boundary hinge loss pools
-observations across every sequence sharing a language within the step, not per group
--- unlike GRPO's group-relative advantage, FlexiTokens' training signal has no notion
-of "reward relative to this group's siblings" at all.
+One step = one batch of parallel groups, drawn uniformly at random (with
+replacement across steps, not a shuffled epoch traversal -- simpler, fine at
+smoke-test scale). Each language in a sampled group contributes one sequence
+(capped by group_sample_size); the boundary hinge loss pools observations
+per language across the whole step, not per group -- unlike GRPO's
+group-relative advantage, there's no "reward relative to this group's
+siblings" here.
 """
 
 import dataclasses
@@ -62,61 +58,40 @@ def derive_alpha_beta(
 ):
     """Per-language target boundary rate alpha_L and band floor beta_L.
 
-    Neither quantity is pinned down by the paper at the level of a concrete
-    formula -- both are JUDGMENT CALLS, documented here in full:
+    Neither is pinned down by the paper as a concrete formula -- both are
+    JUDGMENT CALLS:
 
-    alpha_L (target rate, i.e. `k/N` this language "should" be near): pick one
-    anchor language (English by default, matching this project's use of English
-    as the common.data.oldi_data reporting pivot), and compute alpha_L PROPORTIONAL
-    to how many bytes this language needs, on average, to say the same thing the
-    anchor says -- using the genuinely N-way parallel groups from
-    common.data.oldi_data (or common.data.synthetic's synthetic stand-in) directly, since
-    "the same content in language L" and "the same content in the anchor" are
-    LITERALLY the same dict entry across languages in one group:
+    alpha_L: pick an anchor language (English by default) and scale alpha_L
+    inversely to how many more bytes this language needs, on average, to say
+    the same thing as the anchor -- using genuinely N-way parallel groups so
+    "same content" is literally the same dict entry across languages:
 
-        ratio_L = mean(byte_len(L))  /  mean(byte_len(anchor))
-                  over every group containing BOTH L and the anchor
-
+        ratio_L = mean(byte_len(L)) / mean(byte_len(anchor))  [over groups with both]
         alpha_L = clamp(alpha_anchor / ratio_L, alpha_floor, alpha_ceiling)
 
-    ratio_L itself is computed by common.eval.parity.compute_lang_parity_ratios, shared
-    with fairtok.train's own per-language target-rate derivation (same evidence,
-    same formula -- see that module for why a single global rate is a fairness
-    problem, not just a simplification).
+    (ratio_L via common.eval.parity.compute_lang_parity_ratios, shared with
+    fairtok.train's own target-rate derivation.) Rationale: a language
+    needing more bytes per equivalent content, under a FIXED boundary rate,
+    would get more tokens per sentence than the anchor for the same content
+    -- exactly the cross-lingual unfairness fairtok is built to fight.
+    Scaling alpha_L down by the same ratio keeps expected TOKEN count, not
+    byte count, comparable across languages. alpha_anchor=0.25 (~4
+    bytes/token) is a plausible byte-BPE-ish rate, not paper-specified.
+    Floor/ceiling guard against a degenerate ratio_L pushing alpha_L outside
+    [0, 1].
 
-    Rationale: if L systematically needs MORE bytes than the anchor to express
-    the same content (e.g. multi-byte UTF-8 scripts, more verbose morphology),
-    a FIXED boundary rate would give L systematically MORE tokens per sentence
-    than the anchor gets for equivalent content -- exactly the cross-lingual
-    unfairness this whole project's fairtok half is built to fight. Scaling
-    alpha_L down by the same ratio (fewer boundaries -> longer average spans)
-    is a first-order correction that keeps expected TOKEN count, not byte
-    count, roughly comparable across languages. alpha_anchor=0.25 (~4
-    bytes/token on average for the anchor) is a plausible byte-level-BPE-ish
-    compression rate, not a number the paper specifies anywhere at the
-    abstract/equation level. Floor/ceiling guard against a degenerate ratio_L
-    (e.g. a near-empty sample) producing a nonsensical alpha_L outside [0, 1].
+    beta_L = alpha_L - margin_lambda * sigma_L (the paper's formula), where
+    sigma_L is "std of the compression rate for language L" -- but
+    compression rate is a property of a TRAINED tokenizer, and alpha_L/beta_L
+    must be derived before training (chicken-and-egg). JUDGMENT CALL: proxy
+    sigma_L with L's coefficient of variation of raw byte sentence length
+    (std/mean), scaled by alpha_L to stay commensurate with it. Intuition: a
+    language whose sentence lengths vary more has a less pinned-down
+    "reasonable" rate, so it gets a wider band. beta_L is clamped to
+    [0, alpha_L].
 
-    beta_L (band floor): beta_L = alpha_L - margin_lambda * sigma_L, per the
-    paper's own formula, where sigma_L is described as "the std of the
-    compression rate for language L". We cannot compute an actual compression
-    rate here -- compression rate is a PROPERTY OF A TRAINED TOKENIZER, and
-    deriving alpha_L/beta_L happens before training starts (chicken-and-egg).
-    JUDGMENT CALL: proxy sigma_L with that language's own coefficient of
-    variation of raw byte sentence length (std/mean, over every sentence
-    available for L, not just the anchor-paired subset used for alpha_L),
-    scaled into alpha_L's own units by multiplying by alpha_L -- so sigma_L
-    stays a dimensionless, rate-like quantity commensurate with alpha_L rather
-    than an arbitrary absolute number. Intuition: a language whose sentences
-    vary a lot in length in this corpus is a language whose "reasonable"
-    compression rate is less pinned-down, so it gets a wider flexibility band.
-    beta_L is clamped to [0, alpha_L] (a boundary rate cannot be negative, and
-    the band's floor cannot exceed its own ceiling).
-
-    Returns (alpha_by_lang: dict[str,float], beta_by_lang: dict[str,float],
-    anchor_used: str -- the language actually used as the anchor, which can
-    differ from `anchor_lang` if that language isn't present in the corpus;
-    see the fallback below).
+    Returns (alpha_by_lang, beta_by_lang, anchor_used -- may differ from
+    `anchor_lang` if that language isn't present in the corpus).
     """
     ratio_by_lang, anchor = compute_lang_parity_ratios(train_groups, anchor_lang)
     if anchor != anchor_lang:
@@ -150,22 +125,17 @@ def derive_alpha_beta(
 @dataclasses.dataclass
 class FlexiTokensConfig(BaseTokenizerConfig):
     """vocab_size/output_dir/use_wandb/wandb_project/run_name inherited from
-    BaseTokenizerConfig unchanged except wandb_project's default. Otherwise
-    mirrors fairtok.train.GRPOConfig's naming/style (HF-TrainingArguments-esque
-    field names) wherever a clean equivalent exists; FlexiTokens-specific knobs with
-    no GRPOConfig analogue keep their own domain-specific names, the same convention
-    GRPOConfig itself uses for gamma/lambda_target/lambda_fair."""
+    BaseTokenizerConfig (except wandb_project's default). Otherwise mirrors
+    GRPOConfig's naming/style; FlexiTokens-specific knobs with no GRPOConfig
+    analogue keep their own descriptive names."""
 
-    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
-    # (see FlexiTokensTrainer.train) -- matches fairtok.train.GRPOConfig's own
-    # max_steps/num_train_epochs convention; set explicitly to override with a
-    # raw step count instead.
-    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. 1 "epoch"
-    # here is steps_per_epoch steps (see FlexiTokensTrainer.train) -- a periodic-
-    # checkpoint INTERVAL, not a guaranteed every-group-visited-once traversal
-    # (this trainer samples groups randomly WITHOUT replacement per step but
-    # doesn't track visitation ACROSS steps, unlike fairtok's shuffled
-    # DataLoader) -- so "5 epochs" means "5 * steps_per_epoch steps."
+    max_steps: int = 0  # 0 -> derive from num_train_epochs * steps_per_epoch (see
+    # FlexiTokensTrainer.train); matches GRPOConfig's convention. Set explicitly
+    # to override with a raw step count.
+    num_train_epochs: float = 3.0  # only if max_steps == 0. "epoch" = steps_per_
+    # epoch steps, a periodic-checkpoint interval -- groups are sampled without
+    # replacement per step but visitation isn't tracked across steps (unlike a
+    # shuffled DataLoader), so "5 epochs" just means 5 * steps_per_epoch steps.
     per_device_train_batch_size: int = 8  # counts parallel-sentence GROUPS, not raw
     # byte sequences -- same meaning as GRPOConfig's field of the same name.
     learning_rate: float = 3e-3
@@ -176,19 +146,16 @@ class FlexiTokensConfig(BaseTokenizerConfig):
     num_pre_layers: int = 2
     num_mid_layers: int = 2
     num_post_layers: int = 2
-    gumbel_temperature: float = 0.5  # lower = closer to a true hard Bernoulli sample
-    # (less biased, higher-variance gradient); higher = smoother/more biased but
-    # easier to optimize early in training. 0.5 is a common default in the
-    # categorical/binary-concrete relaxation literature (Maddison et al. 2017,
-    # Jang et al. 2017), not a value specified by the FlexiTokens paper itself.
-    grad_clip_norm: float = 5.0  # pragmatic addition, not from the paper -- transformer
-    # layers combined with Gumbel-sigmoid sampling noise can spike gradients early in
-    # training, before the boundary predictor has settled into a sensible regime.
+    gumbel_temperature: float = 0.5  # lower = closer to hard Bernoulli (less
+    # biased, higher-variance gradient); higher = smoother/easier early
+    # optimization. Common default in the concrete-relaxation literature
+    # (Maddison/Jang 2017), not paper-specified.
+    grad_clip_norm: float = 5.0  # pragmatic addition, not from the paper --
+    # transformer layers + Gumbel-sigmoid noise can spike gradients early on.
 
-    lambda_hinge: float = 1.0  # weight of the boundary-rate hinge loss in the total
-    # loss (loss = ce_loss + lambda_hinge * hinge_loss). Distinct from margin_lambda
-    # below, which is the PAPER's own per-language band-WIDTH hyperparameter, not a
-    # loss weight -- see derive_alpha_beta's docstring for margin_lambda's role.
+    lambda_hinge: float = 1.0  # weight of the boundary-rate hinge loss (loss =
+    # ce_loss + lambda_hinge * hinge_loss). Distinct from margin_lambda below,
+    # the paper's own band-WIDTH hyperparameter, not a loss weight.
     margin_lambda: float = 1.0
     anchor_lang: str = "eng"
     alpha_anchor: float = 0.25
@@ -206,11 +173,9 @@ class FlexiTokensConfig(BaseTokenizerConfig):
     wandb_project: str = "flexitokens"
     # run_name (inherited, default "").
 
-    max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
-    # each epoch-boundary evaluation (see FlexiTokensTrainer.train) -- 0 scores
-    # every loaded dev group. Kept small since this runs periodically DURING
-    # training, not once at the end (see evaluate.py, which always scores
-    # everything).
+    max_eval_samples: int = 20  # cap on BOUQuET dev groups scored per
+    # epoch-boundary eval (0 = score all). Kept small since this runs
+    # periodically during training, unlike evaluate.py's one-time full scoring.
 
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
     # common.training.lr_schedule.build_lr_scheduler.
@@ -221,11 +186,9 @@ class FlexiTokensConfig(BaseTokenizerConfig):
 
 class FlexiTokensTrainer(BaseTokenizerTrainer):
     """Shaped after fairtok.train.GRPOTrainer: construct with args + train_groups
-    (a plain list of {lang: text} dicts, see common.data.oldi_data /
-    common.data.synthetic.make_synthetic_parallel_groups), call .train(), then read
-    .model / .token_freq / .vocab / .alpha_by_lang / .beta_by_lang /
-    .loss_history / .rate_history off the instance. train() also returns
-    (model, token_freq, final_vocab, info) as a tuple for convenience."""
+    (list of {lang: text} dicts), call .train(), then read .model/.token_freq/
+    .vocab/.alpha_by_lang/.beta_by_lang/.loss_history/.rate_history off the
+    instance. train() also returns (model, token_freq, final_vocab, info)."""
 
     def __init__(self, args: FlexiTokensConfig, train_groups, eval_groups=None):
         super().__init__(args, train_groups, eval_groups)
@@ -259,10 +222,8 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
         default_alpha = float(np.mean(list(alpha_by_lang.values())))
         default_beta = float(np.mean(list(beta_by_lang.values())))
 
-        # "Epoch" here means one pass' worth of steps (per_device_train_batch_size
-        # counts GROUPS, see class docstring) -- used as the periodic-checkpoint
-        # INTERVAL for the BOUQuET dev eval below, matching every other trainer's
-        # own steps_per_epoch convention in this repo.
+        # "Epoch" = one pass' worth of steps (per_device_train_batch_size counts
+        # GROUPS) -- the periodic-checkpoint interval for the dev eval below.
         steps_per_epoch = max(
             1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
         )
@@ -311,11 +272,10 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
             optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
         )
 
-        # Built ONCE against the live `model` object -- a closure over `model`
-        # keeps seeing its CURRENT weights on every call (Python closures capture
-        # the object reference, not a snapshot), so this doesn't need rebuilding
-        # each time the epoch boundary is hit. FlexiTokens' induce_spans is
-        # language-agnostic at inference time, unlike magnet's (no script arg).
+        # Built once against the live `model` -- the closure captures the object
+        # reference, so it sees current weights without rebuilding at each epoch
+        # boundary. FlexiTokens' induce_spans is language-agnostic (no script
+        # arg, unlike magnet's).
         eval_induce_fn_by_lang = None
         if self.eval_groups:
             eval_langs = {lang for group in self.eval_groups for lang in group}
@@ -368,11 +328,9 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
             for lang, rate in per_lang_rate.items():
                 self.rate_history[lang].append(rate)
 
-            # Harvest vocabulary from this step's REALIZED (hardened) boundaries --
-            # same "count whatever the model actually produced along the way, apply
-            # the fixed vocab budget only at the end" philosophy as
-            # fairtok.train.GRPOTrainer (see its module docstring): no in-loop
-            # vocab-size enforcement, just tallying spans as they're produced.
+            # Harvest vocabulary from this step's realized (hardened) boundaries --
+            # no in-loop vocab-size enforcement, just tallying spans as produced
+            # (same philosophy as GRPOTrainer).
             with torch.no_grad():
                 hard_boundaries = out["boundaries"].detach().round().long()
             for i, (lang, byte_seq) in enumerate(batch_items):
@@ -387,15 +345,13 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
             )
 
             if run is not None:
-                # Deliberately aggregate-only every step (mean rate across whatever
-                # languages this batch happened to include) -- flattening
-                # per_lang_rate into one wandb metric per language, every step,
-                # would mean hundreds of keys/step under --langs all. fairtok's own
-                # per-language breakdown (fairness/renyi/{lang}) only logs every
-                # fairness_refresh_steps for exactly this reason; this trainer has
-                # no equivalent periodic-diagnostics mechanism to hang a similar
-                # lower-frequency per-language log off of, so it's simply omitted
-                # here rather than logged at the wrong (every-step) cadence.
+                # Aggregate-only every step (mean rate across whatever languages
+                # this batch included) -- logging per_lang_rate as one wandb metric
+                # per language every step would mean hundreds of keys/step under
+                # --langs all. fairtok avoids this by logging per-language
+                # breakdowns only periodically; this trainer has no equivalent
+                # mechanism, so per-language logging is omitted rather than done
+                # at the wrong cadence.
                 run.log(
                     {
                         "train/loss": loss.item(),
@@ -411,9 +367,9 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
                     step=step,
                 )
 
-            # Epoch-boundary held-out eval against the CURRENT (still-training)
-            # model -- BOUQuET dev, capped by max_eval_samples since this runs
-            # periodically, unlike evaluate.py's one-time full scoring.
+            # Epoch-boundary held-out eval against the current (still-training)
+            # model -- BOUQuET dev, capped by max_eval_samples, unlike
+            # evaluate.py's one-time full scoring.
             if eval_induce_fn_by_lang and step % steps_per_epoch == 0:
                 eval_sample = sample_eval_groups(
                     self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
@@ -457,10 +413,9 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
 
 
 def _print_vocab_metrics(token_freq):
-    """Sanity check requested alongside the smoke test: common.eval.metrics functions,
-    UNMODIFIED, consuming this module's own token_freq output -- confirms
-    FlexiTokens' induced vocabulary is a drop-in match for fairtok's existing
-    evaluation pipeline, exactly like a fairtok.policy.BytePolicy vocabulary is."""
+    """Sanity check: unmodified common.eval.metrics functions consuming this
+    module's token_freq output, confirming FlexiTokens' induced vocabulary is
+    a drop-in match for fairtok's evaluation pipeline."""
     per_lang_compression, per_lang_renyi = {}, {}
     for lang, counter in token_freq.items():
         if not counter:
@@ -482,18 +437,14 @@ def _print_vocab_metrics(token_freq):
 
 
 def run_smoke_test():
-    """Mirrors fairtok.train.run_smoke_test's pattern/gate: a small run on
-    synthetic placeholder data (common.data.synthetic.make_synthetic_parallel_groups),
-    checked for:
-      (a) no crash end-to-end,
-      (b) loss actually decreasing (late-training average < early-training average),
-      (c) boundary rates for DIFFERENT synthetic "languages" ending up DIFFERENT
-          from each other, and away from the 0%/100% collapse extremes -- the
-          entire point of the per-language hinge loss is to NOT force every
-          language to the same fixed rate, so identical rates across languages
-          would mean the hinge loss isn't doing anything distinguishable.
-    Also prints common.eval.metrics (compression_rate, renyi_efficiency,
-    gini_coefficient) on the induced vocabulary as a pipeline-compatibility check.
+    """Mirrors fairtok.train.run_smoke_test's pattern: a small run on synthetic
+    placeholder data, checked for (a) no crash, (b) loss decreasing, (c)
+    boundary rates for different synthetic "languages" ending up DIFFERENT
+    from each other and away from the 0%/100% collapse extremes -- identical
+    rates would mean the per-language hinge loss isn't doing anything
+    distinguishable.
+    Also prints common.eval.metrics on the induced vocabulary as a
+    pipeline-compatibility check.
     """
     from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
 

@@ -36,15 +36,10 @@ def build_arg_parser():
 
 def _config_from_args(args):
     """Filters vars(args) down to TrainConfig's own field names before
-    constructing it -- same convention every systems/*/cli.py's own
-    _config_from_args already uses. Needed because parse_args_with_config
-    ALWAYS adds a `config` attribute to the parsed namespace (whether or
-    not -c was actually passed -- see common/config_file.py), which isn't
-    a TrainConfig field; passing vars(args) straight through used to work
-    ONLY because every flag happened to be a TrainConfig field before -c
-    existed. Confirmed to actually break a real run once -c was added:
-    `TrainConfig(**vars(args))` raised `unexpected keyword argument
-    'config'` on a real cluster resume attempt."""
+    constructing it. Needed because parse_args_with_config always adds a
+    `config` attribute to the namespace (see common/config_file.py) that
+    isn't a TrainConfig field -- passing vars(args) straight through
+    raises `unexpected keyword argument 'config'`."""
     field_names = {f.name for f in dataclasses.fields(TrainConfig)}
     return TrainConfig(**{k: v for k, v in vars(args).items() if k in field_names})
 

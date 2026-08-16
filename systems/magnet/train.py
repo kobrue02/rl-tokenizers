@@ -1,18 +1,14 @@
-"""MAGNET training loop -- plain backprop, no RL machinery at all (unlike
-fairtok.train.GRPOTrainer, whose boundary policy is discrete/REINFORCE-trained;
-MAGNET's boundary predictor is differentiable end-to-end via the Gumbel-sigmoid
-+ straight-through trick in model.py, so there's no advantage/return/baseline
-bookkeeping to do here -- just a next-byte CE loss and a boundary-rate loss,
-summed and backpropagated like any ordinary supervised loss).
+"""MAGNET training loop -- plain backprop, no RL/REINFORCE machinery (unlike
+fairtok.train.GRPOTrainer): the boundary predictor is differentiable
+end-to-end via model.py's Gumbel-sigmoid + straight-through trick, so this is
+just a next-byte CE loss + a boundary-rate loss, summed and backpropagated
+like an ordinary supervised loss.
 
 MagnetConfig/MagnetTrainer mirror fairtok.train.GRPOConfig/GRPOTrainer's shape
-(a HF-TrainingArguments-styled config dataclass + a Trainer class with
-.train()) and field naming wherever an equivalent concept exists
-(max_steps, learning_rate, per_device_train_batch_size, seed, vocab_size,
-device, output_dir) -- fields with no GRPOConfig equivalent (d_model,
-boundary_temperature, default_boundary_prior, lambda_boundary) are MAGNET's own
-architecture/loss hyperparameters and keep descriptive names instead of
-force-fitting HF naming that doesn't apply.
+(HF-TrainingArguments-styled config + Trainer.train()) and field naming where
+an equivalent concept exists; fields with no GRPOConfig equivalent (d_model,
+boundary_temperature, default_boundary_prior, lambda_boundary) keep their own
+descriptive names.
 """
 
 import dataclasses
@@ -44,49 +40,34 @@ from .segment import induce_spans
 
 
 def lang_to_script(lang):
-    """Group languages by SCRIPT, not by language, for the per-script boundary
-    predictor -- e.g. arz_Arab and kas_Arab share ONE predictor and one target
-    boundary rate (see model.py's MagnetModel/BoundaryPredictor).
-    common.data.oldi_data.LANG_SCRIPT gives the real lang_Script code (e.g.
-    "arz_Arab" -> the part after the underscore is the ISO 15924 script code:
-    Arab, Latn, Beng, Nkoo cover LANG_SCRIPT's own fixed set of codes.
+    """Group languages by SCRIPT (not language) for the per-script boundary
+    predictor -- e.g. arz_Arab and kas_Arab share one predictor/target rate.
+    common.data.oldi_data.LANG_SCRIPT maps lang -> lang_Script; the part
+    after the underscore is the ISO 15924 script code (Arab, Latn, Beng, Nkoo).
 
-    Synthetic placeholder "languages" (common.data.synthetic.make_synthetic_parallel_groups's
-    profile names, e.g. "high_resource") aren't real language codes and carry no
-    script metadata, so each synthetic profile falls back to being its OWN
-    one-language "script" bucket. This still exercises the exact same
-    per-script-predictor code path end to end; it's simply a trivial
-    (1 language : 1 script) mapping for that placeholder data, which is fine
-    since the smoke test's job is to validate the mechanism, not to reproduce
-    the real script-sharing structure only real language metadata has."""
+    Synthetic placeholder "languages" (e.g. "high_resource") aren't real
+    codes and carry no script metadata, so each falls back to being its own
+    one-language "script" bucket -- exercises the same code path trivially,
+    which is fine since the smoke test only validates the mechanism."""
     if lang in LANG_SCRIPT:
         return LANG_SCRIPT[lang].split("_")[-1]
     return lang
 
 
 def eval_lang_to_script(lang):
-    """Like lang_to_script, but ALSO resolves language keys that are already
-    full lang_Script stems (e.g. "arz_Arab", "aar_Latn") -- exactly what
-    common.data.oldi_data.load_bouquet_dev/load_bouquet_test's langs="all" mode
-    returns (see common.data.cli_data.load_bouquet_dev_for_training, which always
-    uses "all"), unlike training data's plain codes (which lang_to_script's own
-    LANG_SCRIPT-lookup path already handles). Without this, every BOUQuET
-    "all"-mode language silently fails lang_to_script's LANG_SCRIPT lookup,
-    falls through to returning the language key UNCHANGED (the whole stem,
-    e.g. "arz_Arab"), which then never matches any real script key in
-    model.boundary_predictors -- producing an EMPTY (falsy) eval closure dict
-    and silently skipping periodic/held-out evaluation entirely. Confirmed as
-    a real, not just theoretical, bug: an epoch-boundary eval that should have
-    fired 3 times in a 25-step test run fired zero times before this fix.
+    """Like lang_to_script, but also resolves full lang_Script stems (e.g.
+    "arz_Arab") -- what BOUQuET's langs="all" mode returns, vs. training
+    data's plain codes. Without this, BOUQuET language keys fail the
+    LANG_SCRIPT lookup and fall through unchanged, never matching a real
+    script key in model.boundary_predictors, silently producing an empty
+    eval dict and skipping held-out eval entirely (confirmed live: a 25-step
+    test run's epoch-boundary eval fired 0 of an expected 3 times before
+    this fix).
 
-    Falls back to lang_to_script's own convention (the whole string as its own
-    one-off script bucket) if `lang` has no underscore at all -- this never
-    actually collides with lang_to_script's SYNTHETIC-placeholder-profile
-    fallback (e.g. "high_resource", which DOES contain an underscore but isn't
-    a real stem): eval_groups only ever comes from real BOUQuET data or is
-    None (see load_bouquet_dev_for_training's synthetic skip), never from
-    common.data.synthetic's synthetic profiles, so that collision risk can't occur in
-    practice -- but is called out here since it's the reason this is a
+    Falls back to lang_to_script's own whole-string convention if `lang` has
+    no underscore. Can't collide with the synthetic-profile fallback (e.g.
+    "high_resource") in practice, since eval_groups only ever comes from
+    real BOUQuET data or is None -- noted here as the reason this is a
     separate function rather than a change to lang_to_script itself."""
     if lang in LANG_SCRIPT:
         return lang_to_script(lang)
@@ -101,66 +82,49 @@ class MagnetConfig(BaseTokenizerConfig):
     BaseTokenizerConfig unchanged except wandb_project's default. See module
     docstring for the naming-convention rationale on everything else."""
 
-    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
-    # (see MagnetTrainer.train) -- matches fairtok.train.GRPOConfig's own
-    # max_steps/num_train_epochs convention; set explicitly to override with a
-    # raw step count instead (bypasses epoch semantics entirely -- run_smoke_test
-    # below does exactly this, for a fixed small step count regardless of corpus
-    # size).
-    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. 1 "epoch"
-    # here is steps_per_epoch steps (see MagnetTrainer.train) -- a periodic-
-    # checkpoint INTERVAL, not a guaranteed every-group-visited-once traversal
-    # (this trainer samples groups randomly WITH replacement each step, unlike
-    # fairtok's shuffled DataLoader) -- so "5 epochs" means "5 * steps_per_epoch
-    # steps," not a literal 5 full passes with full coverage guarantees.
+    max_steps: int = 0  # 0 -> derive from num_train_epochs * steps_per_epoch (see
+    # MagnetTrainer.train); matches GRPOConfig's convention. Set explicitly to
+    # override with a raw step count (bypasses epoch semantics; run_smoke_test
+    # does this).
+    num_train_epochs: float = 3.0  # only if max_steps == 0. "epoch" = steps_per_
+    # epoch steps, a periodic-checkpoint interval, NOT a full traversal guarantee
+    # -- groups are sampled with replacement each step (unlike a shuffled
+    # DataLoader), so "5 epochs" just means 5 * steps_per_epoch steps.
     per_device_train_batch_size: int = 8  # counts parallel-sentence GROUPS (like
-    # GRPOConfig), which then expand to one flattened (lang, byte_seq) item per
-    # language in each sampled group -- see MagnetTrainer.train.
+    # GRPOConfig); expands to one (lang, byte_seq) item per language per group.
     learning_rate: float = 3e-3
     seed: int = 0
 
-    # --- model architecture (kept deliberately small -- see model.py's module
-    # docstring "deliberate simplifications" section for the full rationale;
-    # these defaults land in the same order of magnitude as
-    # fairtok.policy.BytePolicy's own hidden_size=64-128, num_layers=2-3) ---
+    # --- model architecture (deliberately small, same order of magnitude as
+    # fairtok.policy.BytePolicy's hidden_size=64-128/num_layers=2-3; see
+    # model.py "deliberate simplifications") ---
     d_model: int = 64
     n_heads: int = 4
     n_pre_layers: int = 2
     n_shortened_layers: int = 1
     n_post_layers: int = 1
-    boundary_temperature: float = 0.5  # Gumbel-sigmoid relaxation temperature --
-    # lower = closer to a true discrete Bernoulli (sharper, higher-variance
-    # gradient); higher = smoother relaxation, easier optimization early on. Fixed
-    # here rather than annealed (see model.py's "no temperature annealing"
-    # simplification).
+    boundary_temperature: float = 0.5  # Gumbel-sigmoid temperature -- lower =
+    # closer to discrete Bernoulli (sharper, higher-variance gradient), higher =
+    # smoother/easier early optimization. Fixed, not annealed (see model.py).
 
     # --- boundary-rate loss (see model.py module docstring point on Loss) ---
-    default_boundary_prior: float = 0.3  # target P(byte is a boundary), i.e. an
-    # expected segment length of 1/0.3 ~= 3.3 bytes/token -- in the ballpark a
-    # real BPE tokenizer lands in for Latin-script text. This is deliberately a
-    # flat, hand-set hyperparameter rather than a per-script measurement off a
-    # plain-BPE anchor (contrast fairtok.train._plain_bpe_target_rate) -- the
-    # task spec explicitly allows this simplification ("simpler -- just expose
-    # it as a configurable per-script hyperparameter").
+    default_boundary_prior: float = 0.3  # target P(byte is boundary), i.e. an
+    # expected segment length of 1/0.3 ~= 3.3 bytes/token -- roughly a real BPE
+    # tokenizer's ballpark. A flat, hand-set hyperparameter rather than a
+    # per-script measurement off a plain-BPE anchor (contrast
+    # fairtok.train._plain_bpe_target_rate) -- an allowed simplification.
     per_script_boundary_prior: dict = dataclasses.field(
         default_factory=dict
-    )  # optional
-    # {script: prior} overrides for default_boundary_prior -- e.g. a script with
-    # denser byte-per-character encoding (e.g. Beng, Arab under UTF-8, which use
-    # 2-3 bytes per character vs Latn's 1) might warrant a lower boundary rate
-    # (larger byte-segments) to reach a comparable CHARACTER-level compression
-    # rate. Left empty (falls back to default_boundary_prior everywhere) unless
-    # a caller has a specific reason to differentiate.
-    lambda_boundary: float = 1.0  # weight on the boundary-rate loss relative to
-    # the next-byte CE loss -- both losses are already per-position-normalized
-    # means (see train() below), so a starting point of 1.0 (equal weighting) is
-    # a reasonable default; raise it if boundary rate isn't tracking the prior
-    # closely enough, lower it if it's dominating and hurting the LM loss.
+    )  # optional {script: prior} overrides -- e.g. denser scripts (Beng, Arab:
+    # 2-3 bytes/char vs. Latn's 1) may warrant a lower rate for comparable
+    # character-level compression. Empty falls back to default_boundary_prior.
+    lambda_boundary: float = 1.0  # weight of the boundary-rate loss vs. next-byte
+    # CE (both are per-position-normalized means, so 1.0 = equal weighting).
+    # Raise if boundary rate isn't tracking the prior; lower if it dominates.
 
-    # vocab_size (inherited, default 384): final harvested-vocabulary budget,
-    # same role as GRPOConfig.vocab_size -- applied once, after training, by
-    # keeping the vocab_size most frequent distinct byte spans (see
-    # common.vocab.top_k_by_frequency).
+    # vocab_size (inherited, default 384): final vocab budget, applied once
+    # after training by keeping the most frequent distinct byte spans
+    # (common.vocab.top_k_by_frequency).
     device: str = ""  # "" auto-detects cuda if available, else cpu.
     log_every: int = 10
     # output_dir (inherited, default ""): empty string to skip; else a path
@@ -170,11 +134,9 @@ class MagnetConfig(BaseTokenizerConfig):
     wandb_project: str = "magnet"
     # run_name (inherited, default "").
 
-    max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
-    # each epoch-boundary evaluation (see MagnetTrainer.train) -- 0 scores every
-    # loaded dev group. Kept small by default since this runs periodically DURING
-    # training, not once at the end (see evaluate.py, which always scores
-    # everything -- that one-time cost is fine; paying it every epoch isn't).
+    max_eval_samples: int = 20  # cap on BOUQuET dev groups scored per
+    # epoch-boundary eval (0 = score all). Kept small since this runs
+    # periodically during training, unlike evaluate.py's one-time full scoring.
 
     warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
     # common.training.lr_schedule.build_lr_scheduler.
@@ -184,12 +146,10 @@ class MagnetConfig(BaseTokenizerConfig):
 
 
 class MagnetTrainer(BaseTokenizerTrainer):
-    """Construct with args + train_groups (a plain list of dicts {lang: text},
-    the same shape common.data.cli_data.load_groups /
-    common.data.synthetic.make_synthetic_parallel_groups both return), call .train(),
-    then read .model / .token_freq / .vocab off the instance (train() also
-    returns them, plus a per-step loss trace and boundary-rate trace, as a
-    tuple for convenience -- see run_smoke_test below for the shape)."""
+    """Construct with args + train_groups (list of {lang: text} dicts, see
+    common.data.cli_data.load_groups). Call .train(), then read .model/
+    .token_freq/.vocab off the instance (train() also returns these plus loss
+    and boundary-rate traces as a tuple)."""
 
     def __init__(self, args: MagnetConfig, train_groups, eval_groups=None):
         super().__init__(args, train_groups, eval_groups)
@@ -202,16 +162,13 @@ class MagnetTrainer(BaseTokenizerTrainer):
         rng = np.random.default_rng(cfg.seed)
         print(f"device={device}")
 
-        # The set of scripts must be known BEFORE constructing the model, since
-        # MagnetModel.boundary_predictors is an nn.ModuleDict keyed by script --
-        # adding a key after construction would create parameters the optimizer
-        # below never sees.
+        # Scripts must be known before constructing the model: boundary_predictors
+        # is an nn.ModuleDict keyed by script, and a key added later would create
+        # parameters the optimizer below never sees.
         all_langs = sorted({lang for group in self.train_groups for lang in group})
-        # Precomputed once: lang_to_script(lang) is a pure function of `lang` alone
-        # (a dict lookup + string split), but the loop below calls it once per
-        # (group, lang) pair on EVERY training step -- for a fixed, small set of
-        # languages that's the same lookup repeated thousands of times over a real
-        # run, for no reason, since the mapping never changes after this point.
+        # Precomputed once: lang_to_script is a pure function of `lang`, but is
+        # otherwise called once per (group, lang) pair every step -- wasteful
+        # since the mapping never changes.
         lang_script = {lang: lang_to_script(lang) for lang in all_langs}
         scripts = sorted(set(lang_script.values()))
         print(f"languages={all_langs}")
@@ -237,10 +194,8 @@ class MagnetTrainer(BaseTokenizerTrainer):
         }
         print(f"boundary priors={priors}")
 
-        # "Epoch" isn't a real traversal here either (see train loop's own comment
-        # on random-with-replacement sampling) -- steps_per_epoch is just used as a
-        # periodic-checkpoint INTERVAL (one epoch's worth of steps) for the BOUQuET
-        # dev eval below, not a guarantee every group is visited exactly once.
+        # "Epoch" isn't a real traversal (groups are sampled with replacement) --
+        # steps_per_epoch is just the periodic-checkpoint interval for the dev eval.
         steps_per_epoch = max(
             1, math.ceil(len(self.train_groups) / cfg.per_device_train_batch_size)
         )
@@ -257,17 +212,12 @@ class MagnetTrainer(BaseTokenizerTrainer):
             optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
         )
 
-        # Built ONCE against the live `model` object -- a closure over `model`
-        # keeps seeing its CURRENT weights on every call (Python closures capture
-        # the object reference, not a snapshot), so this doesn't need rebuilding
-        # each time the epoch boundary is hit. Languages whose script this model
-        # never saw during training (eval_lang_to_script(lang) not in
-        # model.boundary_predictors) are excluded here, same policy
-        # magnet/evaluate.py already applies for its own post-hoc eval. Uses
-        # eval_lang_to_script, NOT lang_to_script -- eval_groups' language keys
-        # are BOUQuET "all"-mode stems (e.g. "arz_Arab"), not the plain codes
-        # lang_to_script's LANG_SCRIPT lookup expects (see eval_lang_to_script's
-        # own docstring for why this distinction is load-bearing, not cosmetic).
+        # Built once against the live `model` -- the closure captures the object
+        # reference, so it keeps seeing current weights without rebuilding at
+        # each epoch boundary. Languages whose script this model never saw are
+        # excluded (same policy as evaluate.py). Uses eval_lang_to_script, NOT
+        # lang_to_script -- eval_groups' keys are BOUQuET "all"-mode stems (e.g.
+        # "arz_Arab"), not the plain codes lang_to_script expects.
         eval_induce_fn_by_lang = None
         if self.eval_groups:
             eval_langs = {lang for group in self.eval_groups for lang in group}
@@ -305,23 +255,19 @@ class MagnetTrainer(BaseTokenizerTrainer):
 
         pbar = tqdm(range(total_steps), desc="training", unit="step")
         for step in pbar:
-            # Plain random-with-replacement group sampling per step, rather than
-            # GRPOTrainer's shuffled-epoch DataLoader machinery -- a deliberate
-            # simplification for this baseline (no per-group language-rotation
-            # state to maintain, since MAGNET doesn't need GRPO's group-relative
-            # baseline at all); fine at smoke-test / baseline scale, but means
-            # "epoch" isn't a meaningful concept here the way it is in GRPOConfig.
+            # Random-with-replacement group sampling per step, rather than
+            # GRPOTrainer's shuffled-epoch DataLoader -- simpler, since MAGNET
+            # needs no group-relative baseline; means "epoch" isn't a meaningful
+            # concept here.
             group_idx = rng.integers(
                 0, len(self.train_groups), size=cfg.per_device_train_batch_size
             )
             batch_groups = [self.train_groups[i] for i in group_idx]
 
-            # Flatten every (lang, text) pair in the batch and bucket by script --
-            # the pre/shortened/post transformer stages are SHARED nn.Module
-            # instances reused across every script's forward call below; only
-            # boundary_predictors[script] actually differs per bucket. All
-            # buckets' losses are summed into ONE optimizer step (see below),
-            # exactly like accumulating multiple task losses in a multi-task batch.
+            # Flatten (lang, text) pairs and bucket by script -- pre/shortened/
+            # post stages are shared across scripts; only
+            # boundary_predictors[script] differs. All buckets' losses sum into
+            # one optimizer step (multi-task accumulation).
             items_by_script = defaultdict(list)
             for group in batch_groups:
                 for lang, text in group.items():
@@ -350,11 +296,10 @@ class MagnetTrainer(BaseTokenizerTrainer):
                     byte_ids, lengths, script, sample=True
                 )
 
-                # Next-byte CE, masked to real (b, t) pairs that both (a) aren't
-                # padding and (b) actually have a next byte (i.e. t isn't that
-                # sequence's last real position) -- standard shift-by-one LM
-                # setup, applied per-script-bucket since each bucket has its own
-                # (B, T) padding shape.
+                # Next-byte CE, masked to real (non-pad) positions with an
+                # actual next byte (excludes each sequence's last position) --
+                # standard shift-by-one LM setup, per script bucket since each
+                # has its own padding shape.
                 valid = ~pad_mask
                 has_next = valid.clone()
                 has_next[torch.arange(B, device=device), lengths - 1] = False
@@ -370,11 +315,9 @@ class MagnetTrainer(BaseTokenizerTrainer):
                 n_valid = shift_mask.sum().clamp_min(1)
                 lm_loss = ce.sum() / n_valid
 
-                # Boundary-rate loss: NLL of the observed per-sequence boundary
-                # count under Binomial(real_length, prior) -- see model.py's
-                # module docstring "Loss" section. Computed per real (unpadded)
-                # length, so padding never inflates or deflates a sequence's
-                # apparent boundary rate.
+                # Boundary-rate loss: NLL of the observed boundary count under
+                # Binomial(real_length, prior) -- computed per real (unpadded)
+                # length so padding can't skew the apparent rate.
                 prior = priors[script]
                 boundary_count = hard_boundaries.sum(dim=1)
                 total_count = lengths.to(hard_boundaries.dtype)
@@ -392,10 +335,9 @@ class MagnetTrainer(BaseTokenizerTrainer):
                 total_real_bytes += int(lengths.sum().item())
                 total_boundary_count += float(boundary_count.sum().item())
 
-                # Harvest the induced vocabulary from THIS step's hard boundary
+                # Harvest the induced vocabulary from this step's hard boundary
                 # decisions -- same running-frequency-table role as
-                # fairtok.train.GRPOTrainer's token_freq, and consumed the exact
-                # same way by common.vocab.top_k_by_frequency at the end.
+                # GRPOTrainer's token_freq.
                 for b, (lang, seq) in enumerate(zip(langs, seqs)):
                     L = int(lengths[b].item())
                     boundaries = [
@@ -441,12 +383,10 @@ class MagnetTrainer(BaseTokenizerTrainer):
                     step=step,
                 )
 
-            # Epoch-boundary held-out eval against the CURRENT (still-training)
-            # model -- BOUQuET dev, capped by max_eval_samples since this runs
-            # periodically, unlike evaluate.py's one-time full scoring. Model is
-            # left in eval mode only for the duration of the induce_spans calls
-            # inside evaluate_on_groups (each call flips it back via
-            # model.train(was_training) internally -- see magnet/segment.py).
+            # Epoch-boundary held-out eval against the current (still-training)
+            # model -- BOUQuET dev, capped by max_eval_samples. Model only stays
+            # in eval mode for the duration of each induce_spans call (see
+            # segment.py).
             if eval_induce_fn_by_lang and step % steps_per_epoch == 0:
                 eval_sample = sample_eval_groups(
                     self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
@@ -473,9 +413,9 @@ class MagnetTrainer(BaseTokenizerTrainer):
             run.finish()
 
         if cfg.output_dir:
-            # config + scripts alongside state_dict, not state_dict alone -- see
-            # magnet.inference.load_checkpoint, which needs both to reconstruct a
-            # MagnetModel (scripts sizes its per-script boundary_predictors ModuleDict).
+            # config + scripts alongside state_dict -- load_checkpoint needs
+            # both to reconstruct a MagnetModel (scripts sizes the
+            # boundary_predictors ModuleDict).
             save_checkpoint(model, cfg, scripts, cfg.output_dir)
             print(f"saved model checkpoint to {cfg.output_dir}")
 
@@ -483,21 +423,14 @@ class MagnetTrainer(BaseTokenizerTrainer):
 
 
 def run_smoke_test():
-    """The plan's own gate, MAGNET-flavored: a small trial run on
-    common.data.synthetic's synthetic placeholder corpus (fast, no network access
-    needed -- see common.data.synthetic's module docstring for why this stands in for
-    real OLDI/FLORES+/SMOL data) that checks (1) no crash, (2) the loss trends
-    down, (3) the boundary rate hasn't collapsed to ~0% (never cuts -- the
-    hierarchical bottleneck becomes a no-op, see model.py's null_segment
-    discussion) or ~100% (cuts every byte -- degenerates to character-level,
-    no compression at all).
+    """Small trial run on synthetic placeholder data (fast, no network) that
+    checks (1) no crash, (2) loss trends down, (3) boundary rate hasn't
+    collapsed to ~0% (never cuts) or ~100% (cuts every byte, no compression).
 
-    Also prints compression_rate / renyi_efficiency / gini_coefficient (all
-    from common.eval.metrics, completely unmodified) on the induced per-language
-    vocabulary, as the sanity check that MAGNET's {lang: Counter(span->count)}
-    output shape is consumable by the rest of the fairtok metrics pipeline with
-    zero adapter code -- the same shape fairtok.train.GRPOTrainer.train()
-    itself produces.
+    Also prints compression_rate/renyi_efficiency/gini_coefficient (unmodified
+    common.eval.metrics) on the induced vocabulary, confirming MAGNET's
+    {lang: Counter(span->count)} output is consumable by the fairtok metrics
+    pipeline with zero adapter code.
     """
     from common.data.synthetic import LANG_PROFILES, make_synthetic_parallel_groups
 

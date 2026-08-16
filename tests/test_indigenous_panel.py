@@ -1,10 +1,7 @@
-"""common.data.indigenous_panel/prepare_indigenous_panel/corpora.py's new
-indigenous_panel source -- the parsing/writing/reading logic, exercised
-against small synthetic fixtures rather than the real (network-dependent,
-~202MB in the Nunavut Hansard case) sources every prepare_indigenous_panel
-run actually talks to. See common/data/prepare_indigenous_panel.py's own
-module docstring for what those real sources are and how they were
-verified live before this was built."""
+"""Tests for the indigenous_panel data source (parsing/writing/reading logic)
+against small synthetic fixtures, rather than the real network-dependent
+sources (~202MB for Nunavut Hansard) that prepare_indigenous_panel actually
+talks to."""
 
 import io
 import json
@@ -134,13 +131,10 @@ def test_evaluate_on_indigenous_panel_raises_on_unrecognized_anchor():
 
 def test_hf_frontier_evaluate_end_to_end_on_indigenous_panel(tmp_path, monkeypatch):
     """Exercises the full --eval-data-source indigenous_panel path through
-    systems.hf_frontier.evaluate.main -- CLI parsing, _load_eval_groups,
-    _evaluate_one's evaluate_on_indigenous_panel branch, and the
-    token_freq-stripped JSON output -- against a tiny local fixture panel
-    rather than the real (one-time prep, network-dependent) sources, with a
-    real gpt2 tokenizer (network access to load it, same as this module's
-    own run_smoke_test already does -- small/fast/ungated, not a claim that
-    every test here is network-free)."""
+    systems.hf_frontier.evaluate.main (CLI parsing, group loading, the
+    evaluate_on_indigenous_panel branch, token_freq-stripped JSON output)
+    against a tiny local fixture panel with a real gpt2 tokenizer (small/fast
+    network load, not offline)."""
     from systems.hf_frontier.evaluate import main
 
     _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no"}])
@@ -167,17 +161,12 @@ def test_hf_frontier_evaluate_end_to_end_on_indigenous_panel(tmp_path, monkeypat
 
 
 def test_generate_indigenous_panel_figures(tmp_path):
-    """generate_tikz_figures.generate_indigenous_panel_figures against a
-    small hand-built results.json matching evaluate_on_indigenous_panel's
-    real shape (see that function's own docstring) -- confirms one
-    parity_vs_<anchor>/ subdirectory per anchor actually present in
-    common.data.indigenous_panel.PAIRS, each a single, well-formed grouped
-    bar chart (one tikzpicture, one .dat per tokenizer family, mean
-    token_parity per family per language) -- see
-    gen_indigenous_panel_parity_bars_tex's own docstring for why this
-    replaced an earlier per-language-subplot design (too dense at 34
-    individual tokenizers per language, and overflowed the page at 10
-    languages -- confirmed on a real render)."""
+    """generate_indigenous_panel_figures against a hand-built results.json
+    matching evaluate_on_indigenous_panel's shape -- confirms one
+    parity_vs_<anchor>/ subdirectory per anchor, each a well-formed grouped
+    bar chart (one .dat per tokenizer family, mean token_parity per family
+    per language). This grouped-bar design replaced an earlier
+    per-language-subplot layout that overflowed the page at 10 languages."""
     from generate_tikz_figures import generate_indigenous_panel_figures
 
     def fake_model_result(fertility_spread):
@@ -220,16 +209,13 @@ def test_generate_indigenous_panel_figures(tmp_path):
 
 
 def test_gen_indigenous_panel_parity_bars_omits_family_with_no_data(tmp_path):
-    """Regression test for a real bug: a family with ZERO data points for
-    an anchor group (e.g. claude-opus-5's English-anchor phase not having
-    produced any completed calls yet) must have its \\addplot/\\addlegendentry
-    pair skipped entirely, not emitted against an empty table. A real
-    Overleaf render confirmed pgfplots silently drops a completely-empty
-    addplot from its own legend numbering, which shifts every LATER
-    \\addlegendentry to mislabel the next real plot instead -- "Anthropic"'s
-    legend entry ended up colored/positioned as "Other", with "Other"'s own
-    entry missing entirely. This test locks in the fix: the empty family's
-    .dat file and TeX entries must not exist at all."""
+    """Regression test: a family with ZERO data points for an anchor group must
+    have its \\addplot/\\addlegendentry pair skipped, not emitted against an
+    empty table. pgfplots silently drops an empty addplot from its own legend
+    numbering, shifting every LATER \\addlegendentry to mislabel the next plot
+    (confirmed on a real Overleaf render -- "Anthropic" ended up labeled
+    "Other"). Locks in the fix: the empty family's .dat/TeX entries must not
+    exist."""
     from generate_tikz_figures import gen_indigenous_panel_parity_bars_tex
 
     rows = [
@@ -254,14 +240,10 @@ def test_gen_indigenous_panel_parity_bars_omits_family_with_no_data(tmp_path):
 
 
 def test_run_eval_cli_indigenous_panel_branch(tmp_path, monkeypatch):
-    """common.eval.cross_tokenizer.run_eval_cli is the shared main() body
-    for bpe/superbpe/fairtok/fanta/flexitokens/magnet/manta's own
-    evaluate.py -- extending it once here extends all seven at once (see
-    build_eval_arg_parser's own docstring for confirmation this is the
-    entire CLI surface those seven share). Uses a fake load_model/
-    build_induce_fn_by_lang rather than a real trained checkpoint, since
-    the branch under test (evaluate_on_indigenous_panel vs evaluate_on_groups)
-    doesn't depend on which real system is calling in."""
+    """run_eval_cli is the shared main() body for all seven systems' own
+    evaluate.py, so extending it once here covers all of them. Uses a fake
+    load_model/build_induce_fn_by_lang since the branch under test doesn't
+    depend on which real system is calling in."""
     _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no way"}])
     _write_pairs_jsonl(tmp_path / "nah-es.jsonl", [{"nah": "amo", "es": "no"}])
     monkeypatch.setattr(corpora, "INDIGENOUS_PANEL_LOCAL_DIR", str(tmp_path))
@@ -283,10 +265,9 @@ def test_run_eval_cli_indigenous_panel_branch(tmp_path, monkeypatch):
 
 
 def test_run_eval_cli_bouquet_branch_unaffected(monkeypatch):
-    """Confirms extending run_eval_cli for indigenous_panel didn't change
-    its default (bouquet) behavior -- uses --eval-data-source synthetic
-    with an explicit synthetic_groups override so this stays offline/fast,
-    not a real BOUQuET network fetch."""
+    """Confirms extending run_eval_cli for indigenous_panel didn't change its
+    default (bouquet) behavior; uses a synthetic_groups override to stay
+    offline/fast rather than a real BOUQuET fetch."""
     fake_groups = [{"eng": "hello world", "deu": "hallo welt"}]
 
     def fake_load_model(checkpoint, device):
@@ -309,13 +290,11 @@ def test_run_eval_cli_bouquet_branch_unaffected(monkeypatch):
 
 
 def test_run_eval_cli_output_writes_combinable_json(tmp_path):
-    """--output should write {result_key: results} JSON with token_freq
-    stripped (bytes keys aren't JSON-serializable) -- the SAME shape
-    systems/hf_frontier/evaluate.py and systems/claude_tokenizer/evaluate.py
-    already write, so combine_eval_results.py can merge one of these
-    seven systems' own results in directly. Defaults result_key to the
-    system_label; --result-key overrides it (for keeping two differently
-    configured runs of the same system as distinct entries)."""
+    """--output writes {result_key: results} JSON with token_freq stripped
+    (bytes keys aren't JSON-serializable), matching the shape
+    combine_eval_results.py expects. result_key defaults to system_label;
+    --result-key overrides it to keep differently-configured runs of the
+    same system as distinct entries."""
     fake_groups = [{"eng": "hello world", "deu": "hallo welt"}]
 
     def fake_load_model(checkpoint, device):
@@ -355,10 +334,9 @@ def test_run_eval_cli_output_writes_combinable_json(tmp_path):
 
 
 def test_run_eval_cli_output_indigenous_panel_strips_nested_token_freq(tmp_path, monkeypatch):
-    """Same --output guarantee, but for the nested indigenous_panel shape
-    (token_freq appears inside "combined" AND inside each anchor's own
-    entry in "token_parity_by_anchor" -- see strip_token_freq's own
-    docstring)."""
+    """Same --output guarantee, for the nested indigenous_panel shape
+    (token_freq appears both inside "combined" and inside each anchor's
+    entry in "token_parity_by_anchor")."""
     _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no way"}])
     monkeypatch.setattr(corpora, "INDIGENOUS_PANEL_LOCAL_DIR", str(tmp_path))
 
@@ -385,14 +363,10 @@ def test_run_eval_cli_output_indigenous_panel_strips_nested_token_freq(tmp_path,
 
 
 def test_run_eval_cli_accepts_yaml_config(tmp_path):
-    """run_eval_cli must accept -c/--config the same way every other
-    systems/*/evaluate.py and systems/*/train.py in this repo does (via
-    common.config_file.parse_args_with_config) -- an earlier version used
-    plain argparse.parse_args, silently missing this for all seven systems
-    built on this shared harness (bpe/superbpe/fairtok/fanta/flexitokens/
-    magnet/manta). --checkpoint is a required flag; parse_args_with_config's
-    own docstring is explicit that required-ness is enforced AFTER merging,
-    so it must be satisfiable from the YAML file alone, not just the CLI."""
+    """run_eval_cli must accept -c/--config like every other evaluate.py/train.py
+    in this repo (via parse_args_with_config) -- an earlier version used plain
+    argparse.parse_args and silently missed this. --checkpoint is required, and
+    must be satisfiable from the YAML file alone, not just the CLI."""
     config_path = tmp_path / "eval_config.yml"
     config_path.write_text("checkpoint: fake_checkpoint_path\neval_data_source: synthetic\n")
 
@@ -424,7 +398,7 @@ def test_evaluate_claude_on_indigenous_panel_separates_anchors():
     eval_groups = [
         {"crk": "ab cd", "en": "a b c d e f g h"},  # crk needs half as many "tokens" as en
         {"iu": "ab cd ef gh ij kl mn op", "en": "a b c d"},  # iu needs twice as many as en
-        {"nah": "ab cd ef", "es": "a b"},  # nah needs 1.5x as many as es -- wait use word counts
+        {"nah": "ab cd ef", "es": "a b"},  # nah needs 1.5x as many as es
     ]
     results = evaluate_claude_on_indigenous_panel(eval_groups, _fake_word_count_fn, max_workers=2, progress_every=0)
 
@@ -475,10 +449,8 @@ def test_evaluate_claude_on_indigenous_panel_checkpoint_resume(tmp_path):
 
 def test_claude_evaluate_main_end_to_end_on_indigenous_panel(tmp_path, monkeypatch):
     """Exercises the full --eval-data-source indigenous_panel path through
-    systems.claude_tokenizer.evaluate.main -- CLI parsing, _load_eval_groups,
-    the evaluate_claude_on_indigenous_panel branch, and JSON output -- with
-    ClaudeTokenCounter monkeypatched to a fake (deterministic, no real
-    Anthropic API/credentials needed) so this stays fast and offline."""
+    systems.claude_tokenizer.evaluate.main, with ClaudeTokenCounter
+    monkeypatched to a fake so this stays fast, offline, and credential-free."""
     import systems.claude_tokenizer.evaluate as claude_evaluate
 
     _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no way friend"}])

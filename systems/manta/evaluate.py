@@ -1,8 +1,7 @@
-"""Held-out evaluation for a trained MANTa checkpoint -- mirrors fairtok/evaluate.py's
-shape; see that module's docstring for the BOUQuET-as-held-out-set rationale. MANTa's
-induce_spans discretizes its soft assignment matrix via argmax (see manta/segment.py)
--- language-agnostic at inference time, same as flexitokens, so no extra per-language
-argument is needed here either.
+"""Held-out evaluation for a trained MANTa checkpoint -- mirrors
+fairtok/evaluate.py's shape (BOUQuET as the held-out set). induce_spans
+discretizes the soft assignment matrix via argmax and is language-agnostic
+at inference time (like flexitokens), so no per-language argument is needed.
 """
 
 from common.eval.cross_tokenizer import run_eval_cli

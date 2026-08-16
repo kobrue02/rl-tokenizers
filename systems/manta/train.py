@@ -1,28 +1,20 @@
 """Plain backprop training loop for MantaModel.
 
-Deliberately much simpler than fairtok.train.GRPOTrainer: there is no
-REINFORCE, no reward, no per-group baseline, no fairness scalar, and no
-rate-consistency loss -- see manta.model's module docstring, point 3, for
-why MANTa genuinely has none of that machinery, not just a simplified
-version of it. The only loss is next-byte cross-entropy
-(manta.model.next_byte_loss), and every byte position contributes to it
-independently; "groups" of parallel sentences (common.data.oldi_data's unit of
-organization) are used here purely as a convenient SOURCE of many
-sentences across many languages, not as a training-time structure the way
-GRPOTrainer's group-relative advantage needs them to be. Concretely: this
-trainer flattens every group into a flat list of (lang, text) pairs up
-front and samples plain shuffled minibatches of individual sentences from
-that flat list -- there is no group-of-languages unit at batch time at all.
+Much simpler than fairtok.train.GRPOTrainer: no REINFORCE, reward,
+per-group baseline, fairness scalar, or rate-consistency loss -- MANTa
+genuinely has none of that machinery (manta.model module docstring, point
+3). The only loss is next-byte cross-entropy (manta.model.next_byte_loss).
+Parallel-sentence "groups" (common.data.oldi_data) are just a convenient
+source of multilingual sentences here, not a training-time structure the
+way GRPOTrainer's group-relative advantage needs -- this trainer flattens
+every group into a flat (lang, text) list up front and samples plain
+shuffled minibatches of individual sentences from it.
 
-Field names in MantaConfig mirror fairtok.train.GRPOConfig's own naming
-(itself modeled on HF TrainingArguments) wherever a clean equivalent
-exists, for the same reason GRPOConfig does it: anyone coming from either
-codebase recognizes max_steps/learning_rate/per_device_train_batch_size/
-seed immediately. One naming note worth flagging: GRPOConfig's
-per_device_train_batch_size counts parallel-sentence GROUPS (each
-expanding to multiple language sequences); MantaConfig's counts individual
-byte SEQUENCES directly, since there is no group structure at batch time
-here to count instead (see above).
+MantaConfig field names mirror fairtok.train.GRPOConfig's (itself modeled
+on HF TrainingArguments) wherever a clean equivalent exists. Note:
+GRPOConfig's per_device_train_batch_size counts parallel-sentence groups;
+MantaConfig's counts individual byte sequences, since there's no group
+structure at batch time here.
 """
 
 import dataclasses
@@ -54,37 +46,25 @@ from .segment import boundaries_from_assignment, induce_spans
 @dataclasses.dataclass
 class MantaConfig(BaseTokenizerConfig):
     """vocab_size/output_dir/use_wandb/wandb_project/run_name inherited from
-    BaseTokenizerConfig unchanged except wandb_project's default and
-    vocab_size's docstring (see below). See this module's own docstring for
-    the naming-convention note vs. fairtok.train.GRPOConfig (same spirit,
-    adapted where MANTa's training loop is structurally simpler -- no
-    group/fairness/rate-consistency machinery to name fields for)."""
+    BaseTokenizerConfig. Field names mirror fairtok.train.GRPOConfig where a
+    clean equivalent exists (see module docstring for the batch-size naming
+    caveat)."""
 
-    max_steps: int = 0  # 0 means derive from num_train_epochs * steps_per_epoch
-    # (see MantaTrainer.train) -- matches fairtok.train.GRPOConfig's own
-    # max_steps/num_train_epochs convention; set explicitly to override with a
-    # raw step count instead (run_smoke_test below does exactly this, for a
-    # fixed, predictable number of updates regardless of corpus size).
-    num_train_epochs: float = 3.0  # only takes effect if max_steps == 0. Unlike
-    # magnet/flexitokens/fanta, MANTa's steps_per_epoch IS a real traversal
-    # boundary (this trainer reshuffles a full permutation of every flattened
-    # sequence once it's exhausted -- see the loop below), so "5 epochs" here
-    # really does mean 5 full passes over the corpus.
-    per_device_train_batch_size: int = 8  # counts individual byte SEQUENCES (see
-    # module docstring) -- NOT parallel-sentence groups, unlike GRPOConfig's field
-    # of the same name.
+    max_steps: int = 0  # 0 -> derive from num_train_epochs * steps_per_epoch.
+    # Matches GRPOConfig's max_steps/num_train_epochs convention; set explicitly
+    # for a fixed step count regardless of corpus size (run_smoke_test does this).
+    num_train_epochs: float = 3.0  # only used if max_steps == 0. Unlike
+    # magnet/flexitokens/fanta, steps_per_epoch here is a real traversal boundary
+    # (full reshuffle on exhaustion below), so "N epochs" means N real passes.
+    per_device_train_batch_size: int = 8  # individual byte sequences, not
+    # parallel-sentence groups (unlike GRPOConfig's same-named field).
     learning_rate: float = 3e-3
     seed: int = 0
-    # vocab_size (inherited, default 384): final vocab budget passed to
-    # common.vocab.top_k_by_frequency, applied once after training -- matches
-    # fairtok's own two-stage "never enforce the budget during training, only
-    # harvest it after" design (see fairtok/vocab.py's module docstring),
-    # even though MANTa has no in-loop reward that a hard budget could
-    # distort in the first place; keeping the same two-stage shape just makes
-    # every system's vocab output directly comparable.
-    dim: int = 64  # byte embedding / model width -- see manta.model's module
-    # docstring point 8 for why this is sized to match fairtok.policy.BytePolicy's
-    # own scale (hidden_dim 64-128), not the original paper's ~200M-param model.
+    # vocab_size (inherited, default 384): budget for common.vocab.top_k_by_frequency,
+    # applied once post-training -- same two-stage design as fairtok's own vocab
+    # extraction, for comparable output across systems.
+    dim: int = 64  # byte embedding / model width, matching fairtok.policy.BytePolicy's
+    # scale (64-128), not the paper's ~200M-param model (model.py docstring point 8).
     window: int = 8  # frontier predictor's local-attention half-window (+/- window)
     num_frontier_layers: int = 2
     num_frontier_heads: int = 4
@@ -93,33 +73,20 @@ class MantaConfig(BaseTokenizerConfig):
     max_extra_sigma: float = (
         3.0  # candidate block range truncation, mu_L + this*sigma_L
     )
-    max_grad_norm: float = 1.0  # gradient clipping -- MANTa's forward pass chains a
-    # Gaussian log-density through a softmax through two more matmuls before the
-    # loss even starts, more numerically fragile than fairtok's plain GRU cells, so
-    # this is cheap insurance against an occasional bad batch producing a huge step.
-    device: str = ""  # "" auto-detects cuda if available, else cpu -- same convention
-    # as GRPOConfig.device.
-    log_steps: int = 10  # progress-printing interval; plays the same role
-    # GRPOConfig.fairness_refresh_steps does for periodic console output, but
-    # there's no fairness scalar to refresh here, just a print cadence.
-    # output_dir (inherited, default ""): disables checkpoint saving,
-    # matching GRPOConfig's output_dir convention (empty string = skip).
-    save_steps: int = 0  # 0 disables periodic saving, same convention as GRPOConfig.
-    # use_wandb (inherited, default False) -- see MantaTrainer.train for the
-    # actual wandb.init/run.log calls.
+    max_grad_norm: float = 1.0  # gradient clipping -- cheap insurance since the
+    # Gaussian-log-density -> softmax -> matmul chain is more numerically fragile
+    # than fairtok's plain GRU cells.
+    device: str = ""  # "" auto-detects cuda, else cpu.
+    log_steps: int = 10  # progress-printing interval.
+    save_steps: int = 0  # 0 disables periodic checkpoint saving.
     wandb_project: str = "manta"
-    # run_name (inherited, default "").
 
-    max_eval_samples: int = 20  # cap on how many BOUQuET dev groups get scored at
-    # each epoch-boundary evaluation (see MantaTrainer.train) -- 0 scores every
-    # loaded dev group. Kept small since this runs periodically DURING training,
-    # not once at the end (see evaluate.py, which always scores everything).
+    max_eval_samples: int = 20  # cap on BOUQuET dev groups scored per
+    # epoch-boundary eval (0 = score all). Kept small since this runs
+    # periodically during training, unlike evaluate.py's full scoring.
 
-    warmup_ratio: float = 0.1  # matches HF Trainer's own field name/default -- see
-    # common.training.lr_schedule.build_lr_scheduler.
-    lr_scheduler_type: str = "linear"  # "constant" (warmup only), "linear", or
-    # "cosine" -- see common.training.lr_schedule.build_lr_scheduler. "linear" matches HF
-    # Trainer's own default.
+    warmup_ratio: float = 0.1  # see common.training.lr_schedule.build_lr_scheduler.
+    lr_scheduler_type: str = "linear"  # "constant", "linear", or "cosine".
 
 
 def _avg_span_length(token_freq):
@@ -140,12 +107,10 @@ def _pad_batch(tensors, device):
 
 
 class MantaTrainer(BaseTokenizerTrainer):
-    """Construct with args + train_groups (a list of dicts {lang: text}, the
-    same shape common.data.cli_data.load_groups / common.data.synthetic's
-    make_synthetic_parallel_groups produce -- reused unmodified), call
-    .train(), then read .model / .token_freq / .vocab off the instance
-    (train() also returns them as a tuple, mirroring GRPOTrainer's
-    return-and-store-on-self convention)."""
+    """Construct with args + train_groups (list of {lang: text} dicts, same
+    shape as common.data.cli_data.load_groups / make_synthetic_parallel_groups),
+    call .train(), then read .model/.token_freq/.vocab off the instance
+    (also returned as a tuple, mirroring GRPOTrainer's convention)."""
 
     def __init__(self, args: MantaConfig, train_groups, eval_groups=None):
         super().__init__(args, train_groups, eval_groups)
@@ -157,9 +122,8 @@ class MantaTrainer(BaseTokenizerTrainer):
         torch.manual_seed(cfg.seed)
         print(f"device={device}")
 
-        # Flatten every group into a flat list of (lang, text) pairs ONCE, up
-        # front -- see module docstring for why there's no group structure at
-        # batch time here (unlike GRPOTrainer's GroupLanguageCollator).
+        # Flatten every group into (lang, text) pairs once, up front -- no group
+        # structure at batch time (unlike GRPOTrainer's GroupLanguageCollator).
         flat_items = [
             (lang, text) for group in self.train_groups for lang, text in group.items()
         ]
@@ -176,15 +140,14 @@ class MantaTrainer(BaseTokenizerTrainer):
             num_block_layers=cfg.num_block_layers,
             max_extra_sigma=cfg.max_extra_sigma,
         ).to(device)
-        self.model = model  # set now, not just at the end, so a mid-training crash/
-        # interrupt still leaves a usable (if partially trained) model on the instance
+        self.model = model  # set now so a mid-training crash still leaves a usable
+        # (partially trained) model on the instance.
         print(f"model parameters: {model.num_parameters():,}")
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
 
-        # Unlike magnet/flexitokens/fanta's random-with-replacement group sampling,
-        # MANTa already has a REAL epoch boundary (the reshuffle-when-exhausted
-        # logic in the loop below) -- steps_per_epoch here is exact, not a rough
-        # periodic-checkpoint interval.
+        # Unlike magnet/flexitokens/fanta's random-with-replacement sampling,
+        # steps_per_epoch here is an exact epoch boundary (reshuffle-when-exhausted
+        # below), not a rough periodic interval.
         steps_per_epoch = max(1, len(flat_items) // cfg.per_device_train_batch_size)
         total_steps = (
             cfg.max_steps
@@ -199,9 +162,8 @@ class MantaTrainer(BaseTokenizerTrainer):
             optimizer, total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
         )
 
-        # Built ONCE against the live `model` object -- a closure over `model`
-        # keeps seeing its CURRENT weights on every call (Python closures capture
-        # the object reference, not a snapshot). MANTa's induce_spans is
+        # Closure over `model` sees its current weights on every call (Python
+        # closures capture the reference, not a snapshot). induce_spans is
         # language-agnostic at inference time (no script arg, unlike magnet's).
         eval_induce_fn_by_lang = None
         if self.eval_groups:
@@ -240,9 +202,8 @@ class MantaTrainer(BaseTokenizerTrainer):
         postfix = {}
         for step in pbar:
             if pos + cfg.per_device_train_batch_size > len(order):
-                # Epoch boundary: reshuffle, same "fresh permutation, every group
-                # visited exactly once per pass" semantics as GRPOTrainer's
-                # DataLoader(shuffle=True) reuses across re-iterations.
+                # Epoch boundary: reshuffle (fresh permutation each pass, matching
+                # GRPOTrainer's DataLoader(shuffle=True) semantics).
                 order = rng.permutation(len(flat_items))
                 pos = 0
             batch_idx = order[pos : pos + cfg.per_device_train_batch_size]
@@ -263,10 +224,8 @@ class MantaTrainer(BaseTokenizerTrainer):
             optimizer.step()
             scheduler.step()
 
-            # Track induced spans as training progresses, reusing the assignment
-            # matrix this step's forward pass ALREADY computed -- no second
-            # forward pass needed (see segment.boundaries_from_assignment's
-            # docstring). Detached: this is bookkeeping, not part of the loss.
+            # Reuses this step's already-computed assignment matrix -- no second
+            # forward pass. Detached: bookkeeping, not part of the loss.
             boundaries = boundaries_from_assignment(output.assignment.detach(), lengths)
             for (lang, _), seq, actions in zip(batch, tensors, boundaries):
                 token_freq[lang].update(spans_from_boundaries(seq, actions))
@@ -304,14 +263,9 @@ class MantaTrainer(BaseTokenizerTrainer):
 
             if step % cfg.log_steps == 0:
                 avg_span_len = _avg_span_length(token_freq)
-                # mean number of blocks actually used, per sequence in THIS batch
-                # (mu at the last real position + 1) -- a cheap, differentiable-
-                # quantity-derived proxy for "how coarse is the current
-                # segmentation," independent of (and available before) any
-                # hard-argmax discretization noise; useful for watching whether
-                # the frontier predictor is doing anything at all early in
-                # training, when the discretized spans themselves can be noisy
-                # or near-degenerate (see manta.segment's module docstring).
+                # Mean blocks used per sequence (mu at last real position + 1) --
+                # a cheap proxy for segmentation coarseness that's available before
+                # any hard-argmax discretization noise (useful early in training).
                 last_idx = (lengths - 1).clamp_min(0)
                 mean_blocks = (
                     (output.mu.detach().gather(1, last_idx.unsqueeze(1)).squeeze(1) + 1)
@@ -344,9 +298,9 @@ class MantaTrainer(BaseTokenizerTrainer):
                         step=step,
                     )
 
-            # Epoch-boundary held-out eval against the CURRENT (still-training)
-            # model -- BOUQuET dev, capped by max_eval_samples since this runs
-            # periodically, unlike evaluate.py's one-time full scoring.
+            # Epoch-boundary held-out eval against the still-training model --
+            # BOUQuET dev, capped by max_eval_samples (periodic, unlike
+            # evaluate.py's one-time full scoring).
             if eval_induce_fn_by_lang and step % steps_per_epoch == 0:
                 eval_sample = sample_eval_groups(
                     self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
@@ -384,9 +338,8 @@ class MantaTrainer(BaseTokenizerTrainer):
 
 def _span_length_histogram(token_freq):
     """Merged (across languages) span-length distribution, by frequency --
-    used both for the collapse warnings below and for the smoke test's own
-    "not totally degenerate" pass/fail check. Returns (hist: {length: count},
-    total_spans: int)."""
+    feeds the collapse warnings and the smoke test's degeneracy check.
+    Returns (hist: {length: count}, total_spans: int)."""
     hist = Counter()
     total = 0
     for counter in token_freq.values():
@@ -397,11 +350,9 @@ def _span_length_histogram(token_freq):
 
 
 def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
-    """Feed the smoke test's induced vocabulary straight into fairtok's own
-    metrics functions, UNMODIFIED -- the whole point of reusing
-    common.eval.metrics/common.vocab rather than writing MANTa-specific
-    versions is to confirm this model's output is a drop-in match for
-    whatever consumes fairtok's own tokenizer output."""
+    """Feeds the smoke test's induced vocabulary into fairtok's own metrics
+    functions, unmodified -- confirms this model's output is a drop-in match
+    for whatever consumes fairtok's tokenizer output."""
     avg_span_len = _avg_span_length(token_freq)
     hist, total_spans = _span_length_histogram(token_freq)
     singleton_frac = hist.get(1, 0) / total_spans if total_spans else 0.0
@@ -457,25 +408,14 @@ def _report_smoke_test_metrics(token_freq, final_vocab, loss_trace):
 
 def run_smoke_test():
     """Mirrors fairtok.train.run_smoke_test's role: a small trial run on
-    synthetic placeholder data (common.data.synthetic.make_synthetic_parallel_groups,
-    reused unmodified), gated by three explicit assertions:
-
-      1. no crash getting here at all (train() and metric computation ran
-         end to end over real, padded, variable-length batches);
-      2. the loss actually decreased (compares the mean of the first 5
-         logged step losses against the mean of the last 5, not just the
-         single first/last value, since per-step loss is noisy -- see the
-         printed loss trace);
-      3. the induced (hard-discretized) spans aren't TOTALLY degenerate:
-         not literally 100% single-byte, and not collapsed the other way
-         into one giant span per sentence either.
-
-    Small enough to run on CPU in a couple of minutes, same scale as
-    fairtok's own smoke test. See _report_smoke_test_metrics's printed
-    span-length histogram for the (expected, documented -- see
-    manta/model.py) heavy skew toward short spans this mechanism produces
-    under a plain causal LM loss; assertion 3 only rules out the LITERAL
-    degenerate extremes, not that skew.
+    synthetic data, gated by three assertions -- (1) no crash end to end,
+    (2) loss decreased (mean of first 5 logged steps vs. last 5, since
+    per-step loss is noisy), (3) induced spans aren't totally degenerate
+    (not literally 100% single-byte, nor collapsed into one giant span per
+    sentence). CPU-runnable in a couple minutes. Note: assertion 3 only
+    rules out the literal extremes -- it does not rule out the heavy skew
+    toward short spans this mechanism produces under a causal LM loss (see
+    manta/model.py docstring point 2).
     """
     args = MantaConfig(
         max_steps=80, per_device_train_batch_size=8, vocab_size=384, log_steps=10

@@ -1,31 +1,21 @@
-"""Core overlap-detection logic for checking whether a pretraining corpus
-shares text with a downstream eval benchmark's own test/devtest examples
-(pretraining.benchmarks) -- a real, known risk in the literature (a
-generic web-scale crawl, especially this project's fineweb_edu/olmo_mix,
-may already contain near-duplicates of a benchmark's own test rows,
-independent of anything this project's own tokenizer/pretraining pipeline
-did) that pretraining.benchmarks's own module docstring flags as an open
-risk this module exists to actually check, not just describe.
+"""Overlap-detection logic for checking whether a pretraining corpus shares
+text with a downstream eval benchmark's test/devtest examples
+(pretraining.benchmarks) -- a known risk since a web-scale crawl
+(fineweb_edu/olmo_mix especially) may already contain near-duplicates of a
+benchmark's test rows.
 
-APPROACH: the benchmark side is small (hundreds-thousands of examples) --
-its own text is shingled ONCE into an in-memory index (see
-build_benchmark_shingle_index). The corpus side is large; scan_texts_for_
-contamination streams it ONE DOCUMENT AT A TIME (no tokenization, no GPU --
-a pure-text pass, far cheaper than pretraining.data_prep's own tokenization
-step) and checks each document's shingles against that small index. This
-exploits the size asymmetry (index the SMALL side, stream-scan the LARGE
-side) instead of trying to index the entire pretraining corpus, which would
-need far more memory for no benefit here -- see pretraining/cli_contamination.py
-for the CLI that wires this to an actual common.data.corpora source and a
-pretraining.benchmarks loader.
+APPROACH: the benchmark side is small, so its text is shingled once into an
+in-memory index (build_benchmark_shingle_index); the large corpus side is
+streamed one document at a time (scan_texts_for_contamination, pure text,
+no tokenization/GPU) and checked against that index. This exploits the size
+asymmetry instead of indexing the whole corpus. See cli_contamination.py
+for the CLI wiring this to a corpus source and benchmark loader.
 
-This is a TEXT-level exact n-gram MATCH (a shingle either appears in the
-index or it doesn't), not a MinHash/Jaccard SIMILARITY estimate like
-common.data.dedup's near-dup detection -- the benchmark side is fixed and small
-enough that exact per-shingle indexing is both simpler and more precise
-(no approximation), and what this is actually looking for is "does ANY
-corpus document contain this literal test example's text", not "how
-similar are two whole documents overall."
+This is an exact n-gram shingle match, not a MinHash/Jaccard similarity
+estimate like common.data.dedup's near-dup detection -- exact matching is
+simpler and precise enough given the benchmark side is small and fixed,
+and the question is "does any corpus document contain this literal test
+text", not overall document similarity.
 """
 
 from collections import defaultdict
@@ -34,16 +24,13 @@ from common.data.text_shingles import shingle_hash, shingles
 
 
 def build_benchmark_shingle_index(examples, text_fields_fn, n=13):
-    """examples: a list (not a one-shot generator -- indexed by position
-    below, so this must support len()/repeat iteration) of benchmark
-    example objects (pretraining.benchmarks.MultipleChoiceExample/
-    TranslationExample). text_fields_fn(example) -> list[str] pulls out
-    whichever of that example's own fields should be checked (e.g. XNLI's
-    premise+hypothesis, FLORES-MT's source+reference text).
+    """examples: a list (indexed by position, so must support len()/repeat
+    iteration, not a one-shot generator) of benchmark example objects.
+    text_fields_fn(example) -> list[str] pulls the fields to check (e.g.
+    XNLI's premise+hypothesis, FLORES-MT's source+reference).
 
-    Returns {shingle_hash: {"text": str, "example_indices": set[int]}} --
-    example_indices are POSITIONS in `examples` (the caller keeps that same
-    list around to look a hit back up against the original example)."""
+    Returns {shingle_hash: {"text": str, "example_indices": set[int]}};
+    example_indices are positions in `examples`."""
     index = {}
     for i, ex in enumerate(examples):
         for field_text in text_fields_fn(ex):
@@ -57,13 +44,11 @@ def build_benchmark_shingle_index(examples, text_fields_fn, n=13):
 
 
 def scan_texts_for_contamination(text_iter, shingle_index, n=13):
-    """text_iter: iterable of raw corpus document strings (ONE PASS --
-    a generator is fine here, unlike build_benchmark_shingle_index's
-    `examples`). Returns {example_index: set of matched shingle texts} for
-    every benchmark example that shares at least one n-gram with the
-    corpus documents seen. Also returns the number of documents scanned
-    (as a 2-tuple), since a caller that capped the scan needs that number
-    to know what the result actually covers."""
+    """text_iter: iterable of raw corpus document strings (one pass; a
+    generator is fine here, unlike `examples` above). Returns
+    {example_index: set of matched shingle texts} plus the number of
+    documents scanned (so a caller that capped the scan knows the
+    coverage)."""
     hits = defaultdict(set)
     docs_scanned = 0
     for text in text_iter:

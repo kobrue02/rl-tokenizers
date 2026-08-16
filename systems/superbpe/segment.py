@@ -1,13 +1,9 @@
 """Boundary/span induction for a trained SuperBPEModel -- mirrors every other
-tokenizer package's segment.py shape (a bytes -> list[bytes] spans callable),
-even though there's no neural forward pass or discretization step here: BPE's
-own encode procedure already produces discrete spans directly (see
-superbpe.model.SuperBPEModel.encode_spans), so this is a thin, signature-
-matching wrapper, not a real discretization -- kept as its own module (rather
-than calling encode_spans directly everywhere) purely so superbpe/cli.py and
-superbpe/evaluate.py can import `from .segment import induce_spans` exactly
-like every other tokenizer's cli.py/evaluate.py already does, without either
-of them needing to know SuperBPE's encoding has no notion of "device" at all.
+tokenizer's segment.py shape (bytes -> list[bytes] spans), though there's no
+real discretization here: BPE's encode already produces discrete spans
+directly (SuperBPEModel.encode_spans). Kept as its own module so cli.py/
+evaluate.py can import `from .segment import induce_spans` like every other
+tokenizer, without needing to know SuperBPE has no "device" concept.
 """
 
 

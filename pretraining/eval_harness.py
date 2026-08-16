@@ -1,23 +1,18 @@
 """Scoring primitives for the benchmarks in pretraining.benchmarks, run
-against an already-pretrained pretraining.model.TransformerLM checkpoint
-through its matching pretraining.tokenizer_adapter.TokenizerAdapter.
+against an already-pretrained TransformerLM checkpoint through its matching
+TokenizerAdapter.
 
 Two example shapes, two evaluators:
   - MultipleChoiceExample (XNLI, XCOPA) -> evaluate_multiple_choice, scored
     via loglikelihood (a forward pass, no sampling -- exact and cheap).
   - TranslationExample (FLORES MT) -> evaluate_translation, scored via
-    TransformerLM.generate (sampling -- this is what finally gives
-    generate() a real caller; see model.py's own docstring, which had
-    flagged it as correctly-implemented-but-previously-unreachable) +
-    sacrebleu BLEU/chrF.
+    TransformerLM.generate (sampling) + sacrebleu BLEU/chrF.
 
-Infrastructure only, per explicit scope: this module is unit-tested against
-a tiny from-scratch model in this same PR (see the smoke test at the bottom
-of pretraining/cli_eval.py), NOT run against a real pretrained checkpoint --
-a from-scratch, randomly-initialized/undertrained model has no reason to
-score above chance on any of this, and reporting such a number would be
-noise dressed up as a result. Real numbers are the user's own to produce,
-once an actual pretraining run exists to evaluate.
+Infrastructure only: this module is unit-tested against a tiny from-scratch
+model (see cli_eval.py's smoke test), not run against a real pretrained
+checkpoint -- an untrained model has no reason to score above chance, so
+such a number would just be noise. Real numbers are the user's to produce
+once an actual pretraining run exists.
 """
 
 import collections
@@ -44,22 +39,17 @@ def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"
     """Sum log P(continuation token | context, earlier continuation tokens)
     under `model`, in one forward pass. Returns (sum_logprob, num_tokens).
 
-    context/continuation are ENCODED JOINTLY (adapter.encode(context +
-    continuation)), not concatenated as two separately-encoded id lists --
-    a token can straddle the context/continuation boundary (this matters
-    especially for systems.superbpe, whose whole design point is merges
-    that cross word/whitespace boundaries), and re-splitting after joint
-    encoding is the only way to score the SAME tokenization the model would
-    actually see at that boundary. The split point is found as the longest
-    common prefix between encode(context) and encode(context+continuation)
-    rather than assumed equal to len(encode(context)) -- a JUDGMENT CALL:
-    when the boundary tokenizes differently jointly than alone (again, most
-    likely for superbpe), a few trailing context tokens can get folded into
-    the scored region. That's still a coherent likelihood (every token
-    scored is still conditioned on everything before it), just not
-    guaranteed to isolate EXACTLY the continuation string's own bytes --
-    accepted here rather than building a byte-span-based re-alignment this
-    project's other tokenizers don't need.
+    context/continuation are encoded jointly (encode(context+continuation)),
+    not as two separately-encoded id lists, since a token can straddle the
+    boundary (notably for systems.superbpe, whose merges cross word/
+    whitespace boundaries) -- joint encoding is the only way to score the
+    same tokenization the model would actually see there. The split point
+    is the longest common prefix of encode(context) and encode(context+
+    continuation), not assumed equal to len(encode(context)): when the
+    boundary tokenizes differently jointly, a few trailing context tokens
+    can get folded into the scored region. Still a coherent likelihood,
+    just not guaranteed to isolate exactly the continuation's own bytes --
+    accepted rather than building a byte-span re-alignment.
     """
     context_ids, _ = _encode_tensor(adapter, context, lang, device)
     full_ids, _ = _encode_tensor(adapter, context + continuation, lang, device)
@@ -73,11 +63,9 @@ def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"
 
     max_seq_len = model.cfg.max_seq_len
     if len(full_ids) > max_seq_len:
-        # Truncate CONTEXT from the left (drop earliest tokens), keeping the
-        # continuation intact -- if the continuation alone doesn't fit, that's
-        # a genuinely different problem (the model can't score it at all at
-        # this max_seq_len) and we raise rather than silently truncating the
-        # very thing being scored.
+        # Truncate context from the left, keeping the continuation intact;
+        # if the continuation alone doesn't fit, raise rather than silently
+        # truncating the thing being scored.
         drop = len(full_ids) - max_seq_len
         if drop >= split:
             raise ValueError(
@@ -100,13 +88,10 @@ def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"
 def evaluate_multiple_choice(model, adapter, examples, device="cpu", length_normalize=False):
     """examples: iterable of benchmarks.MultipleChoiceExample. Scores every
     candidate in ex.choices via loglikelihood, predicts argmax, compares to
-    ex.label. length_normalize divides each candidate's score by its own
-    token count first -- off by default (raw sum-loglikelihood, matching
-    the plain "loglikelihood" request type most base-model MC evals report),
-    on trades exact-log-likelihood ranking for robustness to candidates of
-    very different lengths (e.g. XCOPA's choice1/choice2 are usually similar
-    length, so this rarely matters there; expose it anyway since it's a
-    one-line difference and the standard alternative).
+    ex.label. length_normalize divides each candidate's score by its token
+    count -- off by default (raw sum-loglikelihood, the standard "loglikelihood"
+    request type); on trades exact ranking for robustness to candidates of
+    very different lengths.
 
     Returns {"accuracy": float, "n": int, "per_language": {lang: {"accuracy":
     float, "n": int}}}.
@@ -148,38 +133,27 @@ def evaluate_translation(
     max_samples_per_pair=5,
 ):
     """examples: iterable of benchmarks.TranslationExample. Generates a
-    translation via model.generate (no beam search / KV cache -- see that
-    method's own docstring; fine for infrastructure verification, a real
-    large-scale MT eval would want a faster decode path) and scores against
-    ex.reference_text with sacrebleu BLEU + chrF, aggregated per (source_lang,
-    target_lang) pair.
+    translation via model.generate (no beam search / KV cache -- fine for
+    infrastructure verification, a real large-scale eval would want a
+    faster decode path) and scores against ex.reference_text with sacrebleu
+    BLEU + chrF, aggregated per (source_lang, target_lang) pair.
 
-    prompt_template(ex) -> str builds the string handed to the model as the
-    generation prompt; default is a minimal, English-worded instruction
-    ("Translate {source_lang} to {target_lang}:\\n{source_text}\\n{target_lang}:")
-    -- a JUDGMENT CALL, same spirit as benchmarks.py's XNLI/XCOPA templates:
-    a genuinely instruction-tuned/few-shot-primed setup would do better, but
-    this project's pretraining.train produces a plain base LM, and building
-    a real few-shot-example bank per language pair is future work, not
-    infrastructure this module should silently fake.
+    prompt_template(ex) -> str builds the generation prompt; default is a
+    minimal English-worded instruction ("Translate {source_lang} to
+    {target_lang}:\\n{source_text}\\n{target_lang}:") since pretraining.train
+    produces a plain base LM, not an instruction-tuned one -- a real
+    few-shot-example bank per language pair is future work.
 
     max_samples_per_pair: how many raw (source, hypothesis, reference)
-    triples to keep verbatim per pair for qualitative inspection (the
-    corpus-level BLEU/chrF numbers alone don't tell you WHAT the model
-    actually generated) -- capped, not all of them, since a real eval run
-    can have thousands of examples per pair; a print() notes when a pair's
-    samples were truncated, so a small --max-samples-per-pair isn't mistaken
-    for "the model only translated this many sentences."
+    triples to keep verbatim per pair for qualitative inspection, capped
+    since a real eval run can have thousands of examples per pair
+    (corpus-level BLEU/chrF is still computed over the full set).
 
     Returns {"bleu": float, "chrf": float, "n": int, "per_pair": {"src->tgt":
     {"bleu": float, "chrf": float, "n": int, "samples": [{"source":...,
     "hypothesis":..., "reference":...}, ...]}}}. Pair keys are "src->tgt"
-    STRINGS, not (src, tgt) tuples -- tuple dict keys aren't valid JSON, and
-    this result is written straight to disk via json.dumps in
-    pretraining.cli_eval.main (confirmed directly: json.dumps on a
-    tuple-keyed dict raises TypeError -- this was caught before it could
-    crash a real eval run, since cli_eval's own smoke test only ever
-    inspected this dict in-memory, never serialized it).
+    strings, not tuples, since tuple keys aren't valid JSON and this result
+    is written straight to disk via json.dumps in cli_eval.main.
     """
     import sacrebleu
 

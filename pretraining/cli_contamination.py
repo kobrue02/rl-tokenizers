@@ -1,11 +1,8 @@
 """Command-line entry point for pretraining.contamination: checks whether a
-common.data.corpora source (the SAME registry pretraining.data_prep tokenizes)
-shares n-gram text spans with a pretraining.benchmarks eval benchmark's own
-examples -- see pretraining/contamination.py's own module docstring for the
-detection approach, and pretraining/benchmarks.py's CONTAMINATION section
-for why this check matters and what it does NOT cover (only checks the
-sources you actually point it at; a "0% contaminated" result is a real,
-scoped finding about that scan, not a general contamination guarantee).
+common.data.corpora source shares n-gram text spans with a
+pretraining.benchmarks eval benchmark's own examples (see contamination.py
+for the detection approach). Only checks the sources you point it at -- a
+"0% contaminated" result is scoped to that scan, not a general guarantee.
 
 Usage:
     python3 -m pretraining.cli_contamination \\
@@ -18,13 +15,11 @@ Usage:
         --corpus-dataset glot500 --corpus-langs all \\
         --output results/contamination_flores_glot500.json
 
-No SLURM job wraps this deliberately, same reasoning as pretraining.
-cli_generate: this is a text-only scan (no tokenization, no GPU) that a
-user runs on-demand to check ONE corpus/benchmark pair, not a queued stage
-of the regular train->prep->pretrain->eval pipeline -- --max-corpus-docs
-bounds a single interactive run; a genuinely full-corpus scan of a huge
-source is better submitted as an ad-hoc job on whatever partition/time
-limit that scale needs, which varies too much per source to hardcode here.
+No SLURM job wraps this deliberately (same reasoning as cli_generate): a
+text-only scan (no tokenization/GPU) a user runs on-demand for one corpus/
+benchmark pair, not a queued pipeline stage. --max-corpus-docs bounds a
+single interactive run; a full-corpus scan of a huge source is better
+submitted as its own ad-hoc job.
 """
 
 import argparse
@@ -80,11 +75,10 @@ def run_contamination_check(
     max_corpus_docs=None,
 ):
     """examples: list of pretraining.benchmarks example objects.
-    text_fields_fn: see pretraining.contamination.build_benchmark_shingle_index.
-    corpus_dataset/corpus_langs/corpus_dataset_config: same meaning as
-    pretraining.data_prep's own --dataset/--langs/--dataset-config, since
-    this streams from the exact same common.data.corpora.stream_groups. Returns
-    pretraining.contamination.summarize_contamination's own dict shape."""
+    text_fields_fn: see build_benchmark_shingle_index. corpus_dataset/
+    corpus_langs/corpus_dataset_config: same meaning as data_prep's
+    --dataset/--langs/--dataset-config (streams from the same
+    stream_groups). Returns summarize_contamination's dict shape."""
     examples = list(examples)
     index = build_benchmark_shingle_index(examples, text_fields_fn, n=ngram_size)
     text_iter = _corpus_text_iter(corpus_dataset, corpus_langs, corpus_dataset_config, max_corpus_docs)
@@ -108,10 +102,9 @@ def build_arg_parser():
     parser.add_argument("--corpus-dataset", choices=ALL_SOURCES, required=True)
     parser.add_argument(
         "--corpus-langs", type=str, default=None,
-        help="comma-separated language codes (or 'all' for glot500; an arbitrary subset for "
-        "bible_nlp) -- ignored for fineweb_edu/olmo_mix and every BITEXT_SOURCES entry "
-        "(ccmatrix/un_pc/europarl/tatoeba_mt), which use --corpus-dataset-config instead; "
-        "see common.data.corpora",
+        help="comma-separated language codes ('all' for glot500, arbitrary subset for "
+        "bible_nlp); ignored for fineweb_edu/olmo_mix and BITEXT_SOURCES, which use "
+        "--corpus-dataset-config instead",
     )
     parser.add_argument(
         "--corpus-dataset-config", type=str, default=None,
@@ -130,8 +123,7 @@ def build_arg_parser():
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
-        help="SAME default project as every other pretraining.* wandb-logging entry point -- "
-        "this run logs job_type='contamination_check'",
+        help="same default project as other pretraining.* entry points; logs job_type='contamination_check'",
     )
     parser.add_argument("--run-name", type=str, default="")
     return parser
@@ -230,12 +222,10 @@ def main(argv=None):
 
 def run_smoke_test():
     """Verifies the overlap-detection mechanism end-to-end against tiny
-    synthetic examples/corpus text (no real benchmark/HF network calls,
-    unlike a real --corpus-dataset/--benchmark run) -- confirms a
-    genuinely shared long span IS detected and an unrelated document is
-    NOT flagged, at a small ngram_size so short synthetic sentences still
-    produce meaningful shingles (see common/data/dedup.py's own docstring for
-    why shingle_size interacts with document length this way)."""
+    synthetic examples/corpus text (no real benchmark/HF network calls) --
+    confirms a genuinely shared long span is detected and an unrelated
+    document isn't, at a small ngram_size so short synthetic sentences
+    still produce meaningful shingles."""
     from .benchmarks import MultipleChoiceExample
 
     examples = [

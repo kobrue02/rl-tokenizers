@@ -1,40 +1,35 @@
 """Real data loader: the OLDI-and-friends collection
 (https://huggingface.co/collections/openlanguagedata/oldi-and-friends), minus wmt24pp.
 
-Shared by every tokenizer in this repo (fairtok's RL policy, and the
-magnet/flexitokens/manta baselines) -- comparing them meaningfully requires
-training/evaluating them all on the same real multilingual data.
+Shared by every tokenizer in this repo (fairtok, magnet, flexitokens,
+manta) -- comparing them meaningfully requires training/evaluating on the
+same real multilingual data.
 
-Every loader here defaults to `langs="all"` -- every language the source
-natively offers, no curated subset. TRAINING (load_oldi_seed/load_flores_plus)
-and EVAL (load_bouquet_dev/load_bouquet_test) both work this way; smol moved
-out of this module entirely into corpora.py's BITEXT_SOURCES pattern (see
-that module's own docstring), since it's English/Russian-pivot bilingual
-pairs, not true N-way parallel content the way oldi_seed/flores_plus are.
+Every loader defaults to `langs="all"` (every language the source offers,
+no curated subset), for both TRAINING (load_oldi_seed/load_flores_plus) and
+EVAL (load_bouquet_dev/load_bouquet_test). smol moved to corpora.py's
+BITEXT_SOURCES (it's English/Russian-pivot bilingual pairs, not true N-way
+parallel content like oldi_seed/flores_plus).
 
-LANGS below is one specific, fixed list of 9 language codes -- the strict
-cross-lingual intersection of flores_plus/oldi_seed/smol_sent's language
-coverage once wmt24pp is dropped (wmt24pp is a high/mid-resource-only
-benchmark unrelated to OLDI's low-resource focus, and including it collapses
-the intersection to just {eng}). It is not a training or eval default
-anywhere any more -- its one remaining real consumer is
-systems/fairtok/train_morfessor_cli.py's own default language list (see that
-module):
+LANGS below is one fixed list of 9 codes -- the strict cross-lingual
+intersection of flores_plus/oldi_seed/smol_sent once wmt24pp is dropped
+(wmt24pp is high/mid-resource-only and unrelated to OLDI's low-resource
+focus; including it collapses the intersection to just {eng}). Not used as
+a default anywhere any more; its one remaining consumer is
+systems/fairtok/train_morfessor_cli.py's default language list:
 
     arz (Egyptian Arabic), bam (Bambara), ben (Bengali), eng (English), kas (Kashmiri),
     lij (Ligurian), mni (Manipuri), nqo (N'Ko), spa (Spanish)
 
-One canonical script is picked per language where a dataset offers more than one
-(e.g. kas_Arab over kas_Deva, ben_Beng over ben_Latn) -- see LANG_SCRIPT below.
+One canonical script is picked per language where a dataset offers more
+than one (e.g. kas_Arab over kas_Deva) -- see LANG_SCRIPT below.
 
-oldi_seed/flores_plus: one file per language, aligned by an explicit `id` field
-(true N-way parallel -- a `langs="all"` group has every language both
-datasets offer, ~46/~227 respectively at last count).
+oldi_seed/flores_plus: one file per language, aligned by an explicit `id`
+field (true N-way parallel; `langs="all"` covers ~46/~227 languages
+respectively).
 
-BOUQuET dev/test (load_bouquet_dev/load_bouquet_test below) default to
-`langs="all"` too (every one of its 259 languages) -- common.eval.
-cross_tokenizer.evaluate_on_groups already skips languages a given checkpoint
-has no entry for, so this is always safe.
+BOUQuET dev/test default to `langs="all"` too (all 259 languages) --
+evaluate_on_groups already skips languages a checkpoint has no entry for.
 """
 
 import json
@@ -69,10 +64,10 @@ def _load_jsonl(path):
 def _list_all_stems(repo_id, dir_prefix, ext=".jsonl"):
     """Every lang[_Script[_variant]] stem this dataset natively offers in
     `dir_prefix`, discovered from the repo's file listing rather than our
-    curated LANG_SCRIPT table -- this is what lets a group use everything a
-    fully N-way parallel source (oldi_seed, flores_plus, bouquet) actually
-    has, not just LANG_SCRIPT's own fixed entries. `ext` defaults to ".jsonl"
-    (oldi_seed/flores_plus's own layout); bouquet's own files are ".parquet"."""
+    curated LANG_SCRIPT table -- lets a group use everything a fully N-way
+    parallel source (oldi_seed, flores_plus, bouquet) actually has. `ext`
+    defaults to ".jsonl" (oldi_seed/flores_plus); bouquet's files are
+    ".parquet"."""
     prefix = dir_prefix + "/"
     files = list_repo_files(repo_id, repo_type="dataset")
     return sorted(
@@ -85,13 +80,11 @@ def _list_all_stems(repo_id, dir_prefix, ext=".jsonl"):
 def _load_ngram_parallel(repo_id, dir_prefix, langs):
     """oldi_seed / flores_plus layout: one file per language, `id` + `text` fields.
 
-    langs="all" discovers and loads every language file the dataset natively
-    offers (41 for oldi_seed, ~212 for flores_plus dev), keyed by its full
-    lang_Script stem -- this also means script variants of the same language
-    (e.g. kas_Arab and kas_Deva) become distinct entries rather than one
-    curated choice, which is more information, not less. Compute cost is kept
-    bounded by randomly subsampling each group at training time (each
-    trainer's own group_sample_size-equivalent field), not by restricting
+    langs="all" loads every language file the dataset offers (41 for
+    oldi_seed, ~212 for flores_plus dev), keyed by its full lang_Script
+    stem -- script variants of the same language (e.g. kas_Arab/kas_Deva)
+    become distinct entries rather than one curated choice. Compute cost is
+    bounded by subsampling each group at training time, not by restricting
     what's loaded here.
     """
     if langs == "all":
@@ -121,56 +114,40 @@ def load_flores_plus(split="dev", langs="all"):
 
 def _load_bouquet_split(split, langs):
     """Shared implementation for load_bouquet_dev/load_bouquet_test. Combines
-    BOTH paragraph_level and sentence_level for the given split -- matching
-    BOUQuET's own HF "default" config (data_files: "data/*_level/{split}/*.parquet"),
-    not just paragraph_level alone. This roughly doubles row count per language
-    (e.g. English dev: 120 paragraph_level + 504 sentence_level rows) and is what
-    the dataset card's own stated totals (~162k dev / ~272k test rows, summed
-    across all 259 languages) refer to -- paragraph_level alone is only a fraction
-    of that.
+    BOTH paragraph_level and sentence_level for the given split, matching
+    BOUQuET's own HF "default" config -- roughly doubles row count per
+    language (e.g. English dev: 120 paragraph_level + 504 sentence_level
+    rows), matching the dataset card's stated totals (~162k dev / ~272k
+    test rows across all 259 languages).
 
-    Joined by `uniq_id`, NOT `par_id`: paragraph_level rows use `uniq_id == par_id`
-    (e.g. "P001"), sentence_level rows use a finer `uniq_id` per sentence within
-    that paragraph (e.g. "P001-S1", "P001-S2", ...) -- disjoint value spaces (no
-    collision risk), so paragraph- and sentence-level rows can be combined into
-    ONE dict per language. Each row (whether a whole paragraph or a single
-    sentence) becomes its own independent group -- this is a concatenation of
-    the two levels' rows, not a merge of a sentence into its parent paragraph's
-    entry.
+    Joined by `uniq_id`, NOT `par_id`: paragraph_level rows use `uniq_id ==
+    par_id` (e.g. "P001"), sentence_level rows use a finer id per sentence
+    ("P001-S1", "P001-S2", ...) -- disjoint value spaces, so both levels
+    combine into one dict per language, each row becoming its own
+    independent group (a concatenation, not a merge into the parent
+    paragraph's entry).
 
     UNION across languages, not intersection: a group is built for every
-    uniq_id that AT LEAST ONE requested language has, containing whichever
-    subset of those languages actually covers that id -- NOT the full
-    N-way-intersection join _load_ngram_parallel uses for TRAINING data. That
-    distinction matters and is deliberate: training's fairness loss terms
-    (fanta.model.fairness_loss, rate_anchor_loss, flexitokens' boundary_hinge_loss)
-    compare languages' compression rates WITHIN one forward pass, which needs a
-    group's languages to be genuinely aligned parallel content. common.eval.cross_tokenizer.
-    evaluate_on_groups has no such requirement -- it accumulates each language's
-    stats independently across every group containing that language, the same
-    way macro-averaged metrics don't require every class to appear in every
-    sample. Full-intersection across all 259 BOUQuET languages was confirmed
-    (via a real FANTA test-set run) to throw away the vast majority of each
-    language's own rows just because some UNRELATED language happened to be
-    missing that particular id -- e.g. 1052 surviving groups for
-    --eval-data-source bouquet_test langs="all", versus ~272k rows summed
-    across languages per the dataset card. The union join uses every row every
-    language actually has.
+    uniq_id that AT LEAST ONE requested language has, with whichever subset
+    of languages covers that id -- NOT the N-way intersection
+    _load_ngram_parallel uses for training. This matters: training's
+    fairness losses need aligned parallel content within a group, but
+    evaluate_on_groups accumulates each language's stats independently, so
+    it has no such requirement. Full-intersection across all 259 BOUQuET
+    languages was confirmed (via a real FANTA test run) to throw away most
+    of each language's rows whenever some unrelated language happened to be
+    missing that id (1052 surviving groups vs. ~272k rows total) -- the
+    union join uses every row every language actually has.
 
-    Each {lang}.parquet has src_lang == lang and tgt_lang == eng_Latn fixed as a
-    reference pivot -- so `src_text` is this file's actual per-language content,
-    and `tgt_text` is a constant English gloss (the same string appears in every
-    language's file for a given uniq_id, which is NOT the per-language sentence
-    -- easy bug to make, caught by comparing files directly).
+    Each {lang}.parquet has src_lang == lang and tgt_lang == eng_Latn fixed
+    as a reference pivot -- `src_text` is this file's actual per-language
+    content, `tgt_text` is a constant English gloss (same string for a
+    given uniq_id across every language's file, NOT the per-language
+    sentence -- an easy bug to make).
 
-    Defaults to langs="all" (every one of BOUQuET's real 259 languages,
-    confirmed via list_repo_files, keyed by its full lang_Script stem) --
-    same "all" convention _load_ngram_parallel (load_oldi_seed/
-    load_flores_plus) already uses. common.eval.cross_tokenizer's
-    evaluate_on_groups already skips languages a given checkpoint has no
-    entry for, so passing "all" here is always safe -- and every real call
-    site in this repo already does, explicitly, regardless of this
-    function's own default.
+    Defaults to langs="all" (all 259 real BOUQuET languages, keyed by full
+    lang_Script stem) -- same convention as _load_ngram_parallel. Safe:
+    every real call site already passes "all" explicitly.
     """
     import pyarrow.parquet as pq
 
@@ -208,9 +185,7 @@ def load_bouquet_dev(langs="all"):
 
 
 def load_bouquet_test(langs="all"):
-    """The genuinely held-out counterpart to load_bouquet_dev -- reserve this for
-    FINAL reported numbers; use load_bouquet_dev for any hyperparameter tuning or
-    exploratory comparison, to avoid the equivalent of test-set leakage from
-    repeatedly checking results against the same held-out data decisions get
-    tuned against."""
+    """The genuinely held-out counterpart to load_bouquet_dev -- reserve for
+    FINAL reported numbers; use load_bouquet_dev for tuning/exploratory
+    comparison, to avoid the equivalent of test-set leakage."""
     return _load_bouquet_split("test", langs)

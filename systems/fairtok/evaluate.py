@@ -1,23 +1,16 @@
 """Held-out evaluation for a trained fairtok BytePolicy checkpoint.
 
-Scores a SAVED checkpoint (see fairtok.inference.save_checkpoint -- the file
---output-dir points training's cli.py at) against a held-out dataset, as opposed to
-fairtok.train.GRPOTrainer.evaluate's periodic in-training eval, which only ever
-scores the live, currently-training policy. Held-out by default means BOUQuET dev
-(common.data.oldi_data.load_bouquet_dev("all")) -- disjoint from every --data-source
-common.data.cli_data.load_groups trains on, and loading EVERY language BOUQuET's
-paragraph_level/dev split actually offers (259) -- common.eval.cross_tokenizer.
-evaluate_on_groups already skips languages a given checkpoint has no entry for,
-so this scores whatever the checkpoint covers, out of everything BOUQuET has,
-with no manual language list needed. kas/mni/nqo (3 of common.data.oldi_data.
-LANGS's own 9 codes) still aren't in BOUQuET at all -- no fallback for them is
-wired in here, so a checkpoint trained on those 3 simply gets no reported
-numbers for them from this evaluator.
+Scores a SAVED checkpoint (fairtok.inference.save_checkpoint) against a held-out
+dataset -- unlike GRPOTrainer.evaluate, which only scores the live, in-training
+policy. Default held-out set is BOUQuET dev (all 259 languages it offers), disjoint
+from every --data-source load_groups trains on; evaluate_on_groups skips languages
+the checkpoint has no entries for, so no manual language list is needed. Note:
+kas/mni/nqo aren't in BOUQuET at all, so a checkpoint trained on those gets no
+reported numbers here.
 
-Scoring itself (Rényi efficiency, Gini, compression rate, fertility) is
-common.eval.cross_tokenizer.evaluate_on_groups, shared verbatim with magnet/flexitokens/
-manta's own evaluate.py -- only the checkpoint-loading and boundary-inducing steps
-below are fairtok-specific.
+Scoring (Rényi efficiency, Gini, compression rate, fertility) is
+common.eval.cross_tokenizer.evaluate_on_groups, shared with magnet/flexitokens/
+manta's evaluate.py -- only checkpoint-loading and boundary-inducing are fairtok-specific.
 """
 
 from common.bytes_utils import bytes_to_tensor

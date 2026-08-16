@@ -1,78 +1,51 @@
-"""Loads an arbitrary HuggingFace repo's tokenizer (TOKENIZER ONLY -- see
-HFFrontierTokenizer.load's own docstring) and reconstructs exact BYTE spans
-from it, so it can plug into common.eval.cross_tokenizer.evaluate_on_groups exactly
-like every other systems/*/segment.py's own induce_spans.
+"""Loads an arbitrary HuggingFace repo's tokenizer (TOKENIZER ONLY) and
+reconstructs exact BYTE spans from it, so it plugs into
+common.eval.cross_tokenizer.evaluate_on_groups like every other
+systems/*/segment.py's induce_spans.
 
-SPAN RECONSTRUCTION is the real substance of this module. A frontier
-tokenizer's own `tokens`/`ids` aren't byte spans directly -- getting from
-"which token" to "which raw bytes" turns out to depend on which of (at
-least) two genuinely different schemes a given tokenizer uses, CONFIRMED
-empirically here (not assumed from a model's architecture/family name),
-because a naive approach silently produces WRONG spans for either scheme:
+SPAN RECONSTRUCTION is the real substance of this module: a frontier
+tokenizer's `tokens`/`ids` aren't byte spans directly, and a naive approach
+silently produces WRONG spans. Three schemes, detected empirically (never
+assumed from model family), each with a real gotcha:
 
-  1. Byte-level BPE (GPT-2/RoBERTa/tiktoken-style -- confirmed for gpt2 and
-     deepseek-ai/DeepSeek-V4-Pro): every token's own characters directly
-     encode raw bytes one-for-one via the GPT-2 byte<->unicode convention
-     this project already uses elsewhere (common.vocab.BYTE_TO_UNICODE,
-     also reused by systems/bpe/model.py). HF's own `offset_mapping`
-     (character offsets) is NOT sufficient here and was confirmed to give
-     wrong results directly: this scheme can split a single multi-byte
-     UTF-8 character across TWO tokens (e.g. "ü" = 2 UTF-8 bytes can become
-     two separate byte-level tokens), and character-granularity offsets
-     cannot represent a boundary that falls INSIDE one character -- both
-     half-tokens end up mapped to the exact same character range.
+  1. Byte-level BPE (GPT-2/RoBERTa/tiktoken-style, e.g. gpt2, DeepSeek-V4-
+     Pro): token characters encode raw bytes 1:1 via the GPT-2 byte<->unicode
+     map (common.vocab.BYTE_TO_UNICODE, also used by systems/bpe/model.py).
+     HF's `offset_mapping` is NOT usable here: a multi-byte UTF-8 char (e.g.
+     "ü") can split across two tokens, and character-granularity offsets
+     can't represent a boundary inside one character -- both half-tokens
+     would map to the same range.
 
-  2. Character-offset-based (SentencePiece -- confirmed for
-     NousResearch/Llama-2-7b-hf, an ungated mirror of Llama-2's own
-     tokenizer, and microsoft/deberta-v3-base): HF's `offset_mapping` IS
-     exact here, since ordinary SentencePiece tokens are always whole
-     characters -- EXCEPT its own `<0xXX>` byte-fallback tokens (emitted
-     for characters outside its normal vocabulary), which hit the identical
-     sub-character problem as scheme 1: a 4-byte emoji can become four
-     separate `<0xXX>` tokens, all sharing one character offset. Handled by
-     reading the byte value directly out of the token's own hex digits
-     instead of trusting the offset for those specific tokens.
+  2. Character-offset-based (SentencePiece, e.g. Llama-2, deberta-v3-base):
+     `offset_mapping` IS exact for ordinary tokens (always whole
+     characters), EXCEPT SentencePiece's `<0xXX>` byte-fallback tokens
+     (used for out-of-vocab chars), which hit the same sub-character
+     problem as scheme 1 (a 4-byte emoji -> four `<0xXX>` tokens sharing one
+     offset) -- handled by reading the byte value out of the token's own hex
+     digits instead of trusting the offset for those tokens.
 
-     This same offset-based path ALSO covers WordPiece (BERT/DistilBERT/
-     ELECTRA-style) -- confirmed for bert-base-cased/bert-base-multilingual-
-     cased -- but WordPiece has its own real wrinkle offsets alone don't
-     solve: it discards whitespace entirely during tokenization (used only
-     as a word-boundary signal, never encoded in any token), so naive
-     per-token offset slicing silently DROPS every space -- confirmed live:
-     "The quick" round-tripped to "Thequick" without this. _spans_via_offsets
-     tracks a running "covered_until" character position and always starts
-     the next span exactly where the last one left off (never at the
-     token's own reported `start`) -- this absorbs any gap (WordPiece's
-     dropped whitespace) into the FOLLOWING token's span, the same "leading
-     space belongs to the next word" convention byte-level BPE's own "Ġ"
-     prefix already encodes, and is a no-op (start == covered_until anyway)
-     for tokenizers with no such gaps, so it doesn't change anything for the
-     plain-SentencePiece case already confirmed working.
+     Same path also covers WordPiece (BERT/DistilBERT/ELECTRA), which has
+     its own wrinkle: it discards whitespace entirely (word-boundary signal
+     only, never encoded), so naive per-token offset slicing drops every
+     space ("The quick" -> "Thequick"). Fix: _spans_via_offsets tracks a
+     running `covered_until` char position and always starts the next span
+     exactly where the last one left off (never at the token's own `start`)
+     -- absorbs WordPiece's gaps into the following token's span (same
+     "leading space belongs to next word" convention as BPE's "Ġ" prefix),
+     and is a no-op when start == covered_until already.
 
-Given a genuinely new/unverified repo could use some THIRD scheme this
-module doesn't yet handle, _detect_span_method always verifies its choice
-with a real round-trip (encode a canary string, reconstruct bytes, compare)
-before trusting it, and raises a clear error rather than silently returning
-wrong spans if neither known scheme round-trips correctly -- confirmed live
-this correctly REJECTS xlm-roberta-base, whose SentencePiece tokenizer
-emits a standalone metaspace-only token immediately before some words with
-an offset that overlaps the following token's own reported start (not just
-a gap) -- a genuinely different, not-yet-understood quirk this module
-deliberately doesn't guess its way around.
+     _detect_span_method always verifies its choice with a real round-trip
+     (canary string) rather than trusting it -- correctly REJECTS
+     xlm-roberta-base, whose SentencePiece tokenizer emits standalone
+     metaspace-only tokens whose offset OVERLAPS the next token's start
+     (not just a gap) -- a genuinely different quirk this module doesn't
+     try to guess around.
 
-  3. tiktoken-native (OpenAI's own tiktoken package, NOT loaded via
-     transformers.AutoTokenizer/HF Hub at all -- confirmed live tiktoken's
-     own `Encoding.decode_single_token_bytes(id)` returns each token's exact
-     raw bytes directly, no offset reconstruction needed, and every one of
-     the 7 encodings tiktoken 0.13.0 ships (gpt2, r50k_base, p50k_base,
-     p50k_edit, cl100k_base, o200k_base, o200k_harmony) round-trips the
-     canary exactly -- this is what tiktoken's own byte-level BPE design
-     guarantees by construction, verified rather than assumed anyway (see
-     _load_tiktoken's own round-trip check). Selected via a
+  3. tiktoken-native (not loaded via transformers/HF Hub at all):
+     `Encoding.decode_single_token_bytes(id)` returns exact raw bytes
+     directly, no offset reconstruction needed. Selected via a
      "tiktoken:{encoding_name}" pseudo-repo-id (e.g. "tiktoken:cl100k_base")
-     instead of a real HF repo_id, since these aren't HF Hub repos at all --
-     a bare name like "cl100k_base" could otherwise collide with (or be
-     confused for) an actual HF repo id.
+     since these aren't HF Hub repos and a bare name could collide with one.
 """
 
 import re
@@ -86,23 +59,17 @@ _UNICODE_TO_BYTE = {v: k for k, v in BYTE_TO_UNICODE.items()}
 _BYTE_FALLBACK_RE = re.compile(r"^<0x([0-9A-Fa-f]{2})>$")
 _TIKTOKEN_PREFIX = "tiktoken:"
 
-# Deliberately mixes: plain ASCII words, a multi-byte-but-single-codepoint
-# accented Latin character (ü), fully non-Latin multi-byte script (CJK),
-# and a 4-byte emoji requiring surrogate-pair-free UTF-8 handling -- this
-# specific mix is what actually exercises the sub-character-split edge case
-# in both known schemes (see module docstring); a plain-ASCII canary would
-# NOT have caught either bug during development.
+# Mixes ASCII, a multi-byte accented Latin char (ü), CJK, and a 4-byte
+# emoji -- exercises the sub-character-split edge case in both schemes
+# above; a plain-ASCII canary would not have caught either bug.
 _CANARY_TEXT = "The quick brown fox jumps über den Zaun. 你好世界 🎉"
 
 
 def _token_to_bytes_gpt2(tok_str):
-    # A literal ' ' can only mean a raw space byte, never the GPT-2 boundary
-    # marker -- the standard byte-to-unicode scheme always escapes byte 0x20
-    # to 'Ġ', never to itself, so it never collides with this. Needed for
-    # e.g. answerdotai/ModernBERT-base, whose vocab has ~20 literal
-    # multi-space tokens (for efficient code/indentation encoding) that
-    # bypass the escaping scheme entirely -- confirmed live: every one of
-    # its out-of-alphabet vocab tokens is a run of literal ' ' and nothing else.
+    # Literal ' ' always means a raw space byte -- the byte-to-unicode
+    # scheme escapes byte 0x20 to 'Ġ', never to itself, so no collision.
+    # Needed for e.g. ModernBERT-base, whose vocab has literal multi-space
+    # tokens (for code/indentation) that bypass the escaping scheme.
     return bytes(ord(ch) if ch == " " else _UNICODE_TO_BYTE[ch] for ch in tok_str)
 
 
@@ -113,13 +80,10 @@ def _spans_via_byte_level(tokenizer, text):
 
 
 def _spans_via_tiktoken(encoding, text):
-    # disallowed_special=(): real held-out text can coincidentally contain a
-    # substring that LOOKS like a special token (e.g. a literal
-    # "<|endoftext|>" appearing in some scraped corpus) -- tiktoken's own
-    # default raises on that rather than tokenizing it as plain text; this
-    # project wants byte-span reconstruction for arbitrary real text, not a
-    # hard stop on a rare coincidental match, so nothing is treated as
-    # special here.
+    # disallowed_special=(): tiktoken's default raises if text coincidentally
+    # contains a substring that looks like a special token (e.g. a literal
+    # "<|endoftext|>" in scraped text); we want plain byte-span
+    # reconstruction, not a hard stop on a rare coincidence.
     ids = encoding.encode(text, disallowed_special=())
     return [encoding.decode_single_token_bytes(i) for i in ids]
 
@@ -131,26 +95,19 @@ def _load_tiktoken(encoding_name):
     encoding = tiktoken.get_encoding(encoding_name)
     spans = _spans_via_tiktoken(encoding, _CANARY_TEXT)
     if b"".join(spans) != _CANARY_TEXT.encode("utf-8"):
-        # Not expected to ever fire (tiktoken's own byte-level BPE design
-        # guarantees this), but verified rather than assumed anyway, same
-        # discipline as every other scheme in this module.
+        # Not expected to fire (tiktoken's byte-level BPE guarantees this),
+        # but verified rather than assumed, same discipline as elsewhere here.
         raise ValueError(f"tiktoken encoding {encoding_name!r} failed the canary round-trip -- see module docstring")
     return encoding
 
 
 def _spans_via_offsets(tokenizer, text):
-    """`covered_until` is a running character high-water mark, advanced
-    monotonically -- each span always starts exactly where the last one
-    left off, NEVER at the token's own reported `start` (see module
-    docstring's own WordPiece/xlm-roberta-base discussion for why trusting
-    `start` directly breaks on both a GAP -- WordPiece's dropped whitespace,
-    start > covered_until -- and an OVERLAP -- xlm-roberta-base's isolated
-    metaspace-only tokens, start < covered_until). This one rule handles
-    both: a gap gets absorbed into the following span, an overlap gets
-    clamped away from the following span (since covered_until already
-    claimed those characters), and it's a complete no-op for a tokenizer
-    with neither (start == covered_until already), so nothing changes for
-    the plain-SentencePiece/byte-level cases already confirmed working."""
+    """`covered_until` is a running character high-water mark: each span
+    starts exactly where the last one left off, never at the token's own
+    `start` (see module docstring re: WordPiece gaps / xlm-roberta-base
+    overlaps). One rule handles both -- a gap gets absorbed into the
+    following span, an overlap gets clamped away -- and is a no-op when
+    start == covered_until already (plain SentencePiece/byte-level case)."""
     enc = tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
     tokens = tokenizer.convert_ids_to_tokens(enc["input_ids"])
     raw = text.encode("utf-8")
@@ -168,27 +125,23 @@ def _spans_via_offsets(tokenizer, text):
         spans.append(raw[byte_start:byte_end])
         covered_until = span_end
     if spans and covered_until < len(text):
-        # Trailing gap after the last token (rare, but possible) -- attach
-        # to the last span rather than drop it, same "no bytes belong to no
-        # token" invariant as the leading/mid-sequence case above.
+        # Trailing gap after the last token (rare) -- attach to the last
+        # span rather than drop it.
         spans[-1] = spans[-1] + raw[len(text[:covered_until].encode("utf-8")) :]
     return spans
 
 
 def _detect_span_method(tokenizer):
-    """Returns "byte_level" or "offset_mapping", chosen by ACTUALLY trying
-    each and checking a real round-trip -- see module docstring. Raises
-    ValueError (a clear, actionable failure, not silently wrong spans) if
-    neither known scheme reconstructs the canary's bytes exactly.
+    """Returns "byte_level" or "offset_mapping", chosen by actually trying
+    each and checking a round-trip against the canary. Raises ValueError
+    (not silently-wrong spans) if neither scheme reconstructs it exactly.
 
-    Byte-level is tried FIRST regardless of tokenizer.is_fast -- confirmed
-    directly (moonshotai/Kimi-K3's own tokenizer): a "slow" (pure-Python,
-    not Rust-backed) tokenizer can still be genuine byte-level BPE with a
-    working convert_ids_to_tokens, which is all this path needs.
-    tokenizer.is_fast is only required for the offset_mapping fallback,
-    since HF's return_offsets_mapping genuinely needs a fast tokenizer --
-    checked there, not up front, so a slow-but-byte-level tokenizer isn't
-    rejected before it even gets a chance."""
+    Byte-level is tried FIRST regardless of tokenizer.is_fast: a "slow"
+    (pure-Python) tokenizer (e.g. Kimi-K3) can still be genuine byte-level
+    BPE, which only needs convert_ids_to_tokens. is_fast is only checked
+    before the offset_mapping fallback, since return_offsets_mapping
+    genuinely needs a fast tokenizer -- checked there, not up front, so a
+    slow-but-byte-level tokenizer isn't rejected before it gets a chance."""
     try:
         spans = _spans_via_byte_level(tokenizer, _CANARY_TEXT)
         if b"".join(spans) == _CANARY_TEXT.encode("utf-8"):
@@ -218,9 +171,8 @@ def _detect_span_method(tokenizer):
 
 class HFFrontierTokenizer:
     """Construct via .load(repo_id), not directly. .induce_spans(raw) ->
-    list[bytes], the same shape every other systems/*/segment.py's own
-    induce_spans returns -- plugs directly into
-    common.eval.cross_tokenizer.evaluate_on_groups."""
+    list[bytes], same shape as every systems/*/segment.py's induce_spans --
+    plugs directly into common.eval.cross_tokenizer.evaluate_on_groups."""
 
     def __init__(self, tokenizer, span_method):
         self.tokenizer = tokenizer
@@ -229,34 +181,20 @@ class HFFrontierTokenizer:
 
     @classmethod
     def load(cls, repo_id, trust_remote_code=False, hf_token=None):
-        """Loads ONLY the tokenizer from `repo_id` -- confirmed directly
-        (not assumed): a real load of deepseek-ai/DeepSeek-V4-Pro's
-        tokenizer via AutoTokenizer.from_pretrained fetched ~6MB of
-        tokenizer.json/config files, zero .safetensors/.bin model weight
-        files, verified by inspecting the HF cache directory afterward.
+        """Loads ONLY the tokenizer from `repo_id` (AutoTokenizer.from_pretrained
+        fetches tokenizer.json/config files, never model weights).
 
         A "tiktoken:{encoding_name}" repo_id (e.g. "tiktoken:cl100k_base")
-        loads one of tiktoken's own built-in encodings instead -- see
-        _load_tiktoken and the module docstring's own scheme 3. Every other
-        argument below is irrelevant to that path (tiktoken's encodings
-        aren't HF Hub repos, need no token, execute no remote code) and is
-        simply not used for it.
+        loads a tiktoken built-in encoding instead (see _load_tiktoken /
+        scheme 3 above); the other args are unused for that path.
 
-        trust_remote_code defaults to False and must be opted into
-        explicitly -- some repos (confirmed: moonshotai/Kimi-K3 ships its
-        own tokenization_kimi.py) define a custom tokenizer class not built
-        into transformers and need this to load at all, but it means
-        executing that repo's own Python code on your machine -- a real
-        security consideration this project won't silently default around
-        just to make one more repo load without an extra flag.
+        trust_remote_code defaults to False: some repos (e.g. Kimi-K3) ship
+        a custom tokenizer class that needs this to load, but it means
+        executing that repo's own Python code -- opt in explicitly.
 
-        hf_token: an explicit HF access token, only required for GATED
-        repos (confirmed: meta-llama/Llama-3.1-8B-Instruct is one -- needs
-        BOTH license acceptance on huggingface.co AND a token with that
-        access actually granted). Falls back to the HF_TOKEN environment
-        variable / a prior `huggingface-cli login` if not given, the same
-        convention every other HF_TOKEN usage in this project's own
-        jobs/*.sh scripts already follows."""
+        hf_token: only needed for gated repos (e.g. Llama-3.1-8B-Instruct,
+        which also needs license acceptance on huggingface.co). Falls back
+        to HF_TOKEN env var / prior `huggingface-cli login`."""
         if repo_id.startswith(_TIKTOKEN_PREFIX):
             encoding = _load_tiktoken(repo_id[len(_TIKTOKEN_PREFIX):])
             return cls(encoding, "tiktoken")
@@ -267,10 +205,8 @@ class HFFrontierTokenizer:
         return cls(tokenizer, span_method)
 
     def induce_spans(self, raw):
-        # errors="replace": same accepted, documented lossiness
-        # systems/bpe/model.py's own _to_str takes for invalid UTF-8 --
-        # never triggered by any real text source in this project, only a
-        # deliberately-adversarial byte string.
+        # errors="replace": same lossiness systems/bpe/model.py's _to_str
+        # accepts for invalid UTF-8 -- never hit by real project text.
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else raw
         if self.span_method == "byte_level":
             return _spans_via_byte_level(self.tokenizer, text)

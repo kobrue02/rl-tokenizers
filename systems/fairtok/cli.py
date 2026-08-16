@@ -15,8 +15,8 @@ from systems.cli_common import add_dataclass_fields, add_vocab_output_args, conf
 from .policy import segment_bytes
 from .train import GRPOConfig, GRPOTrainer
 
-# Extra clarifying text for fields whose semantics aren't obvious from
-# "(GRPOConfig.field, default: X)" alone -- merged into the auto-generated help.
+# Clarifying text for fields whose semantics aren't obvious from the
+# auto-generated "(GRPOConfig.field, default: X)" help alone.
 _HELP_OVERRIDES = {
     "max_steps": "0 derives the step count from num_train_epochs; set explicitly to override "
     "with a raw step count instead (bypasses epoch semantics entirely)",

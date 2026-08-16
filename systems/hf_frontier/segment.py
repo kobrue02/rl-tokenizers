@@ -1,9 +1,8 @@
 """Boundary/span induction for a loaded HFFrontierTokenizer -- mirrors every
-other tokenizer package's segment.py shape (a bytes -> list[bytes] spans
-callable). See model.py's own docstring for why this is a real
-discretization step here (unlike bpe/superbpe's thin wrappers): a frontier
-tokenizer's own tokens aren't byte spans directly, reconstructing them
-correctly is the actual substance of this package.
+other tokenizer package's segment.py shape (bytes -> list[bytes] spans).
+Unlike bpe/superbpe's thin wrappers, a frontier tokenizer's tokens aren't
+byte spans directly -- reconstructing them (model.py) is the real substance
+of this package.
 """
 
 

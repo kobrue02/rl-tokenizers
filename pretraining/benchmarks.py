@@ -1,72 +1,42 @@
 """Downstream evaluation benchmark registry: XNLI, XCOPA, FLORES (MT) -- the
-three named in scope for evaluating a PRETRAINED model (pretraining.train),
-as opposed to everything else in this repo, which evaluates a TOKENIZER's
-own intrinsic quality (common.eval.cross_tokenizer) or fits one (systems/, this
-package's own data_prep.py). Schemas confirmed directly against each source
-before writing this (not assumed):
+three in scope for evaluating a pretrained model (pretraining.train), as
+opposed to a tokenizer's own intrinsic quality (common.eval.cross_tokenizer)
+or fitting one (systems/, data_prep.py). Schemas confirmed against each
+source directly:
 
   - XNLI: facebook/xnli. 15 per-language configs (ar/bg/de/el/en/es/fr/hi/
-    ru/sw/th/tr/ur/vi/zh) plus a differently-shaped "all_languages" pooled
-    config (nested dicts, not flat rows) -- this module iterates the
-    per-language configs individually rather than that pooled one, for a
-    uniform row shape across languages. Row: {premise: str, hypothesis:
-    str, label: int}, label via ClassLabel(['entailment', 'neutral',
-    'contradiction']) -- confirmed via the dataset's own declared features,
-    not assumed from the values alone.
+    ru/sw/th/tr/ur/vi/zh), loaded individually rather than the differently-
+    shaped pooled "all_languages" config, for a uniform row shape. Row:
+    {premise, hypothesis, label}, label via ClassLabel(['entailment',
+    'neutral', 'contradiction']).
   - XCOPA: cambridgeltl/xcopa. 11 real per-language configs (et/ht/id/it/
-    qu/sw/ta/th/tr/vi/zh) plus "translation-X" machine-translated variants
-    (not used here). Row: {premise, choice1, choice2, question ('cause' or
-    'effect'), label (0 or 1, index of the correct choice)}.
-  - FLORES (MT): reuses common.data.oldi_data.load_flores_plus directly rather
-    than a separate loader -- flores_plus is already integrated in this
-    project (systems/ tokenizer training also draws on it). load_flores_mt
-    calls it with langs="all" (not a short list), which VERIFIED LIVE
-    (not assumed -- an earlier version of this docstring wrongly assumed
-    the intersection would collapse to a much smaller set; it does not)
-    loads all ~227 of flores_plus's native languages with ZERO id
-    shrinkage: every one of those 227 per-language files shares the exact
-    same 997 sentence ids, because FLORES is deliberately built as a fully
-    N-way parallel benchmark. So ANY pair of its languages is valid
-    parallel content, not just a curated subset -- load_flores_mt accepts
-    any of flores_plus's own lang_Script stems (e.g. "deu_Latn"), plus (for
-    backward compatibility with other tooling elsewhere in this project --
-    oldi_seed/smol/BOUQuET) the short codes from common.data.oldi_data.
-    LANG_SCRIPT, auto-resolved to their full stem.
-    split="devtest" (confirmed to exist as its own top-level split,
-    distinct from "dev") is the standard FLORES held-out MT evaluation
-    split -- "dev" is what systems/ tokenizer training itself already
-    draws on, so devtest keeps this genuinely disjoint from anything the
-    tokenizer or a pretraining run built from flores_plus's own "dev"
-    split could have seen.
+    qu/sw/ta/th/tr/vi/zh); "translation-X" MT variants not used. Row:
+    {premise, choice1, choice2, question ('cause'/'effect'), label (0/1)}.
+  - FLORES (MT): reuses common.data.oldi_data.load_flores_plus directly.
+    load_flores_mt calls it with langs="all", which loads all ~227 native
+    languages with zero id shrinkage -- every per-language file shares the
+    same 997 sentence ids since FLORES is fully N-way parallel, so any
+    language pair is valid. Accepts flores_plus's lang_Script stems (e.g.
+    "deu_Latn") or LANG_SCRIPT's short codes (backward compat with oldi_
+    seed/smol/BOUQuET tooling), auto-resolved. split="devtest" is the
+    standard held-out MT split, disjoint from "dev" (what tokenizer
+    training draws on).
 
-PROMPTING, a real judgment call stated rather than hidden: XNLI/XCOPA's
-natural zero-shot templates (e.g. COPA's "{premise} because {choice}") use
-English scaffolding words ("because", "so", "Question:", "True, False, or
-Neither?"). Properly localizing that scaffolding per language would need
-verified translations this project doesn't have for 11-15 languages: rather
-than guess at them, PROMPT_OVERRIDES lets a caller supply a per-language
-template, and every language without one falls back to the English
-template applied to that language's own (non-English) premise/hypothesis/
-choice text -- linguistically imperfect (English scaffolding around
-non-English content), but honest about being a default, not a claim of
-faithful multilingual prompting. Swap in real localized templates via
-PROMPT_OVERRIDES before running a non-English XNLI/XCOPA eval that matters.
+PROMPTING: XNLI/XCOPA's natural zero-shot templates use English scaffolding
+words ("because", "Question:", "True, False, or Neither?"). Properly
+localizing that per language would need verified translations this project
+doesn't have. PROMPT_OVERRIDES lets a caller supply a per-language
+template; languages without one fall back to the English template applied
+to that language's own text -- linguistically imperfect but an honest
+default, not a claim of faithful multilingual prompting.
 
-CONTAMINATION: checked, not just described, via pretraining.cli_contamination
--- an n-gram text-overlap scan between any common.data.corpora source (the SAME
-sources a pretraining run actually trains on) and any of these three
-benchmarks' own examples (see pretraining/contamination.py for the
-detection approach: shingle the small benchmark side into an index, stream
-the large corpus side once checking for matches). FLORES-MT specifically
-also uses load_flores_plus's "devtest" split, disjoint from the "dev" split
-systems/ tokenizer training draws on -- that guards against one additional,
-narrower leak on top of the general n-gram scan. Run it explicitly (`python3
--m pretraining.cli_contamination --benchmark ... --corpus-dataset ...`)
-against whichever source(s) actually fed a given pretraining run before
-trusting that run's eval numbers -- a scan that was never run, or one
-capped short of the full corpus via --max-corpus-docs, still tells you
-nothing either way (see cli_contamination.py's own docstring for that
-caveat).
+CONTAMINATION: checked via pretraining.cli_contamination -- an n-gram
+overlap scan between any common.data.corpora source and these benchmarks'
+examples (see contamination.py). FLORES-MT's "devtest" split is disjoint
+from "dev" (tokenizer training's split), guarding one narrower leak beyond
+the general scan. Run cli_contamination explicitly against whichever
+source(s) fed a given pretraining run before trusting its eval numbers --
+an unrun or --max-corpus-docs-capped scan tells you nothing either way.
 """
 
 import dataclasses
@@ -78,8 +48,8 @@ from common.data.oldi_data import LANG_SCRIPT, load_flores_plus
 XNLI_LANGS = ["ar", "bg", "de", "el", "en", "es", "fr", "hi", "ru", "sw", "th", "tr", "ur", "vi", "zh"]
 XCOPA_LANGS = ["et", "ht", "id", "it", "qu", "sw", "ta", "th", "tr", "vi", "zh"]
 
-XNLI_LABEL_NAMES = ["entailment", "neutral", "contradiction"]  # ClassLabel order,
-# confirmed via facebook/xnli's own declared features -- do not reorder.
+XNLI_LABEL_NAMES = ["entailment", "neutral", "contradiction"]  # ClassLabel
+# order per facebook/xnli's declared features -- do not reorder.
 
 
 @dataclasses.dataclass
@@ -140,18 +110,11 @@ def _xcopa_template(lang, premise, choice1, choice2, question):
 
 def _round_robin(iterables):
     """Cycles through `iterables` one item at a time, dropping any that
-    exhaust, until all are exhausted -- the SAME fix common.data.corpora.
-    _round_robin applies for Glot500 (see that module's docstring for the
-    original incident): every loader below feeds one dataset/language PER
-    ITEM lazily, in sequence, so a caller that applies a global cap (like
-    pretraining.cli_eval's --max-examples, via itertools.islice) on a
-    NAIVELY-CONCATENATED multi-language stream would silently only ever
-    draw from the first language/pair before the cap is hit -- confirmed to
-    actually happen this way in a real run (a --langs en,de,fr,ar,zh
-    --max-examples 1000 XNLI eval came back with only "en" in
-    per_language). Round-robining here, not by asking every caller to
-    remember to cap per-language itself, is what makes any global
-    --max-examples value actually sample every requested language/pair."""
+    exhaust, until all are exhausted. Needed because a naively-concatenated
+    multi-language stream under a global cap (--max-examples via
+    itertools.islice) would silently draw only from the first language --
+    confirmed on a real run (--langs en,de,fr,ar,zh --max-examples 1000
+    came back with only "en")."""
     iterators = [iter(it) for it in iterables]
     active = list(iterators)
     while active:
@@ -164,10 +127,8 @@ def _round_robin(iterables):
 
 def load_xnli(langs=None, split="test"):
     """langs: list of XNLI_LANGS codes, defaults to all 15. Yields
-    MultipleChoiceExample, per-language configs loaded one at a time (not
-    the differently-shaped "all_languages" pooled config -- see module
-    docstring), interleaved round-robin across languages (see
-    _round_robin's own docstring for why that matters under a global cap)."""
+    MultipleChoiceExample, per-language configs loaded one at a time,
+    interleaved round-robin across languages (see _round_robin)."""
 
     def _one_lang(lang):
         ds = hf_datasets.load_dataset("facebook/xnli", name=lang, split=split, streaming=True)
@@ -195,35 +156,25 @@ def load_xcopa(langs=None, split="test"):
 
 
 def _resolve_flores_lang(code):
-    """Accepts either a short code common.data.oldi_data.LANG_SCRIPT maps
-    (e.g. "eng" -> "eng_Latn" -- kept for backward compatibility with other
-    tooling elsewhere in this project: oldi_seed/smol/BOUQuET) or a full
-    lang_Script stem directly (e.g. "deu_Latn") -- any of flores_plus's
-    ~227 native languages. Passed through unchanged if it isn't a known
-    short code."""
+    """Accepts either a short code LANG_SCRIPT maps (e.g. "eng" ->
+    "eng_Latn", kept for backward compat with oldi_seed/smol/BOUQuET
+    tooling) or a full lang_Script stem directly (e.g. "deu_Latn"). Passed
+    through unchanged if not a known short code."""
     return LANG_SCRIPT.get(code, code)
 
 
 def load_flores_mt(lang_pairs, split="devtest"):
     """lang_pairs: list of (source_lang, target_lang) tuples -- either
     short codes (see _resolve_flores_lang) or full flores_plus lang_Script
-    stems (e.g. "eng_Latn", "deu_Latn"), any of its ~227 native languages,
-    not restricted to a curated subset (verified live: flores_plus's
-    langs="all" expansion is genuinely fully N-way parallel across all 227
-    languages -- see module docstring).
+    stems (e.g. "eng_Latn"), any of its ~227 native languages.
 
-    Loads the FULL 227-language set ONCE regardless of how many pairs are
-    requested (langs="all"), then slices out whichever pairs were asked
-    for -- more expensive than loading just 2 languages for a SINGLE pair,
-    but the only way to support arbitrary pairs at all (LANG_SCRIPT only
-    maps its own fixed 9 short codes), and cheaper than the old
-    per-pair-reload design once more than one pair is requested for the
-    same split. flores_plus's own per-language files are cached locally
-    after the first download (see common.data.oldi_data._download), so repeated
-    calls don't re-download. Pairs are interleaved round-robin (see
-    _round_robin) for the same reason load_xnli/load_xcopa are -- a global
-    --max-examples cap should sample every requested pair, not just the
-    first. Yields TranslationExample."""
+    Loads the full 227-language set once (langs="all") regardless of how
+    many pairs are requested, then slices out the requested pairs -- more
+    expensive for a single pair but the only way to support arbitrary
+    pairs (LANG_SCRIPT only maps 9 short codes). Per-language files are
+    cached locally after first download. Pairs are interleaved round-robin
+    (see _round_robin) so a global --max-examples cap samples every
+    requested pair. Yields TranslationExample."""
     resolved_pairs = [(_resolve_flores_lang(s), _resolve_flores_lang(t)) for s, t in lang_pairs]
     groups = load_flores_plus(split=split, langs="all")
     available = set(groups[0]) if groups else set()

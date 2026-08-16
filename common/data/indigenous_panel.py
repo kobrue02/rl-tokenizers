@@ -1,66 +1,58 @@
-"""A small, DELIBERATELY curated panel of Indigenous languages for a
-dedicated tokenizer-fairness comparison alongside BOUQuET -- unlike every
-other source in common.data.corpora, this one exists specifically to probe
+"""A small, deliberately curated panel of Indigenous languages for a
+dedicated tokenizer-fairness comparison alongside BOUQuET -- unlike other
+sources in common.data.corpora, this one exists specifically to probe
 polysynthetic/highly-synthetic morphology, not to cover "every language a
-source natively offers" (there is no "all" for this source; see
-common.data.corpora's own LOCAL_BITEXT_SOURCES docstring section for why).
+source offers" (there is no "all" for this source).
 
-Every entry pairs one Indigenous language with an ANCHOR language it comes
+Every entry pairs one Indigenous language with an ANCHOR language it's
 already aligned against in its own source -- English for crk/iu, Spanish
 for the nine AmericasNLP shared-task languages (their own pivot language,
-confirmed directly from https://github.com/AmericasNLP/americasnlp2021,
-not English). This is a genuine mixed-anchor panel, not an oversight:
-common.eval.parity.anchor_invariant_parity's own gm_relative/spread metrics
-are anchor-agnostic by construction, so mixing anchors doesn't break the
-underlying comparison -- callers that report results per-pair should just
-keep each pair's own anchor field visible (see PAIRS[*]["anchor"]) rather
-than silently treating the whole panel as English-anchored.
+per https://github.com/AmericasNLP/americasnlp2021, not English). This is
+a genuine mixed-anchor panel: common.eval.parity.anchor_invariant_parity's
+gm_relative/spread metrics are anchor-agnostic by construction, so mixing
+anchors is fine as long as callers keep each pair's own anchor field
+visible (PAIRS[*]["anchor"]) rather than treating the whole panel as
+English-anchored.
 
-MORPHOLOGY, stated plainly: not every language here is equally
-"polysynthetic" under standard typological classification -- Plains Cree,
-Inuktitut, Nahuatl, Wixarika, and (to varying degrees discussed in the
-literature) Bribri, Rarámuri, Shipibo-Konibo, and Asháninka are the ones
-most consistently described as polysynthetic; Quechua, Aymara, and
-Guaraní are more standardly classified as agglutinative (highly synthetic,
-but not usually "polysynthetic" in the stricter sense). The "morphology"
-field below records this project's own best-effort classification, not a
-rigorously sourced typological survey -- treat it as a starting point for
-figure grouping/filtering, not a citable claim.
+MORPHOLOGY: not every language here is equally "polysynthetic" under
+standard typological classification -- Plains Cree, Inuktitut, Nahuatl,
+Wixarika, and (to varying degrees) Bribri, Rarámuri, Shipibo-Konibo, and
+Asháninka are most consistently described as polysynthetic; Quechua,
+Aymara, and Guaraní are more standardly agglutinative (highly synthetic but
+not usually "polysynthetic" in the stricter sense). The "morphology" field
+is this project's own best-effort classification -- a starting point for
+figure grouping/filtering, not a citable typological claim.
 
-PROVENANCE (verified live against each real source, not guessed):
+PROVENANCE:
   - crk-en (Plains Cree): KonradBRG/plains-cree-figurative on HF -- 228
     human-verified ("gold") + 10,619 LLM-labeled ("silver") sentence pairs
     from Bloomfield's 1934 Plains Cree Texts. CC-BY-4.0. Both splits are
-    used here (the figurative-language labels themselves are unused extra
-    columns for tokenizer-fairness purposes -- only text_cree/text_en
-    matter).
+    used (the figurative-language labels themselves are unused extra
+    columns -- only text_cree/text_en matter).
   - iu-en (Inuktitut): The Nunavut Hansard Inuktitut-English Parallel
     Corpus 3.0.1 (NRC Digital Repository, CC BY 4.0) -- Legislative
     Assembly of Nunavut proceedings, 1999-2017, ~1.3M sentence pairs total.
-    This panel uses only the corpus's own held-out "test" split (13,082
-    pairs) rather than the full training-scale corpus, matching the scale
-    BOUQuET/other panel entries already use for a fairness comparison
-    (this isn't an MT training run).
+    This panel uses only the held-out "test" split (13,082 pairs), matching
+    the scale other panel entries use for a fairness comparison (not an MT
+    training run).
   - the remaining nine pairs: AmericasNLP 2021 shared task
     (github.com/AmericasNLP/americasnlp2021), each language's own
-    train.{code}/train.es line-aligned text files, fetched directly via
-    raw.githubusercontent.com (no git clone -- see prepare_indigenous_panel
-    for why).
+    train.{code}/train.es line-aligned files, fetched via
+    raw.githubusercontent.com (no git clone -- see prepare_indigenous_panel).
 """
 
-# code: this pair's own ISO/AmericasNLP-native language code (the key used
-# in every yielded {lang: text} group -- see common.data.corpora's
-# LOCAL_BITEXT_SOURCES docstring section).
-# anchor: the OTHER language this pair is aligned against (its own key in
+# code: this pair's ISO/AmericasNLP-native language code (the key used in
+# every yielded {lang: text} group).
+# anchor: the other language this pair is aligned against (its own key in
 # the same group).
 # family: genealogical language family (Ethnologue/Glottolog-style naming,
-# not verified against either directly -- standard textbook classification).
+# standard textbook classification, not independently verified).
 # morphology: this project's own best-effort tag -- see module docstring's
-# own MORPHOLOGY section for what this is and isn't.
+# MORPHOLOGY section.
 # loader: which of prepare_indigenous_panel's loader functions builds this
 # pair ("hf_cree", "nrc_hansard", or "americasnlp").
-# dir: (americasnlp only) the pair's own directory name in the
-# americasnlp2021 repo.
+# dir: (americasnlp only) the pair's directory name in the americasnlp2021
+# repo.
 PAIRS = {
     "crk-en": {
         "language": "Plains Cree",
@@ -101,9 +93,8 @@ PAIRS = {
         "code": "oto",
         "anchor": "es",
         "family": "Oto-Manguean",
-        "morphology": "agglutinative",  # not standardly classified as
-        # polysynthetic -- included for AmericasNLP-panel completeness, not
-        # because it's a strong polysynthesis example (see module docstring).
+        "morphology": "agglutinative",  # not standardly polysynthetic --
+        # included for AmericasNLP-panel completeness (see module docstring).
         "loader": "americasnlp",
         "dir": "hñähñu-spanish",
     },

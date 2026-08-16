@@ -1,9 +1,7 @@
 """Held-out evaluation for a trained BPE checkpoint -- mirrors
-superbpe/evaluate.py's shape; see that module's docstring for the
-BOUQuET-as-held-out-set rationale. BPE's induce_spans is language-agnostic at
-encode time (plain BPE has no notion of language at all), same as
-flexitokens/manta/superbpe, so no extra per-language argument is needed here
-either.
+superbpe/evaluate.py's shape. BPE's induce_spans is language-agnostic at
+encode time (plain BPE has no notion of language), same as
+flexitokens/manta/superbpe, so no per-language argument is needed.
 """
 
 from common.eval.cross_tokenizer import run_eval_cli
@@ -14,10 +12,9 @@ from .train import _SMOKE_TEST_GROUPS
 
 _EVAL_DATA_SOURCE_HELP = (
     "'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
-    "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
-    "reported numbers, not repeated tuning checks; "
-    "'synthetic': a small real-text placeholder (NOT common.data.synthetic's byte generator -- "
-    "see bpe/train.py's module docstring), for a quick sanity check with no network access"
+    "'bouquet_test': BOUQuET TEST, the held-out split -- reserve for final reported numbers; "
+    "'synthetic': a small real-text placeholder (not common.data.synthetic's byte generator -- "
+    "see bpe/train.py), for a quick sanity check with no network access"
 )
 
 

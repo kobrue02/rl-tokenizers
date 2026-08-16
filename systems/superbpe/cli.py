@@ -1,8 +1,6 @@
 """Command-line entry point for SuperBPETrainer, mirroring manta.cli's shape:
-every SuperBPEConfig field becomes a `--flag`, generated from the dataclass
-itself. Real-data loading is NOT reimplemented here -- common.data.cli_data.load_groups
-already does exactly what's needed, and is shared verbatim by every tokenizer's
-CLI in this repo (fairtok, magnet, flexitokens, manta, fanta, superbpe).
+every SuperBPEConfig field becomes a `--flag`. Real-data loading reuses
+common.data.cli_data.load_groups, shared by every tokenizer CLI here.
 """
 
 import argparse
@@ -25,9 +23,8 @@ def build_arg_parser():
     add_dataclass_fields(parser, SuperBPEConfig)
     add_data_source_args(parser)
     parser.add_argument("--seed", type=int, default=0, help="unused by SuperBPE itself "
-        "(fitting is deterministic given the corpus -- see SuperBPEConfig's module "
-        "docstring); kept only so --data-source synthetic's own corpus generation, "
-        "which DOES take a seed, has one to forward.")
+        "(fitting is deterministic given the corpus); kept so --data-source synthetic's "
+        "corpus generation, which does take a seed, has one to forward.")
     add_vocab_output_args(parser, "superbpe_")
     return parser
 

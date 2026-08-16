@@ -1,7 +1,6 @@
 """BloomFilter correctness (no false negatives, bounded memory) and
-Deduplicator's exact/near-dup behavior after exact-dedup moved from an
-unbounded set to a fixed-memory BloomFilter -- see common/data/dedup.py's
-own module docstring for the real OOM this replaced."""
+Deduplicator's exact/near-dup behavior, after exact-dedup moved from an
+unbounded set to a fixed-memory BloomFilter (fixing a real OOM)."""
 
 from common.data.dedup import BloomFilter, Deduplicator
 
@@ -22,17 +21,15 @@ def test_bloom_filter_rejects_most_unseen_items():
     false_positives = sum(
         1 for i in range(500, 5500) if bf.might_contain(i, i * 2 + 1)
     )
-    # error_rate=0.01 -> expect roughly 1% false positives among unseen
-    # items at design capacity; generous slack since this is a specific
-    # random-looking (not adversarial) probe set, not a formal guarantee.
+    # error_rate=0.01 -> ~1% false positives expected; generous slack, not a formal guarantee.
     assert false_positives < 0.05 * 5000
 
 
 def test_bloom_filter_memory_is_fixed_at_construction():
     bf_small = BloomFilter(capacity=1_000, error_rate=0.01)
     bf_large = BloomFilter(capacity=1_000_000, error_rate=0.01)
-    # num_bits scales with capacity (Bloom 1970's own formula), not with
-    # however many items actually get added later -- the whole point.
+    # num_bits scales with capacity (Bloom 1970's formula), not with how many
+    # items get added later -- the whole point.
     assert bf_large.num_bits > bf_small.num_bits
     for i in range(2000):  # exceeds bf_small's capacity on purpose
         bf_small.add(i, i * 7 + 3)

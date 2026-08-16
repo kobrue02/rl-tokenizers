@@ -1,16 +1,13 @@
 """SuperBPE baseline: a from-scratch reimplementation of the two-stage
-byte-level BPE algorithm described in Liu et al. 2025, "SuperBPE: Space
-Travel for Language Models" (COLM 2025) -- see superbpe.model's module
-docstring for the algorithm, the official code release it's attributed to,
-and why that release's own training code (a custom Rust fork of
-huggingface/tokenizers) isn't reused directly.
+byte-level BPE algorithm from Liu et al. 2025, "SuperBPE: Space Travel for
+Language Models" (COLM 2025) -- see superbpe.model's docstring for the
+algorithm and why the official release's training code isn't reused.
 
-Unlike every other tokenizer in this repo, SuperBPE has no neural model, no
-gradient descent, and no fairness mechanism of its own -- it's a classical
-BPE variant, included specifically to test whether cross-lingual fairness
-properties differ by tokenizer FAMILY (learned boundary predictor vs.
-classical greedy merge counting), not just by which mechanism is used
-within this project's own neural family.
+Unlike every other tokenizer here, SuperBPE has no neural model, gradient
+descent, or fairness mechanism -- it's a classical BPE variant, included to
+test whether cross-lingual fairness properties differ by tokenizer FAMILY
+(learned boundary predictor vs. classical greedy merge counting), not just
+by mechanism within this project's own neural family.
 """
 
 from .model import SuperBPEModel, bpe_encode, fit_superbpe, pretokenize

@@ -1,43 +1,26 @@
 """Unsupervised morphological segmentation via Morfessor 2.0, trained on monolingual
-text pulled from cis-lmu/Glot500 and allenai/MADLAD-400 -- the substitute for gold
-morphological data (UniMorph/Universal Dependencies) that MorphScore normally needs
-(arxiv.org/abs/2507.06378), for languages that don't have any.
+text from cis-lmu/Glot500 and allenai/MADLAD-400 -- substitutes for the gold
+morphological data (UniMorph/Universal Dependencies) MorphScore normally needs
+(arxiv.org/abs/2507.06378), for languages that lack it. (statmt/cc100 was considered
+and dropped: no coverage beyond Glot500+MADLAD, plus off-Hub access complexity.)
 
-statmt/cc100 was considered and dropped: it contributes zero languages not already
-covered by Glot500 or MADLAD, and its data lives off-Hub (data.statmt.org via a legacy
-`datasets` loading script, not fetchable via hf_hub_download), so it added real access
-complexity for no coverage benefit.
+discover_morph_sources covers every language either source has (389 Glot500 + 303
+MADLAD codes, 636 total merged), and merges all available source text per language --
+more repeated word-form evidence is what Morfessor needs (a small parallel corpus
+alone was too thin/low-repetition).
 
-Per-language source list (see discover_morph_sources below) covers EVERY language
-either source has, not a hand-picked handful -- confirmed live: 389 unique Glot500
-short codes + 303 MADLAD-400 codes, 636 total once merged. Merges every available
-source's text for a given language -- more repeated word-form evidence is exactly
-what Morfessor needs (see conversation: a small parallel corpus alone was found too
-thin/low-repetition for it).
+MERGE RULE: Glot500 uses ISO 639-3-style 3-letter+script codes (e.g. "eng_Latn");
+MADLAD mixes ISO 639-1 2-letter codes for higher-resource languages with 3-letter
+for the rest. Sources are merged for a language ONLY on an identical code string, never
+via a broader 639-1<->639-3 equivalence table -- e.g. MADLAD's generic "ar" is
+MSA-dominated Arabic, not necessarily the same variety as some 3-letter Glot500 code,
+so guessing them equal risks a real dialect/variety mismatch at a scale no one can
+manually vet. _MANUAL_OVERRIDES holds the few cross-code merges (and confirmed
+no-data exclusions) that WERE individually checked.
 
-MERGE RULE, and why it stops where it does: Glot500 and MADLAD-400 don't share one
-code convention (Glot500 uses ISO 639-3-style 3-letter codes with a script suffix,
-e.g. "eng_Latn"; MADLAD mixes ISO 639-1 2-letter codes for higher-resource languages,
-e.g. "en", with 3-letter codes for the rest) -- discover_morph_sources merges the two
-sources for a language ONLY when their own codes are the IDENTICAL string, never via
-a broader ISO 639-1<->639-3 equivalence table. That's a deliberate, conservative
-boundary, not a missed opportunity: MADLAD's generic "ar" is MSA-dominated Arabic, not
-any one specific dialect/variety a 3-letter code might name, so silently equating
-"ar" with some 3-letter Glot500 variety code purely because they're "probably the same
-language" risks exactly the kind of variety mismatch a real linguist would catch and a
-blind code-mapping table wouldn't -- safer to keep them as two separate entries than
-guess wrong at scale across hundreds of languages with no way to manually vet each one.
-_MANUAL_OVERRIDES below is where a FEW such cross-code merges (and the reverse -- two
-codes confirmed to have NO usable data despite looking like they should) were
-genuinely checked, one at a time, rather than assumed.
-
-Efficiency: both sources are far larger than any per-language word budget we need
-(Morfessor saturates well before billions of words; low hundreds of thousands to a few
-million is already a big improvement over what a small parallel corpus alone offers).
-Every fetcher streams shard-by-shard and stops as soon as the word budget is hit, so a
-high-resource language never downloads more than its first shard or two, instead of
-the full multi-GB corpus -- discovery itself (listing which languages exist at all) is
-cheap regardless of how many of the 636 a given run actually trains on.
+Efficiency: both sources vastly exceed the per-language word budget needed (Morfessor
+saturates well under a few million words). Fetchers stream shard-by-shard and stop at
+the word budget, so high-resource languages never download their full multi-GB corpus.
 """
 
 import gzip
@@ -53,62 +36,52 @@ WORD_RE = re.compile(r"\w+", re.UNICODE)
 GLOT500_REPO = "cis-lmu/Glot500"
 MADLAD_REPO = "allenai/MADLAD-400"
 
-# A handful of (source, source_language_code) merges/exclusions that needed a real,
-# one-at-a-time judgment call rather than the general exact-code-match rule below --
-# these WIN outright over whatever discover_morph_sources's own automatic merge would
-# otherwise produce for the same code. Determined by directly querying both repos'
-# file trees (not just card metadata, which was incomplete for Glot500) -- see
-# conversation for the full derivation. MADLAD's generic "ar" is deliberately NOT used
-# as a stand-in for arz (Egyptian Arabic): it's MSA-dominated, not the dialect, so
-# using it would be a real variety mismatch, not just missing data -- the exact-match
-# rule alone would also have MISSED merging eng/ben/spa/bam with MADLAD's own 2-letter
-# "en"/"bn"/"es"/"bm" codes (different string, same language), which is why those are
-# spelled out here explicitly instead of relying on the general rule for them.
+# (source, source_language_code) merges/exclusions needing a one-at-a-time judgment
+# call, not the general exact-code-match rule below -- these WIN outright over
+# discover_morph_sources's automatic merge for the same code. Determined by querying
+# both repos' file trees directly (Glot500's card metadata was incomplete). Notably:
+# MADLAD's generic "ar" is NOT used as a stand-in for arz (Egyptian Arabic) -- it's
+# MSA-dominated, a real variety mismatch, not just missing data. eng/ben/spa/bam are
+# spelled out explicitly since the exact-match rule alone misses their MADLAD 2-letter
+# equivalents ("en"/"bn"/"es"/"bm" -- different string, same language).
 _MANUAL_OVERRIDES = {
     "arz": [("glot500", "arz_Arab")],
     "bam": [("glot500", "bam_Latn"), ("madlad400", "bm")],
     "ben": [("madlad400", "bn")],
     "eng": [("glot500", "eng_Latn"), ("madlad400", "en")],
-    "kas": [],  # no source has ANY text for this, confirmed live -- not a missing lookup
+    "kas": [],  # no source has any text for this -- confirmed, not a missing lookup
     "lij": [("glot500", "lij_Latn")],
     "mni": [("madlad400", "mni")],
-    "nqo": [],  # no source has ANY text for this, confirmed live -- not a missing lookup
+    "nqo": [],  # no source has any text for this -- confirmed, not a missing lookup
     "spa": [("glot500", "spa_Latn"), ("madlad400", "es")],
 }
 
 
 def list_madlad_langs():
-    """Every language code allenai/MADLAD-400 offers, discovered from its own
-    top-level "data-v1p5/" directory listing (non-recursive -- listing every FILE
-    under data-v1p5/ takes minutes given ~280k files across the whole repo; listing
-    just the per-language directories is fast, confirmed live) -- same "ask the
-    source, don't hardcode a copy of it" convention common.data.corpora.
-    list_glot500_configs already uses. Mixed ISO 639-1 (2-letter, e.g. "en"/"es"/"ar")
-    and ISO 639-3 (3-letter, for languages with no 639-1 code, e.g. "abs"/"adh"/"ady")
-    codes -- MADLAD doesn't use one convention uniformly."""
+    """Every language code allenai/MADLAD-400 offers, discovered from its top-level
+    "data-v1p5/" directory listing (non-recursive: listing every file under
+    data-v1p5/ takes minutes given ~280k files repo-wide; per-language directories
+    alone list fast). Same "ask the source, don't hardcode a copy" convention as
+    common.data.corpora.list_glot500_configs. Codes are a mix of ISO 639-1 (2-letter)
+    and 639-3 (3-letter) -- MADLAD doesn't use one convention uniformly."""
     tree = HfApi().list_repo_tree(MADLAD_REPO, path_in_repo="data-v1p5", repo_type="dataset")
     return sorted(item.path.rsplit("/", 1)[-1] for item in tree)
 
 
 def discover_morph_sources(_cache={}):
-    """Every language with usable monolingual text in EITHER Glot500 or MADLAD-400 --
-    not just this project's original 9 hand-picked codes -- discovered live (see
-    list_glot500_configs/list_madlad_langs above) and merged per the module docstring's
-    own MERGE RULE (exact code-string match only, plus _MANUAL_OVERRIDES for the
-    handful of genuinely-checked exceptions). Returns {lang_code: [(source_name,
-    source_code), ...]}.
+    """Every language with usable monolingual text in EITHER Glot500 or MADLAD-400,
+    discovered live and merged per the module docstring's MERGE RULE (exact
+    code-string match, plus _MANUAL_OVERRIDES for checked exceptions). Returns
+    {lang_code: [(source_name, source_code), ...]}.
 
-    One canonical script is picked per Glot500 short code when it offers more than
-    one (confirmed live: 21 of 389 do) -- reuses common.data.oldi_data.LANG_SCRIPT's
-    own already-vetted choice when the code is one of ITS codes (e.g. kas_Arab over
-    kas_Deva), falling back to whichever variant sorts first alphabetically for every
-    other code (an arbitrary but deterministic tiebreak, same spirit as
-    common.data.corpora.list_smol_pairs's own mirror-pair dedup).
+    One canonical script is picked per Glot500 short code when it offers more than one
+    (21 of 389 do): reuses common.data.oldi_data.LANG_SCRIPT's vetted choice when
+    available (e.g. kas_Arab over kas_Deva), else the alphabetically-first variant
+    (arbitrary but deterministic tiebreak).
 
-    Memoized (module-level _cache) since building this hits the network twice
-    (Glot500's card_data, MADLAD's directory tree) -- cheap to call repeatedly within
-    one process once discovered; call with an explicit `{}` first-arg override if you
-    genuinely need to force a re-discovery (e.g. a long-running process across days).
+    Memoized (module-level _cache) -- building this hits the network twice (Glot500
+    card_data, MADLAD directory tree). Pass an explicit `{}` first-arg to force
+    re-discovery.
     """
     if _cache:
         return _cache
@@ -136,15 +109,14 @@ def discover_morph_sources(_cache={}):
 
 def _words_from_text(text):
     # NFC normalization first: decomposed vs. composed Unicode forms of the same
-    # character (common in Arabic-script/diacritic-heavy text especially) would
-    # otherwise count as different word "types" for the exact same word.
+    # character (common in Arabic-script/diacritic-heavy text) would otherwise
+    # count as different word "types" for the same word.
     return WORD_RE.findall(unicodedata.normalize("NFC", text).lower())
 
 
 def _iter_glot500_words(stem, max_words, _file_cache={}):
-    # _file_cache={} is an intentional cross-call cache (the classic Python mutable-
-    # default-argument gotcha, used deliberately here) -- without it, every one of the
-    # ~7 languages we train would re-list Glot500's full ~1800-file tree from scratch.
+    # _file_cache={} is a deliberate mutable-default-argument cross-call cache --
+    # without it, every language re-lists Glot500's full ~1800-file tree from scratch.
     if GLOT500_REPO not in _file_cache:
         _file_cache[GLOT500_REPO] = list_repo_files(GLOT500_REPO, repo_type="dataset")
     files = sorted(
@@ -175,12 +147,10 @@ def _iter_glot500_words(stem, max_words, _file_cache={}):
 
 
 def _iter_madlad_words(code, max_words, _file_cache={}):
-    # Per-LANGUAGE directory listing (list_repo_tree, recursive under just
-    # "data-v1p5/{code}"), not a repo-wide list_repo_files -- confirmed live
-    # the whole repo has ~284k files across ~300 languages, so listing
-    # everything just to filter down to one language's own files is a real,
-    # avoidable cost at the scale discover_morph_sources now runs at
-    # (hundreds of languages, not this project's original 9).
+    # Per-language directory listing (recursive under "data-v1p5/{code}"), not a
+    # repo-wide list_repo_files -- the repo has ~284k files across ~300 languages,
+    # so listing everything just to filter to one language is an avoidable cost
+    # at the hundreds-of-languages scale discover_morph_sources runs at.
     if code not in _file_cache:
         tree = HfApi().list_repo_tree(MADLAD_REPO, path_in_repo=f"data-v1p5/{code}", repo_type="dataset", recursive=True)
         _file_cache[code] = [item.path for item in tree]
@@ -210,19 +180,16 @@ _FETCHERS = {"glot500": _iter_glot500_words, "madlad400": _iter_madlad_words}
 def collect_word_counts(
     lang, max_words_per_source=2_000_000, max_word_types=300_000, sources=None
 ):
-    """sources defaults to discover_morph_sources()[lang]; pass explicitly to override
-    (e.g. for a language discovery doesn't find, or to force a specific choice).
-    Returns a Counter, or an empty Counter if lang has no usable source (e.g. kas/nqo,
-    see _MANUAL_OVERRIDES) -- callers check for emptiness, this never raises for a
-    known-uncovered language."""
+    """sources defaults to discover_morph_sources()[lang]; pass explicitly to override.
+    Returns an empty Counter (never raises) if lang has no usable source (e.g.
+    kas/nqo, see _MANUAL_OVERRIDES)."""
     sources = discover_morph_sources().get(lang, []) if sources is None else sources
     counts = Counter()
     for source_name, code in sources:
         counts.update(_FETCHERS[source_name](code, max_words_per_source))
     if max_word_types and len(counts) > max_word_types:
-        # keep the most frequent types -- Morfessor's training cost scales with
-        # lexicon size more than raw token count, so this bounds compute for
-        # high-resource languages without touching the (already-fine) low-resource ones
+        # keep the most frequent types -- Morfessor's cost scales with lexicon size,
+        # so this bounds compute for high-resource languages only.
         counts = Counter(dict(counts.most_common(max_word_types)))
     return counts
 
@@ -230,29 +197,20 @@ def collect_word_counts(
 def train_morfessor(
     word_counts, freq_threshold=1, corpusweight=1.0, init_rand_split=0.5, seed=0
 ):
-    """word_counts: a Counter (or dict) of {word: count} -- see collect_word_counts.
-    freq_threshold is forwarded to Morfessor's own load_data (discard word types
-    occurring fewer than this many times -- crawl noise/OCR-error/singleton-typo
-    filtering). Returns None if word_counts is empty (nothing to train on).
+    """word_counts: a Counter/dict of {word: count} (see collect_word_counts).
+    freq_threshold discards word types occurring fewer than this many times
+    (crawl-noise/typo filtering). Returns None if word_counts is empty.
 
-    init_rand_split=0.5 is NOT a cosmetic default -- without it, BaselineModel's
-    default 'recursive' training algorithm starts every word fully unsplit and,
-    empirically (see conversation), converges right back to zero splits even on
-    textbook cases (many distinct stems sharing common suffixes, both synthetic and
-    real): the recursive local search has no way to discover that splitting would
-    lower cost if it never considers a split in the first place. Passing a nonzero
-    init_rand_split seeds every word with random candidate split points so the
-    search has something to compare against and actually finds real splits
+    init_rand_split=0.5 is NOT cosmetic: BaselineModel's default 'recursive'
+    algorithm starts every word fully unsplit and, without random seed splits,
+    converges right back to zero splits even on textbook cases -- the local search
+    never considers a split if none exists to compare against. A nonzero
+    init_rand_split seeds candidate split points so it can actually find real ones
     (e.g. 'unhappiness' -> ['un', 'happiness']).
 
-    That said: this is the best setting found through fairly limited manual probing,
-    not a properly validated one. Behavior was noticeably sensitive to word-count
-    scale in ways that weren't monotonically "more data = better" in quick testing --
-    Morfessor's own recommended way to pick corpusweight is tuning it against a small
-    hand-checked development set of known-correct segmentations (see
-    BaselineModel.set_corpus_weight_updater / the annotation-based tuning support in
-    the morfessor package), which hasn't been done here yet. Treat this as a
-    reasonable starting point to iterate from, not a validated final setting."""
+    corpusweight is a best-guess setting from limited manual probing, not properly
+    validated -- Morfessor's recommended tuning method (against a hand-checked dev
+    set of known-correct segmentations) hasn't been done here."""
     if not word_counts:
         return None
     import random
@@ -260,7 +218,7 @@ def train_morfessor(
     import morfessor
 
     random.seed(seed)  # train_batch optimizes compounds "in a random order" per its
-    # own docstring -- seeding Python's random module is what makes that reproducible
+    # own docstring -- this is what makes that reproducible
     model = morfessor.BaselineModel(corpusweight=corpusweight)
     model.load_data(
         [(count, word) for word, count in word_counts.items()],

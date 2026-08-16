@@ -1,15 +1,12 @@
 """CLI: train per-language unsupervised Morfessor 2.0 models on monolingual text
-pooled from Glot500 + MADLAD-400 (see morphology.py for why, and for the per-language
-source list -- discover_morph_sources finds usable text for 636 languages, not a
-hand-picked handful). These stand in for the gold morphological data (UniMorph/
-Universal Dependencies) that MorphScore normally requires and that most languages
-don't have.
+pooled from Glot500 + MADLAD-400 (see morphology.py; discover_morph_sources finds
+usable text for 636 languages). These stand in for the gold morphological data
+(UniMorph/Universal Dependencies) MorphScore normally requires but most languages lack.
 
-This is a separate, one-off preprocessing step -- not part of Phase 1 training. Run it
-once (or whenever you want to refresh the models), then load the saved .bin files
-wherever a MorphScore-style alignment check is computed. Defaulting --langs to all 636
-discovered languages is a genuinely large, slow run (hundreds of Glot500/MADLAD-400
-downloads) -- narrow --langs down for anything short of a real full-scale refresh.
+A separate, one-off preprocessing step, not part of Phase 1 training -- run once,
+then load the saved .bin files wherever a MorphScore-style check is needed. Default
+--langs (all 636) is a large, slow run (hundreds of downloads); narrow it down
+otherwise.
 """
 
 import argparse
@@ -145,12 +142,10 @@ def main(argv=None):
 
         preview = []
         if args.preview_count:
-            # most_common() alone is dominated by 1-2 character function words/elided
-            # clitics (e.g. Ligurian "l'aegua" -> "l" + "aegua" at the apostrophe --
-            # arguably a correct morphological split, but useless for a human
-            # sanity-check of whether LONGER words are being segmented sensibly) --
-            # so preview the most frequent words that are actually long enough to
-            # potentially contain an interesting stem+affix split.
+            # most_common() alone is dominated by 1-2 character function words/clitics
+            # (e.g. Ligurian "l'aegua" -> "l"+"aegua" -- a correct but uninteresting
+            # split), so preview the most frequent words long enough to show a real
+            # stem+affix split.
             candidates = [w for w in word_counts if len(w) >= 5]
             preview_words = sorted(candidates, key=lambda w: -word_counts[w])[
                 : args.preview_count

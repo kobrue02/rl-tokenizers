@@ -1,10 +1,9 @@
 """Held-out evaluation for a trained FlexiTokens checkpoint -- mirrors
-fairtok/evaluate.py's shape; see that module's docstring for the BOUQuET-as-held-out-
-set rationale. FlexiTokens' induce_spans is language-agnostic at inference time (its
-per-language alpha_L/beta_L bands only shape TRAINING, not the forward pass), so this
-is the simplest of the four evaluate.py modules -- no extra per-language argument
-needed, unlike magnet's induce_spans (script) or fairtok's segment_bytes (a policy,
-not a frozen checkpoint-shaped model).
+fairtok/evaluate.py's shape (see that module for the BOUQuET-as-held-out-set
+rationale). FlexiTokens' induce_spans is language-agnostic at inference time
+(alpha_L/beta_L bands only shape training, not the forward pass), so this is
+the simplest of the evaluate.py modules -- no extra per-language argument
+needed, unlike magnet's (script).
 """
 
 from common.eval.cross_tokenizer import run_eval_cli

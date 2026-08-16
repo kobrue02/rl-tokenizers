@@ -1,16 +1,15 @@
 """Two-stage fixed-vocabulary extraction, shared by every tokenizer in this repo.
 
-The RL loop never enforces V_MAX in-loop (that would make the reward nonstationary --
-see the fixed-vocab-size discussion). Instead it trains against a compression-rate
-target, and the hard vocabulary budget is applied once, after training, by keeping the
-V_MAX most frequent distinct byte spans seen across all languages. The differentiable
-baselines (magnet/flexitokens/manta) don't have this nonstationary-reward concern at
-all, but use the exact same two-stage extraction anyway so every tokenizer's final
-vocabulary is produced identically and is directly comparable.
+The RL loop never enforces V_MAX in-loop (that would make the reward nonstationary).
+Instead it trains against a compression-rate target, and the hard vocab budget is
+applied once, after training, by keeping the V_MAX most frequent distinct byte spans
+seen across all languages. The differentiable baselines (magnet/flexitokens/manta)
+don't have this nonstationary-reward concern, but use the same two-stage extraction
+so every tokenizer's final vocabulary is produced identically and comparable.
 
-Spans are byte strings, so `Counter` keys them by content already -- there is no
-arbitrary id to accidentally alias two spans onto, which is the invariant that keeps
-this immune to Duplication-BPE-style gaming (see common.bytes_utils.spans_from_boundaries).
+Spans are byte strings, so `Counter` keys them by content already -- no arbitrary id
+to accidentally alias two spans onto, which is what keeps this immune to
+Duplication-BPE-style gaming (see common.bytes_utils.spans_from_boundaries).
 """
 
 import json
@@ -18,11 +17,10 @@ from collections import Counter
 
 
 def _bytes_to_unicode():
-    """The GPT-2 / HuggingFace byte-level BPE trick: map every byte value 0-255
-    to its own printable unicode character, so any byte string (including one
-    that isn't valid UTF-8 on its own -- a boundary policy can place a cut in the
-    middle of a multi-byte character) becomes a safe, reversible, JSON-writable
-    string. Same scheme `vocab.json` uses in a real HF byte-level tokenizer."""
+    """The GPT-2 / HuggingFace byte-level BPE trick: map every byte value 0-255 to
+    its own printable unicode character, so any byte string (even one that isn't
+    valid UTF-8, e.g. a boundary cut mid-character) becomes a safe, reversible,
+    JSON-writable string -- the same scheme a real HF byte-level tokenizer uses."""
     bs = (
         list(range(ord("!"), ord("~") + 1))
         + list(range(ord("\xa1"), ord("\xac") + 1))
@@ -47,9 +45,8 @@ def span_to_token_string(span):
 
 def vocab_with_stats(token_freq_by_lang, k):
     """Top-k spans by total frequency across all languages, each with its total
-    count and a per-language breakdown -- the breakdown is what makes a vocab
-    entry inspectable: whether it's genuinely shared across languages or an
-    artifact of one language dominating the running frequency table.
+    count and a per-language breakdown -- makes a vocab entry inspectable: shared
+    across languages, or an artifact of one language dominating the table.
     Returns a list of (span: bytes, total_count: int, per_lang: dict[str, int]),
     sorted by total_count descending.
     """
@@ -76,18 +73,14 @@ def top_k_by_frequency(token_freq_by_lang, k):
 
 def vocab_snapshot_stats(token_freq_by_lang, k):
     """Cheap periodic snapshot for progress tracking (coverage, cross-lingual
-    sharing) -- deliberately avoids the full per-language breakdown
-    vocab_with_stats computes (that's O(k * num_languages), fine to pay once
-    at the end for vocab_stats.json, too expensive to pay every fairness
-    refresh once many languages are in play, e.g. langs="all" pulling in
-    dozens-to-hundreds of distinct language keys over a long run).
+    sharing) -- avoids the full per-language breakdown vocab_with_stats computes
+    (O(k * num_languages): fine once for vocab_stats.json, too expensive every
+    fairness refresh once many languages are in play).
 
     Returns (top_spans: set[bytes], coverage: float, cross_lingual_share: float).
     coverage = fraction of all tokenized content (by frequency) the top-k spans
-    capture. cross_lingual_share = fraction of the top-k spans used (count > 0)
-    by more than one language -- an early exit after finding a 2nd language
-    keeps this cheap for the common case (frequent spans are usually shared).
-    """
+    capture. cross_lingual_share = fraction of top-k spans used by more than one
+    language (early exit after finding a 2nd language keeps this cheap)."""
     merged = Counter()
     for c in token_freq_by_lang.values():
         merged.update(c)
@@ -114,9 +107,8 @@ def vocab_snapshot_stats(token_freq_by_lang, k):
 
 
 def vocab_churn(prev_spans, curr_spans):
-    """Jaccard overlap between two top-k span sets -- rising toward 1 as the
-    vocabulary stops reshuffling and settles, independent of what the loss
-    curve says."""
+    """Jaccard overlap between two top-k span sets -- rises toward 1 as the
+    vocabulary stops reshuffling and settles, independent of the loss curve."""
     if not prev_spans and not curr_spans:
         return 1.0
     union = prev_spans | curr_spans
@@ -126,12 +118,11 @@ def vocab_churn(prev_spans, curr_spans):
 
 
 def save_vocab_json(entries, path):
-    """Writes vocab.json in the same shape a HuggingFace byte-level tokenizer
-    would: a flat {token_string: id} mapping, ids assigned in the given order
-    (entries is expected sorted by frequency descending, as vocab_with_stats
-    returns -- so id 0 is the most frequent span). Token strings use the same
-    byte<->unicode encoding HF's ByteLevel tokenizers use, so this round-trips
-    even for spans that aren't valid UTF-8 on their own.
+    """Writes vocab.json in the same shape a HuggingFace byte-level tokenizer would:
+    a flat {token_string: id} mapping, ids assigned in the given order (entries
+    expected sorted by frequency descending, so id 0 is the most frequent span).
+    Uses the same byte<->unicode encoding HF's ByteLevel tokenizers use, so this
+    round-trips even for spans that aren't valid UTF-8 on their own.
     """
     vocab = {span_to_token_string(span): i for i, (span, _, _) in enumerate(entries)}
     with open(path, "w", encoding="utf-8") as f:
@@ -139,9 +130,9 @@ def save_vocab_json(entries, path):
 
 
 def save_vocab_stats(entries, path):
-    """The richer companion file vocab.json intentionally doesn't carry: per-entry
-    frequency and per-language usage breakdown, for actually inspecting fairness
-    (is this token shared across languages, or a single language's artifact?)."""
+    """The richer companion file vocab.json doesn't carry: per-entry frequency and
+    per-language usage breakdown, for inspecting fairness (shared token, or a
+    single language's artifact?)."""
     records = [
         {
             "token": span_to_token_string(span),
@@ -155,16 +146,13 @@ def save_vocab_stats(entries, path):
 
 
 def report_and_save_vocab(token_freq, vocab_size, vocab_out, vocab_stats_out, vocab_preview):
-    """The final-vocab preview/save step every systems/*/cli.py runs identically
-    after training, extracted verbatim from that repeated tail (confirmed
-    byte-identical in substance across all seven, only cosmetic whitespace
-    differed) -- terminal preview of the `vocab_preview` most frequent entries,
-    then vocab.json (if `vocab_out`) and the richer vocab_stats.json (if
-    `vocab_stats_out`), both skipped by passing "" (empty string), matching
-    each flag's own existing --vocab-out/--vocab-stats-out convention.
-    Returns `entries` (vocab_with_stats(token_freq, vocab_size)'s own return
-    shape) in case a caller wants it after this -- none currently do, but
-    nothing here needs entries to be recomputed to add that later.
+    """The final-vocab preview/save step every systems/*/cli.py runs after
+    training, extracted from that repeated tail -- terminal preview of the
+    `vocab_preview` most frequent entries, then vocab.json (if `vocab_out`) and the
+    richer vocab_stats.json (if `vocab_stats_out`), both skipped by passing ""
+    (matching each flag's --vocab-out/--vocab-stats-out convention).
+    Returns `entries` (vocab_with_stats's own return shape) in case a caller wants
+    it, though none currently do.
     """
     entries = vocab_with_stats(token_freq, vocab_size)
     if vocab_preview:

@@ -1,12 +1,11 @@
-"""Rényi efficiency validated against analytically known cases (Zouhar et al.'s paper
-table wasn't fully extractable via web fetch -- see conversation -- so these are exact
-closed-form results derivable from the formula itself, not values copied from a source
-that couldn't be fully verified):
+"""Rényi efficiency validated against exact closed-form cases derived from the
+formula itself (not copied from a source, since Zouhar et al.'s paper table
+wasn't fully extractable):
 
-  - a uniform distribution over v types has Rényi entropy exactly log(v) for ANY alpha,
-    so efficiency is exactly 1.0 regardless of alpha.
-  - a one-hot (fully degenerate) distribution has Rényi entropy exactly 0 for alpha != 1,
-    so efficiency is exactly 0.0.
+  - a uniform distribution over v types has Rényi entropy exactly log(v) for
+    ANY alpha, so efficiency is exactly 1.0 regardless of alpha.
+  - a one-hot (fully degenerate) distribution has Rényi entropy exactly 0 for
+    alpha != 1, so efficiency is exactly 0.0.
 """
 
 from common.eval.metrics import compression_rate, gini_coefficient, renyi_efficiency

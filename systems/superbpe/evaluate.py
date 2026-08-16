@@ -1,8 +1,7 @@
 """Held-out evaluation for a trained SuperBPE checkpoint -- mirrors
-manta/evaluate.py's shape; see that module's docstring for the BOUQuET-as-
-held-out-set rationale. SuperBPE's induce_spans is language-agnostic at
-encode time (plain BPE has no notion of language at all), same as
-flexitokens/manta, so no extra per-language argument is needed here either.
+manta/evaluate.py's shape. SuperBPE's induce_spans is language-agnostic at
+encode time (plain BPE has no notion of language), same as flexitokens/manta,
+so no per-language argument is needed.
 """
 
 from common.eval.cross_tokenizer import run_eval_cli

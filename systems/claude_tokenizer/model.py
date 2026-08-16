@@ -1,38 +1,26 @@
-"""Token counting via Anthropic's own public count_tokens API
+"""Token counting via Anthropic's public count_tokens API
 (client.messages.count_tokens) -- genuinely different from every other
-systems/*/model.py in this repo: there is no local tokenizer object at all,
-no vocabulary file, no byte-span reconstruction. Every single count is a
-real network round-trip to Anthropic's API, and the response is JUST a
-total count (confirmed via the installed SDK's own MessageTokensCount type:
-a single `input_tokens: int` field, nothing else -- no token ids, no token
-strings, no per-token boundaries). That means this integration can report
-compression rate / fertility / token parity (all derivable from a bare
-count) but CANNOT report Rényi efficiency or Gini, which need the actual
-per-token FREQUENCY distribution -- which specific tokens repeat, not just
-how many there were -- see common.eval.cross_tokenizer.evaluate_on_groups's
-own docstring for what those two need. This is a real, structural
-limitation of the public API, not a shortcut taken here: reported honestly
-as narrower output (see evaluate.py's own report_claude_eval), never faked
-with placeholder token identities to force renyi/gini to compute (that
-would produce a meaningless, misleadingly-perfect result -- an explicit
-decision, not an oversight, made when this module was built).
+systems/*/model.py: no local tokenizer, no vocab file, no byte-span
+reconstruction. Every count is a real network round-trip, and the response
+is just a total (SDK's MessageTokensCount has only `input_tokens: int` --
+no token ids/strings/boundaries). So this can report compression rate /
+fertility / token parity (derivable from a bare count) but NOT Rényi
+efficiency or Gini, which need the per-token frequency distribution. Real
+structural API limitation, reported honestly as narrower output (see
+report_claude_eval), never faked with placeholder token identities to force
+renyi/gini to compute.
 
 RATE LIMITING: count_tokens has no batch endpoint -- one call per document.
-Anthropic's own published limits (requests per minute, by usage tier):
-Start=2000, Build=4000, Scale=8000. RateLimiter below enforces a strict
-rolling-window cap (thread-safe, shared across a whole run's worker pool)
-so a large run (e.g. BOUQuET test's ~272k rows) never exceeds whatever RPM
-the caller configures, regardless of how many worker threads are issuing
-requests concurrently -- concurrency is still needed to actually approach
-that cap: a purely sequential loop is latency-bound (a few hundred ms per
-call is typical for a small API request), not rate-limit-bound, so on its
-own it would sit well under even the lowest 2000/min tier.
+Anthropic's published RPM limits by tier: Start=2000, Build=4000,
+Scale=8000. RateLimiter enforces a strict rolling-window cap (thread-safe,
+shared across the worker pool) so a large run never exceeds the configured
+RPM regardless of thread count; concurrency is needed to actually approach
+that cap since a sequential loop is latency-bound, not rate-limit-bound.
 
-PREREQUISITE: needs a real ANTHROPIC_API_KEY (env var, or --api-key) -- a
-live account credential, not a public/anonymous endpoint the way most of
-systems/hf_frontier's own HF repos are. Confirmed live: the count_tokens
-endpoint itself is free to call (no per-token billing), but still requires
-authentication and is subject to the RPM limits above.
+PREREQUISITE: needs a real ANTHROPIC_API_KEY (env var or --api-key) -- a
+live account credential, unlike most of hf_frontier's public HF repos.
+count_tokens itself is free to call but still requires auth and is subject
+to the RPM limits above.
 """
 
 import threading
@@ -43,15 +31,13 @@ import anthropic
 
 
 class RateLimiter:
-    """Thread-safe rolling-window rate limiter: at most `max_calls` calls
-    permitted in any trailing `period` seconds, across every thread sharing
-    one instance. acquire() blocks (sleeping, not busy-waiting, and not
-    raising) until a slot is free -- callers just call acquire() before each
-    request and it paces itself, no separate retry-on-429 logic needed for
-    the "too many calls from US" case (ClaudeTokenCounter.count still
-    retries actual 429 responses from the server, since a shared account
-    limit across OTHER concurrent usage this process doesn't know about is
-    a real, separate possibility this limiter alone can't prevent)."""
+    """Thread-safe rolling-window rate limiter: at most `max_calls` calls in
+    any trailing `period` seconds, across all threads sharing one instance.
+    acquire() blocks (sleeps, doesn't raise) until a slot is free -- callers
+    just call it before each request. ClaudeTokenCounter.count still retries
+    actual 429s from the server too, since other concurrent usage on the
+    same account (outside this process) isn't something this limiter alone
+    can prevent."""
 
     def __init__(self, max_calls, period=60.0):
         self.max_calls = max_calls
@@ -75,16 +61,12 @@ class RateLimiter:
 class ClaudeTokenCounter:
     """One (model, shared rate limiter) pair -- .count(text) -> int.
 
-    Retries transient failures with bounded exponential backoff (confirmed
-    live against the installed anthropic SDK's own exception hierarchy,
-    not guessed): RateLimitError (429) and InternalServerError-class 5xx
-    responses are both subclasses of APIStatusError, which carries a real
-    `status_code` attribute; APIConnectionError (network-level, no
-    status_code at all -- APITimeoutError is its own subclass) covers
-    connection drops/timeouts. Anything else (4xx other than 429 -- e.g. a
-    genuine 401/bad request) is NOT retried and propagates immediately,
-    since retrying a request that will never succeed just burns rate-limit
-    budget and time for no benefit.
+    Retries transient failures with bounded exponential backoff:
+    RateLimitError (429) and 5xx are subclasses of APIStatusError
+    (`status_code` attribute); APIConnectionError (incl. APITimeoutError)
+    covers connection drops/timeouts. Any other error (e.g. 401/bad
+    request) is NOT retried and propagates immediately -- retrying a
+    request that will never succeed just wastes rate-limit budget.
     """
 
     def __init__(self, model, rate_limiter, api_key=None, max_retries=5):

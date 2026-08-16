@@ -1,13 +1,11 @@
 """Memory-mapped reader for packed token shards written by data_prep.py.
 
-Shards are raw binary files of fixed-width unsigned integers (uint16 if the
-tokenizer's vocab_size + 1, for the reserved EOS id, fits under 65536, else
-uint32 -- see data_prep.py's _dtype_for_vocab), one flat stream of token ids
-per file. Document boundaries are marked by the tokenizer's own EOS id
-directly in that stream -- there is no separate boundary index to keep in
-sync. A small sidecar shards_meta.json records the exact dtype/vocab_size/
-eos_id/system/checkpoint used to build them, so this module never assumes or
-re-derives that -- see data_prep.py for what writes it.
+Shards are raw binary files of fixed-width unsigned integers (uint16 if
+vocab_size+1 fits under 65536, else uint32 -- see data_prep.py's
+_dtype_for_vocab), one flat stream of token ids per file. Document
+boundaries are marked by the tokenizer's own EOS id in that stream directly
+-- no separate boundary index. A sidecar shards_meta.json records the
+dtype/vocab_size/eos_id/system/checkpoint used to build them.
 """
 
 import json
@@ -24,31 +22,22 @@ def load_shard_meta(shard_dir):
 
 
 class ShardedTokenDataset(Dataset):
-    """One "epoch" here is just `num_samples` random windows, not a real
-    pass over the corpus -- a streamed pretraining corpus this large has no
-    natural epoch boundary at all (see pretraining/train.py, which steps by
-    a token/step budget, not epochs).
+    """One "epoch" is just `num_samples` random windows, not a real pass
+    over the corpus -- a streamed corpus this large has no natural epoch
+    boundary (pretraining/train.py steps by a token/step budget instead).
 
-    Sampling is (seed, idx)-seeded, not drawn from any RNG object stored on
-    self: a Dataset instance gets COPIED into every DataLoader worker
-    process under num_workers > 0, so RNG state living on self would either
-    duplicate the same draws across workers or need a worker_init_fn to
-    reseed correctly. Deriving each sample's randomness purely from
-    (self.seed, idx) sidesteps that entirely -- no shared mutable state,
-    same sample for the same idx regardless of which worker serves it,
-    reproducible given the same seed."""
+    Sampling is seeded from (self.seed, idx), not an RNG object stored on
+    self, since a Dataset gets copied into every DataLoader worker process
+    under num_workers > 0 -- RNG state on self would duplicate draws across
+    workers. Deriving randomness purely from (seed, idx) gives the same
+    sample for a given idx regardless of which worker serves it."""
 
     def __init__(self, shard_dir, seq_len, num_samples, seed=0, index_offset=0):
-        """index_offset: shifts every __getitem__(idx) to actually draw
-        (seed, idx + index_offset) -- lets pretraining.train.train's own
-        --resume-from path continue the SAME deterministic (seed, idx)
-        sequence from where a previous run left off (idx=0..index_offset-1
-        already consumed), instead of a fresh dataset instance restarting
-        at idx=0 and silently replaying exactly the samples the original
-        run already trained on early -- confirmed to actually happen this
-        way before this parameter existed (train() built a brand new
-        sequential-order DataLoader on every process launch, with no
-        memory of how many samples a resumed run had already drawn)."""
+        """index_offset: shifts __getitem__(idx) to draw (seed, idx +
+        index_offset) so train.py's --resume-from can continue the same
+        deterministic sequence from where a previous run left off, instead
+        of a fresh dataset restarting at idx=0 and replaying already-trained
+        samples."""
         self.meta = load_shard_meta(shard_dir)
         self.seq_len = seq_len
         self.num_samples = num_samples

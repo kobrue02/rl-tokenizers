@@ -1,48 +1,34 @@
-"""Generates thesis-ready TikZ/pgfplots figures directly from a systems/*/evaluate.py
---output JSON file (e.g. results/hf_frontier_comparison.json, or a combine_eval_results.py
-output that also has Claude's entry folded in) -- no LaTeX install needed to RUN this, only
-to compile what it writes.
+"""Generates thesis-ready TikZ/pgfplots figures from a systems/*/evaluate.py --output
+JSON file (e.g. results/hf_frontier_comparison.json, or a combine_eval_results.py output
+with Claude's entry merged in). No LaTeX install needed to run this, only to compile
+the output.
 
-Five figures, chosen specifically because a straight 33-tokenizer x 259-language dump is
-unreadable in print:
-
-  1. Spread leaderboard (fig_spread_leaderboard.tex + bar_*.dat): every tokenizer in the
-     input file, ranked by token_parity_spread (max/min token cost across every language --
-     anchor-invariant, see common.eval.parity.anchor_invariant_parity's own docstring for
-     why that matters). No reduction needed: spread already summarizes the FULL language
-     set for each model.
-  2. Fairness landscape (fig_landscape.tex + scatter_*.dat): avg_compression vs spread,
-     every tokenizer as one point. Also no reduction -- only the 3 most informative points
-     get text labels (best/worst spread, best compression) instead of 33 overlapping labels.
-  3. Worst-language heatmap (fig_heatmap.tex, self-contained -- no external .dat needed):
-     the ONE figure that reduces anything, because a 259-row table isn't legible in print.
-     Shows the languages with the highest max(token_parity) across ANY model in the input
-     (the same data-driven rule the interactive dashboard's heatmap tab already uses -- not
-     a hand-picked subset), against every model. Colors are precomputed in Python (ColorBrewer's
-     YlOrRd sequential scheme -- pale yellow at parity, deep red at the worst disparity, so
-     "worse" reads as a stronger/darker color, unlike a general perceptual colormap such as
-     viridis, which has no inherent good/bad direction) and baked in as literal \\fill commands,
-     so there's no pgfplots colormap/meshing step to get subtly wrong.
-  4. Resource-level trend (fig_resource_level.tex + resourcelevel_*.dat): mean token_parity
-     per tokenizer, grouped by Joshi et al. 2020's 6-level linguistic resource taxonomy
-     (see common.data.lang2tax for the code->level mapping -- ~85% of this project's
-     languages resolve against that external taxonomy; the rest genuinely aren't in it).
-     One line per tokenizer (colored by family, no per-tokenizer legend spam), using the
-     FULL per-language token_parity data, not the heatmap's worst-20 subset.
-  5. Real API cost by provider (fig_api_cost.tex, self-contained -- no external .dat
-     needed): 4 subplots (DeepSeek, GPT, Claude, Kimi K3 -- see _PROVIDER_PANELS), each
-     with 6 REAL Tukey box-and-whisker plots (one per Joshi et al. resource level) built
-     from every resolved language's own dollar cost, not just a group mean. Claude's
-     panel renders as a "pending" placeholder until its evaluation results exist and are
-     merged in. Uses real, live-fetched pricing from platform.claude.com,
-     developers.openai.com, and deepseek.ai (Kimi K3: supplied by the user).
+Five figures (a raw 33-tokenizer x 259-language dump isn't legible in print):
+  1. Spread leaderboard: every tokenizer ranked by token_parity_spread (anchor-invariant
+     max/min token cost across languages -- see common.eval.parity.anchor_invariant_parity).
+  2. Fairness landscape: avg_compression vs spread scatter, one point per tokenizer;
+     only the 3 most informative points (best/worst spread, best compression) get labels.
+  3. Worst-language heatmap: the only figure that subsets data (259 rows isn't printable).
+     Shows the highest max(token_parity) languages across any model. Colors are precomputed
+     in Python (ColorBrewer YlOrRd -- pale=parity, deep red=worst, so "worse" reads as
+     darker, unlike a directionless colormap like viridis) and baked in as literal \\fill
+     commands rather than left to a pgfplots colormap.
+  4. Resource-level trend: mean token_parity per tokenizer grouped by Joshi et al. 2020's
+     6-level resource taxonomy (see common.data.lang2tax; ~85% of languages resolve against
+     it). One thin line per tokenizer, colored by family, full per-language data (not the
+     heatmap's worst-20 subset).
+  5. Real API cost by provider: 4 subplots (DeepSeek/GPT/Claude/Kimi, see _PROVIDER_PANELS),
+     each 6 real Tukey box plots (one per resource level) from each language's own dollar
+     cost. Claude renders as a "pending" placeholder until merged into the input. Pricing is
+     real, live-fetched (platform.claude.com, developers.openai.com, deepseek.ai; Kimi's
+     rate supplied by the user).
 
 Usage:
     python3 generate_tikz_figures.py --input results/hf_frontier_comparison.json --output-dir figures/tikz
     python3 generate_tikz_figures.py -c configs/some_config.yml
 
-No LaTeX was available to compile-test these when this module was written --
-verify with a real compiler (Overleaf is fine) before trusting the output.
+No local LaTeX install to compile-test against -- verify with a real compiler
+(Overleaf is fine) before trusting the output.
 """
 
 import argparse
@@ -57,16 +43,10 @@ import numpy as np
 from common.config_file import parse_args_with_config
 from common.data.lang2tax import load_resource_levels
 
-# ColorBrewer YlOrRd-9 (published, standard sequential scheme), pure-python
-# piecewise-linear interpolation -- avoids a matplotlib dependency. Chosen
-# over a general perceptual colormap like viridis specifically because
-# viridis has no "good/bad" direction: going dark-purple(low)->bright-
-# yellow(high) reads BACKWARDS for a lower-is-better cost metric (bright
-# intuitively reads as "more/better" to most readers, confirmed as a real
-# point of confusion). YlOrRd's pale-yellow(low, near parity)->deep-red
-# (high, worse) direction matches the metric's actual meaning, and stays
-# colorblind-safe since it varies only in lightness within one hue family,
-# not by hue discrimination.
+# ColorBrewer YlOrRd-9, pure-python piecewise-linear interpolation (avoids a matplotlib
+# dependency). Chosen over a directionless perceptual colormap like viridis, whose
+# dark->bright ramp reads backwards for a lower-is-better metric; YlOrRd's pale->deep-red
+# matches "worse = darker" and stays colorblind-safe (lightness-only, not hue).
 _COST_STOPS = [
     (0.000, (0xff, 0xff, 0xcc)),
     (0.125, (0xff, 0xed, 0xa0)),
@@ -94,19 +74,12 @@ _FAMILY_RGB = {
     "Meta/Llama": (74, 111, 227),
     "Encoder-only": (140, 140, 140),
     "Anthropic": (180, 60, 60),
-    # Distinct green -- every other family is a teal/orange/blue/gray/red/
-    # purple, so this project's own 7 trained tokenizers (see
-    # _REPO_TOKENIZER_NAMES below) stand out rather than falling into the
-    # generic "Other" bucket alongside genuinely unrelated external models.
-    "This work": (34, 139, 74),
+    "This work": (34, 139, 74),  # distinct green so our own 7 tokenizers stand out from "Other"
     "Other": (163, 79, 168),
 }
-# Exact system_label strings evaluate.py's own TOKENIZERS dict uses for this
-# repo's 7 trained tokenizers -- combine_eval_results.py's entries are keyed
-# by --result-key, which defaults to exactly this string (see
-# common.eval.cross_tokenizer.build_eval_arg_parser's own docstring), so an
-# exact-match set is correct here, not a name-prefix heuristic like the
-# other families below.
+# Exact system_label strings evaluate.py's TOKENIZERS dict uses for this repo's
+# 7 trained tokenizers (combine_eval_results.py keys entries by --result-key,
+# which defaults to this) -- exact-match, not the prefix heuristic below.
 _REPO_TOKENIZER_NAMES = {"fairtok", "magnet", "flexitokens", "manta", "fanta", "superbpe", "bpe"}
 _ENCODER_ONLY_NAMES = {
     "bert-base-cased", "bert-base-multilingual-cased", "distilbert-base-uncased",
@@ -114,9 +87,8 @@ _ENCODER_ONLY_NAMES = {
     "microsoft/deberta-v3-base", "answerdotai/ModernBERT-base", "google/electra-base-discriminator",
 }
 
-# Joshi et al. 2020's own 6-class names ("The State and Fate of Linguistic
-# Diversity and Inclusion in the NLP World") -- see common.data.lang2tax's
-# module docstring for the code->level mapping this project uses.
+# Joshi et al. 2020's 6-class names ("The State and Fate of Linguistic
+# Diversity and Inclusion in the NLP World"); see common.data.lang2tax for the code->level mapping.
 _RESOURCE_LEVEL_LABELS = {
     0: "0: Left-Behinds",
     1: "1: Scraping-Bys",
@@ -126,28 +98,15 @@ _RESOURCE_LEVEL_LABELS = {
     5: "5: Winners",
 }
 
-# Real, published input pricing ($/million tokens): DeepSeek/OpenAI/Anthropic entries
-# fetched live from deepseek.ai/pricing, developers.openai.com/api/docs/pricing, and
-# platform.claude.com/docs/en/about-claude/pricing; Kimi-K3 pricing supplied directly by
-# the user from Moonshot AI's own pricing page. Cache-miss input rates used throughout
-# (the standard, non-cached request price) for consistency across providers. One panel
-# per PROVIDER (not per tokenizer/encoding) -- OpenAI alone has 4 different tiktoken
-# encodings with their own flagship-model prices (GPT-4o/GPT-4-Turbo/davinci-002/
-# gpt-3.5-turbo-instruct, see this dict's git history for that earlier line-chart
-# version), but a 4-subplot-by-provider layout needs exactly one representative model
-# per provider -- GPT-4o chosen as OpenAI's current flagship, per explicit user choice.
-# claude-opus-5 is the key evaluate.py's own configs/eval_claude.yml writes results
-# under; its panel renders as a "pending" placeholder until that evaluation finishes
-# and its entry is merged into the input results file (e.g. via combine_eval_results.py)
-# -- gen_api_cost_boxplot_tex checks for the key at generation time, not hardcoded to
-# always expect it.
+# Real published input pricing ($/million tokens, cache-miss rate), live-fetched from
+# each provider's own pricing page; Kimi-K3's supplied by the user. One panel per
+# PROVIDER, not per tokenizer -- GPT-4o represents OpenAI as its current flagship.
+# claude-opus-5 renders as a "pending" placeholder (see gen_api_cost_boxplot_tex) until
+# its entry is merged into the input file via combine_eval_results.py.
 _PROVIDER_PANELS = [
     {"key": "deepseek-ai/DeepSeek-V4-Pro", "display": "DeepSeek V4-Pro", "input": 0.435, "color": (214, 96, 42)},
     {"key": "tiktoken:o200k_base", "display": "GPT-4o", "input": 2.50, "color": (16, 110, 118)},
-    # anthropicCol (180,60,60), matching the categorical family color used in
-    # fig_resource_level/fig_heatmap/etc. -- was previously an ad hoc magenta
-    # unrelated to that palette.
-    {"key": "claude-opus-5", "display": "Claude Opus 5", "input": 5.00, "color": (180, 60, 60)},
+    {"key": "claude-opus-5", "display": "Claude Opus 5", "input": 5.00, "color": (180, 60, 60)},  # anthropicCol
     {"key": "moonshotai/Kimi-K3", "display": "Kimi K3", "input": 3.00, "color": (60, 150, 130)},
 ]
 
@@ -194,22 +153,10 @@ def fam_key(fam):
 
 
 def lang_display_name(code, _cache={}):
-    """'shn_Mymr' -> 'Shan', 'cmn_Hans' -> 'Mandarin Chinese' -- resolved via
-    langcodes (CLDR-backed), NOT a hand-maintained lookup table: confirmed
-    live against every one of a real 259-language BOUQuET set with zero
-    lookup failures, including rare codes (fia_Copt -> Nobiin, taq_Tfng ->
-    Tamasheq, crk_Cans -> Plains Cree). Strips ISO 639-3's "(individual
-    language)" macrolanguage-membership clarifier (e.g. on npi/ory/swh/...)
-    -- a real, confirmed CLDR annotation, not useful in a chart label.
-
-    Also resolves BARE codes with no script suffix at all (e.g.
-    common.data.indigenous_panel's own "aym"/"crk"/"nah" codes, unlike
-    BOUQuET's lang_Script stems) -- confirmed live that langcodes resolves
-    these directly (aym -> Aymara, crk -> Plains Cree, nah -> "Nahuatl
-    languages", a real macrolanguage-umbrella CLDR name, not a lookup
-    failure). Falls back to the bare code if it can't be parsed/resolved
-    either way (should not happen given the above, but a chart label
-    showing the raw code is a safe, honest failure mode, not a crash)."""
+    """'shn_Mymr' -> 'Shan' via langcodes (CLDR-backed), not a hand-maintained table --
+    covers the full 259-language BOUQuET set including rare codes, and bare codes with
+    no script suffix (e.g. indigenous_panel's "aym"/"crk"/"nah"). Strips ISO 639-3's
+    "(individual language)" clarifier. Falls back to the raw code on any lookup failure."""
     if code in _cache:
         return _cache[code]
     name = code
@@ -279,18 +226,11 @@ def write_scatter_data(rows, families, out_dir):
 
 
 def _write_standalone_and_body(name, preamble_lines, body_lines, out_dir):
-    """Writes BOTH fig_<name>.tex (a full \\documentclass{standalone} document,
-    for standalone test-compiles) and fig_<name>_body.tex (just body_lines --
-    the \\begin{tikzpicture}...\\end{tikzpicture} content, nothing else) for
-    \\input-ing directly into a thesis chapter. The _body.tex file exists
-    because \\includestandalone requires shell-escape (to recompile the
-    referenced file into its own PDF) -- when that's unavailable (the
-    default on many Overleaf compiler configs), it silently falls back to an
-    empty "file not found" placeholder box instead of erroring loudly.
-    \\input-ing the body directly sidesteps that entirely: it's plain TikZ/
-    pgfplots code compiled in the SAME pass as the rest of the thesis, so it
-    only needs the relevant packages/colors declared once in the main
-    preamble (see this repo's figures/tikz/README.md)."""
+    """Writes fig_<name>.tex (full standalone document, for test-compiles) and
+    fig_<name>_body.tex (just the tikzpicture, for \\input-ing into a thesis chapter).
+    The body file exists because \\includestandalone needs shell-escape, which many
+    Overleaf configs lack -- it then silently renders an empty placeholder instead of
+    erroring. \\input-ing the body avoids that (see figures/tikz/README.md)."""
     full_tex = "\n".join(preamble_lines + [r"\begin{document}"] + body_lines + [r"\end{document}"])
     body_tex = "\n".join(body_lines)
     with open(os.path.join(out_dir, f"fig_{name}.tex"), "w", encoding="utf-8") as f:
@@ -341,19 +281,11 @@ def gen_spread_leaderboard_tex(
 
 
 def _label_anchor_offsets(labeled_points, all_x_values, pad=0.06):
-    """Picks a two-word TikZ anchor (e.g. "south west") + small (dx, dy) nudge
-    for each of a handful of annotated scatter points, so the label text
-    extends AWAY from both the nearest plot edge and from any other labeled
-    point instead of always extending the same direction -- confirmed live
-    (real Overleaf render) that a fixed anchor=west with a small +x offset
-    clips or fully hides labels for points near the plot's right edge (text
-    extends rightward straight into/past the boundary), and that two labels
-    whose points are close in y collide with each other since both were
-    nudged the same direction. Horizontal side (west/east) is chosen by
-    which half of the overall x-range the point falls in (so a label never
-    extends toward the nearer edge); vertical side (north/south) alternates
-    across the points in y-sorted order (so any two vertically-close points
-    end up on opposite sides of their own markers)."""
+    """Picks a two-word TikZ anchor (e.g. "south west") + small (dx, dy) nudge per
+    labeled scatter point, so labels extend away from the nearest plot edge and from
+    each other -- a fixed anchor=west clips labels near the right edge and collides
+    labels close in y. Horizontal side follows which half of the x-range the point is
+    in; vertical side alternates in y-sorted order."""
     xmin, xmax = min(all_x_values), max(all_x_values)
     xmid = (xmin + xmax) / 2
     by_y = sorted(range(len(labeled_points)), key=lambda i: labeled_points[i]["spread"])
@@ -412,11 +344,9 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
 
 
 def _grouped_positions(rows, families, gap=0.7):
-    """Orders models by family (matching the bar/scatter charts' grouping),
-    sorted by spread within each family, with a `gap`-unit break between
-    family blocks. Axis-agnostic -- used for the heatmap's ROW axis (models
-    now go down the page, not across it -- see gen_heatmap_tex's own
-    docstring for why). Returns (ordered_rows, {model_name: position},
+    """Orders models by family (matching the bar/scatter charts), sorted by spread
+    within each family, with a `gap`-unit break between family blocks. Axis-agnostic --
+    used for the heatmap's row axis. Returns (ordered_rows, {model_name: position},
     [(family, start, end), ...], total_extent)."""
     ordered = []
     positions = {}
@@ -438,29 +368,20 @@ def _grouped_positions(rows, families, gap=0.7):
 
 
 def _estimate_label_width_cm(s, pt_per_char=3.6):
-    """Rough (not exact-metrics) estimate of a \\tiny-font label's rendered
-    width, just to reserve enough left-margin for the row-label column
-    before placing the family indicator bar further left -- generous by
-    design, since underestimating causes the bar (drawn AFTER, i.e. on TOP
-    of, the row labels) to visually paint over the longest names, confirmed
-    live: a real render at pt_per_char=2.6 clipped exactly the 3 longest
-    model names (bert-base-multilingual-cased, electra-base-discriminator,
-    distilbert-base-uncased) and nothing else. Overestimating just leaves
-    harmless whitespace, so err generous."""
+    """Rough estimate of a \\tiny-font label's rendered width, to reserve enough
+    left-margin before the row-label column for the family indicator bar drawn
+    further left. Deliberately generous: underestimating lets the bar (drawn on top)
+    paint over the longest names; overestimating just leaves harmless whitespace."""
     pt_to_cm = 0.03514
     return len(s) * pt_per_char * pt_to_cm
 
 
 def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42, gap=0.7):
-    """Models go down the ROWS (y-axis, family-grouped, same as the
-    leaderboard's ordering), languages go across the COLUMNS (x-axis, plain
-    left-to-right, worst first) -- confirmed live (a real Overleaf render)
-    that the opposite orientation (33 models across, 20 languages down) came
-    out ~18cm wide, wider than a normal page's text width, forcing either an
-    ugly \\resizebox shrink (which shrinks the already-\\tiny labels into
-    illegibility) or a landscape page. Putting the WIDE axis (33 models) on
-    the TALL dimension of a portrait page and the NARROW axis (20 languages)
-    on its width fits comfortably without shrinking anything."""
+    """Models go down the rows (family-grouped, same ordering as the leaderboard),
+    languages go across the columns (worst first). The opposite orientation (33 models
+    across) rendered ~18cm wide -- wider than a normal text block -- forcing an ugly
+    \\resizebox shrink or a landscape page; putting the wide axis on the tall dimension
+    of a portrait page fits without shrinking."""
     worst_by_lang = {}
     for m in models.values():
         for lang, v in m["token_parity"].items():
@@ -469,16 +390,9 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     n_cols = len(top_langs)
 
     ordered, row_pos, blocks, total_height = _grouped_positions(rows, families, gap=gap)
-    # .get(l) rather than [l]: top_langs is chosen from the UNION of every
-    # model's own token_parity keys (see worst_by_lang above), so a language
-    # that's one model's worst outlier isn't guaranteed to be present in
-    # every OTHER model's own token_parity dict -- confirmed live for a
-    # still-in-progress checkpointed eval (e.g. systems/claude_tokenizer's
-    # own multi-day run), whose dict only has whichever languages have
-    # actually been scored so far, not the full BOUQuET set. A model/lang
-    # pair with no data simply contributes nothing here and gets no cell
-    # below, same "missing data -> skip, don't crash" convention as every
-    # other figure in this module (e.g. gen_indigenous_panel_parity_bars_tex).
+    # .get(l), not [l]: top_langs comes from the UNION of every model's token_parity
+    # keys, so a checkpointed in-progress eval may lack some of them -- missing pairs
+    # just get no cell below, same skip-don't-crash convention used throughout.
     all_vals = [
         v for r in ordered for l in top_langs
         for v in [models[r["name"]]["token_parity"].get(l)] if v is not None
@@ -503,10 +417,7 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
         r_, g_, b_ = _FAMILY_RGB.get(fam, _FAMILY_RGB["Other"])
         body.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
 
-    # Cells. A model with no data for this language (see all_vals above for
-    # why that happens) simply gets no filled cell here -- left blank
-    # (the tikzpicture's own background) rather than crashing or
-    # fabricating a value.
+    # Cells: no data for this model/language -> left blank, not fabricated.
     for r in ordered:
         y = y_of(row_pos[r["name"]])
         for xi, lang in enumerate(top_langs):
@@ -516,20 +427,15 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
             b = bucket_of(v)
             body.append(r"\fill[heat%d] (%d,%.2f) rectangle ++(1,1);" % (b, xi, y))
 
-    # Gridlines drawn PER BLOCK (not one grid spanning the whole height) so
-    # the gap between families reads as a real visual break, not a filled seam.
+    # Gridlines drawn per block, not one grid spanning the full height, so the
+    # family gap reads as a real visual break rather than a filled seam.
     for _, y0, y1 in blocks:
         body.append(r"\draw[white, line width=0.3pt] (0,%.2f) grid (%d,%.2f);" % (y_of(y1) + 1, n_cols, y_of(y0) + 1))
 
-    # Family header: a colored vertical bar + rotated family name, further
-    # left than the row labels -- reserve enough margin (estimated from the
-    # longest actual model short-name string) so the bar shouldn't collide
-    # with row-label text. Drawn BEFORE the row labels (below in z-order) as
-    # a backstop: confirmed live that drawing it AFTER painted over the 3
-    # longest model names whose real rendered width came in wider than the
-    # estimate -- with labels drawn on top instead, even an imperfect
-    # estimate degrades to "label overlaps a sliver of color" rather than
-    # "label invisible."
+    # Family header: colored bar + rotated name, left of the row labels. Drawn BEFORE
+    # the row labels (so labels win visually) as a backstop against the width estimate
+    # (_estimate_label_width_cm) running short -- worst case is a label overlapping a
+    # sliver of color, not an invisible label.
     row_label_margin = max((_estimate_label_width_cm(r["short"]) for r in ordered), default=1.0) / cell_cm
     header_x1 = -(0.3 + row_label_margin + 0.5)
     header_x0 = header_x1 - 0.4
@@ -579,20 +485,13 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
 
 
 def load_indigenous_panel_rows(results_path):
-    """Loads a systems/*/evaluate.py --eval-data-source indigenous_panel
-    --output JSON (see common.eval.cross_tokenizer.evaluate_on_indigenous_panel's
-    own docstring for the per-model result shape: {"combined": ...,
-    "token_parity_by_anchor": ..., "morphology_spread": ...}) into the SAME
-    row shape load_rows produces, so compute_families/_grouped_positions
-    (the shared row-ORDERING scaffold every indigenous-panel figure uses,
-    for a consistent tokenizer order across figures) work UNCHANGED. "spread"
-    here is morphology_spread["fertility_spread"] -- used ONLY to order
-    rows within each family (no figure displays this number directly per
-    explicit user feedback: the mixed-anchor panel is better read as two
-    separate, anchor-specific token_parity figures -- see
-    gen_indigenous_panel_parity_bars_tex -- than one anchor-free fertility
-    summary; "spread" stays here purely as a stable, meaningful sort key).
-    """
+    """Loads a systems/*/evaluate.py --eval-data-source indigenous_panel --output JSON
+    (see evaluate_on_indigenous_panel for the per-model result shape) into the same row
+    shape load_rows produces, so compute_families/_grouped_positions work unchanged.
+    "spread" = morphology_spread["fertility_spread"], used only to order rows within
+    each family -- no figure displays it directly; the mixed-anchor panel is better
+    read as two separate anchor-specific token_parity figures instead (see
+    gen_indigenous_panel_parity_bars_tex)."""
     with open(results_path, encoding="utf-8") as f:
         data = json.load(f)
     models = {k: v for k, v in data.items() if k != "_failed" and isinstance(v, dict)}
@@ -623,35 +522,19 @@ def load_indigenous_panel_rows(results_path):
 
 
 def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, fig_name, out_dir, data_prefix=""):
-    """ONE grouped vertical bar chart for this anchor group -- languages
-    along the x-axis, one clustered bar per tokenizer FAMILY (not per
-    individual tokenizer), colored the same as every other figure
-    (_FAMILY_COLORS/_FAMILY_RGB). Replaces an earlier per-language-subplot
-    design (a minipage grid, one xbar subplot per language, all 33+
-    individual tokenizers shown as separate bars in each) per explicit
-    user feedback on a real render: even after fixing that version's own
-    width-overflow bug, showing every individual tokenizer once per
-    language was too dense to read AND the subplot grid overflowed the
-    page at 10 languages. Aggregating to family-level MEANS collapses
-    ~34 bars per language down to len(families) (currently 6), and putting
-    every language on one shared x-axis instead of one-subplot-per-language
-    means the whole comparison is one compact, page-fitting plot instead
-    of a tall grid.
+    """One grouped vertical bar chart for this anchor group: languages on the x-axis,
+    one clustered bar per tokenizer FAMILY (not per individual tokenizer). Replaces an
+    earlier per-language-subplot grid, which was too dense (33+ tokenizers per subplot)
+    and overflowed the page at 10 languages; family-level means collapse ~34 bars down
+    to len(families).
 
-    Each family's own bar is the MEAN token_parity across every model in
-    that family that has data for a given language -- individual-tokenizer
-    detail is deliberately traded away here for a readable overview; a
-    reader who wants the per-tokenizer number can still get it from
-    results/indigenous_panel_comparison.json directly. A language with NO
-    data at all for a given family (e.g. a checkpoint that never covered
-    it) simply has no bar there, same graceful-skip convention as every
-    other figure in this module.
+    Each bar is the MEAN token_parity across models in that family with data for the
+    given language -- per-tokenizer detail is available directly from
+    results/indigenous_panel_comparison.json. A family with no data for a language
+    simply has no bar there.
 
-    A dashed horizontal reference line at parity=1.0 is drawn via pgfplots'
-    own `extra y ticks` + `grid=major` mechanism (not a manually-plotted
-    line) -- the standard, robust way to add a reference gridline at an
-    arbitrary axis value without hand-computing plot-area coordinates.
-    """
+    The parity=1.0 reference line uses pgfplots' `extra y ticks` + `grid=major`
+    rather than a manually-plotted line."""
     family_models = defaultdict(list)
     for r in rows:
         family_models[r["family"]].append(r["name"])
@@ -669,18 +552,12 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
         r_, g_, b_ = _FAMILY_RGB[fam]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
 
-    # Families with NO data at all for this anchor group (e.g. a checkpoint-
-    # in-progress model whose relevant phase hasn't produced any completed
-    # calls yet) are excluded from `present_families` entirely -- both their
-    # .dat file AND their \addplot/\addlegendentry pair are skipped below.
-    # This matters beyond just "don't draw an empty bar": pgfplots silently
-    # drops a completely-empty-table addplot from its own internal legend
-    # numbering, which shifts every LATER \addlegendentry to mislabel the
-    # next real plot instead (confirmed live -- a real render showed
-    # "Anthropic"'s legend entry colored/positioned as if it were "Other",
-    # with "Other"'s own entry missing entirely, because Anthropic's own
-    # table was empty at compile time). Skipping the pair in Python avoids
-    # ever emitting a plot pgfplots would silently drop.
+    # Families with no data at all for this anchor group are excluded from
+    # present_families entirely (not just given an empty bar): pgfplots silently drops
+    # a completely-empty-table addplot from its own legend numbering, which shifts
+    # every LATER \addlegendentry to mislabel the next real plot. Skipping the
+    # \addplot/\addlegendentry pair in Python avoids ever emitting a plot pgfplots
+    # would silently drop.
     present_families = [fam for fam in families if any(family_mean(fam, lang) is not None for lang in langs)]
     dropped_families = [fam for fam in families if fam not in present_families]
     if dropped_families:
@@ -735,18 +612,11 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
 
 
 def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
-    """Sibling to generate() (see this module's own docstring for the main
-    5-figure BOUQuET-based pipeline) for a systems/*/evaluate.py
-    --eval-data-source indigenous_panel --output JSON instead -- see
-    common.data.indigenous_panel's own module docstring for the panel and
-    evaluate_on_indigenous_panel's for why its results need dedicated
-    loading/figure logic (this deliberately mixed-anchor panel has no
-    single global token_parity the way the BOUQuET comparison does). Two
-    figures, one per anchor language actually present in
-    common.data.indigenous_panel.PAIRS (currently "en": crk/iu, and "es":
-    the ten AmericasNLP languages) -- see
-    gen_indigenous_panel_parity_bars_tex's own docstring for the design.
-    """
+    """Sibling to generate() (see module docstring) for a --eval-data-source
+    indigenous_panel --output JSON instead -- this mixed-anchor panel has no single
+    global token_parity, so it needs dedicated loading/figure logic (see
+    common.data.indigenous_panel). Two figures, one per anchor language present in
+    PAIRS (currently "en": crk/iu, "es": ten AmericasNLP languages)."""
     from common.data.indigenous_panel import PAIRS
 
     os.makedirs(out_dir, exist_ok=True)
@@ -783,19 +653,12 @@ def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
 
 def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
     """Mean token_parity per tokenizer, grouped by Joshi et al. 2020's 6-level
-    linguistic resource taxonomy (see common.data.lang2tax's own module
-    docstring for the code->level mapping and its ~85% coverage of this
-    project's languages -- the rest aren't in that external taxonomy at
-    all, a real coverage gap in that resource, not something fixable here).
-    Uses the FULL per-language token_parity dict each model already has
-    (not the heatmap's worst-20 subset), so every resolved language
-    contributes to whichever level's mean it belongs to.
+    resource taxonomy (see common.data.lang2tax; ~85% of languages resolve against it,
+    the rest are a genuine gap in that external resource). Uses each model's full
+    per-language token_parity dict, not the heatmap's worst-20 subset.
 
-    One line per tokenizer (thin, colored by family, `forget plot` so it
-    doesn't spam the legend), plus one legend entry per family added
-    manually via `\\addlegendimage` -- the same pattern as coloring 33
-    tokenizers without a 33-entry legend used elsewhere in this file.
-    """
+    One thin line per tokenizer, colored by family, `forget plot` so it doesn't spam
+    the legend, plus one legend entry per family added manually via `\\addlegendimage`."""
     all_codes = set()
     for m in models.values():
         all_codes.update(m["token_parity"].keys())
@@ -854,17 +717,10 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
 
 
 def _panel_title(panel, models):
-    """Appends "(N% complete)" to a panel's title whenever its underlying
-    data is meaningfully partial -- self-correcting, since it's computed
-    directly from that model's own real num_total_calls/num_failed_calls
-    (only present on evaluate_claude_on_groups-style entries; hf_frontier
-    entries have neither key, so this is a no-op for them). Confirmed
-    useful live: this project's own Claude evaluation is a genuinely
-    multi-day job that gets checkpointed and regenerated from partial data
-    mid-run -- this marker makes that visible directly IN the figure,
-    not just in a commit message or chat note that's easy to forget, and
-    disappears on its own once a regenerate uses the finished results
-    (no manual edit to remember/revert)."""
+    """Appends "(N% complete)" whenever a panel's data is meaningfully partial, computed
+    from num_total_calls/num_failed_calls (only present on evaluate_claude_on_groups-style
+    entries -- a no-op for hf_frontier ones). Makes a checkpointed, still-running eval
+    visible directly in the figure, and disappears on its own once the results finish."""
     display = panel["display"]
     m = models.get(panel["key"], {})
     total = m.get("num_total_calls")
@@ -878,12 +734,9 @@ def _panel_title(panel, models):
 
 
 def _boxplot_stats(values):
-    """Standard Tukey five-number summary from REAL data (not simulated):
-    median/quartiles via numpy, whiskers extended to the most extreme point
-    within 1.5*IQR of the quartiles (clipped to the actual data range, never
-    invented beyond it), remaining points beyond that returned separately as
-    outliers -- pgfplots' `boxplot prepared` plots these as individual
-    points, same as any standard box-and-whisker plot."""
+    """Standard Tukey five-number summary: median/quartiles via numpy, whiskers extended
+    to the most extreme point within 1.5*IQR (clipped to the real data range), remaining
+    points returned separately as outliers for pgfplots' `boxplot prepared`."""
     arr = np.array(sorted(values))
     q1, median, q3 = np.percentile(arr, [25, 50, 75])
     iqr = q3 - q1
@@ -900,35 +753,22 @@ def _boxplot_stats(values):
 
 
 def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
-    """Real per-language cost DISTRIBUTIONS (not just means), one subplot per
-    PROVIDER (DeepSeek, GPT, Claude, Kimi K3 -- see _PROVIDER_PANELS), each
-    with 6 real Tukey box-and-whisker plots (one per Joshi et al. resource
-    level). Confirmed live that an earlier single-chart line version (mean
-    cost only) visually tangled two similarly-priced series together and hid
-    all per-language variance -- a box plot surfaces that variance directly
-    instead of collapsing it into one number.
+    """Real per-language cost DISTRIBUTIONS (not just means), one subplot per PROVIDER
+    (see _PROVIDER_PANELS), each with 6 Tukey box plots (one per resource level). An
+    earlier single-line mean-cost version hid per-language variance by collapsing it
+    into one number.
 
     cost(model, lang) = fertility(model, eng_Latn) * reference_words *
-    token_parity(model, lang) * input_price_per_token(model) / 1e6 -- the
-    SAME English-anchored token_parity this whole module already uses,
-    converted to an absolute token count via that model's own measured
-    English fertility, then priced at its real per-token rate. Every
-    resolved language contributes its OWN point to its level's box, not
-    just a group mean.
+    token_parity(model, lang) * input_price_per_token(model) / 1e6 -- the same
+    English-anchored token_parity used elsewhere in this module, priced at the real
+    per-token rate. Every resolved language contributes its own point to its level's box.
 
-    Uses plain LaTeX `minipage`s (not pgfplots' groupplots library) for the
-    2x2 layout -- lower-risk than a library this project hasn't used
-    elsewhere, given no local LaTeX install to compile-test against.
-    `\\usepgfplotslibrary{statistics}` is required for `boxplot prepared`
-    and is NOT loaded by plain `\\usepackage{pgfplots}` alone -- baked into
-    this figure's own preamble, and called out again in figures/tikz/README.md
-    since the user must also add it to their thesis's main preamble.
+    Uses plain `minipage`s (not groupplots) for the 2x2 layout. `\\usepgfplotslibrary{statistics}`
+    (required for `boxplot prepared`, not loaded by plain pgfplots) is baked into this
+    figure's own preamble and called out again in figures/tikz/README.md.
 
-    Claude's panel renders as a "pending" placeholder if "claude-opus-5"
-    (the key configs/eval_claude.yml's own evaluate.py run writes results
-    under) isn't in `models` yet -- checked at generation time, not
-    hardcoded to always expect it.
-    """
+    Claude's panel renders as a "pending" placeholder if "claude-opus-5" isn't in
+    `models` yet."""
     present_panels = [p for p in _PROVIDER_PANELS if p["key"] in models]
     all_codes = set()
     for p in present_panels:
@@ -947,11 +787,9 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
         r_, g_, b_ = p["color"]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (color_names[p["key"]], r_, g_, b_))
 
-    # Pre-compute every present panel's per-level cost values up front so a single
-    # shared ymin/ymax can be applied to all 4 panels -- previously each panel
-    # auto-ranged independently, so e.g. Claude's $10-90 range and DeepSeek's
-    # $0.4-6 range used different y-axis floors/ceilings and couldn't be visually
-    # compared against each other.
+    # Pre-compute every panel's per-level costs up front so one shared ymin/ymax can
+    # apply to all 4 -- previously each auto-ranged independently and couldn't be
+    # visually compared (e.g. Claude's $10-90 vs DeepSeek's $0.4-6).
     panel_by_level = {}
     all_costs = []
     for panel in present_panels:
@@ -980,19 +818,13 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
     body = []
     for i, panel in enumerate(_PROVIDER_PANELS):
         col = color_names[panel["key"]]
-        # Bottom row of the 2x2 grid (indices 2 and 3) gets the shared x-axis label --
-        # top row would just duplicate it since both rows share the same resource-level
-        # x-axis.
+        # Bottom row (indices 2, 3) gets the shared x-axis label; top row would duplicate it.
         xlabel_opt = [r"    xlabel={Linguistic resource level (Joshi et al. 2020)},"] if i >= 2 else []
         body.append(r"\begin{minipage}[t]{0.48\linewidth}")
         body.append(r"\centering")
         if panel["key"] not in models:
-            # Same axis options as the real panels below (grid, ticks, ylabel,
-            # log-scale range) -- confirmed live that an empty `axis lines=none`
-            # placeholder does NOT reserve the same layout space pgfplots gives
-            # a real, populated axis, so the title/text ended up misaligned
-            # against the other 3 panels. Matching the structure (just with no
-            # \addplot data) keeps every panel's title at the same height.
+            # Same axis options as the real panels (not axis lines=none) so the
+            # placeholder reserves the same layout space and titles stay aligned.
             body += [
                 r"\begin{tikzpicture}",
                 r"\begin{axis}[",
@@ -1087,19 +919,11 @@ _FIGURE_SUBDIRS = {
 
 def generate(results_path, out_dir, data_prefix=None):
     """Each figure gets its own subdirectory under out_dir (figures/tikz/spread_leaderboard/,
-    figures/tikz/landscape/, etc.) -- one figure's .tex + .dat files sitting together,
-    rather than 50+ files flattened into one directory. data_prefix: BASE path prefix
-    (before the per-figure subdirectory name gets appended) baked into every
-    `table {...}` reference inside fig_spread_leaderboard.tex/fig_landscape.tex/
-    fig_resource_level.tex/fig_api_cost.tex, e.g. "figures/tikz". Needed because
-    \\includestandalone (without shell-escape) runs pgfplots from the HOST document's
-    own directory, not from out_dir -- a bare filename like "bar_X.dat" only resolves
-    when compiling standalone directly inside that figure's own subdirectory, and
-    fails with "Could not read table file" once the figure is included from a
-    thesis's main .tex elsewhere. Defaults to out_dir itself (normalized to forward
-    slashes), which is correct whenever the main document compiles from the same
-    root this script was run from -- override if your actual include path differs.
-    """
+    etc.) rather than 50+ files flattened together. data_prefix is the base path baked into
+    every `table {...}` reference -- needed because \\includestandalone (without shell-escape)
+    runs pgfplots from the HOST document's directory, not out_dir, so a bare "bar_X.dat"
+    fails once the figure is \\input from elsewhere. Defaults to out_dir itself; override
+    if your thesis's include path differs."""
     os.makedirs(out_dir, exist_ok=True)
     base_prefix = out_dir.replace(os.sep, "/") if data_prefix is None else data_prefix
     if base_prefix and not base_prefix.endswith("/"):

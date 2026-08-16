@@ -1,7 +1,7 @@
 """Checkpoint load for a trained FlexiTokensModel -- mirrors fairtok.inference's
-load_checkpoint naming convention. No save_checkpoint here: flexitokens/train.py
-already saves {"state_dict": ..., "config": dataclasses.asdict(cfg)} inline at the
-end of FlexiTokensTrainer.train, in exactly the shape this loads back.
+naming convention. No save_checkpoint here: train.py already saves
+{"state_dict": ..., "config": ...} inline at the end of
+FlexiTokensTrainer.train, in the shape this loads back.
 """
 
 import torch

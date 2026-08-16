@@ -1,28 +1,22 @@
-"""Held-out evaluation for one or more arbitrary HuggingFace frontier models'
-own tokenizers (--hf-repo-id, loaded TOKENIZER-ONLY -- see model.py's own
-docstring) -- mirrors every other systems/*/evaluate.py's shape so a real
-frontier tokenizer scores on IDENTICAL held-out data (BOUQuET) with the SAME
-metrics as fairtok/magnet/flexitokens/manta/fanta/superbpe/bpe. Like
-bpe/superbpe/flexitokens/manta, a frontier tokenizer's own encode() takes no
-language argument, so ONE induce_fn covers every language (no MAGNET-style
-per-script resolution needed).
+"""Held-out evaluation for one or more arbitrary HuggingFace frontier
+tokenizers (--hf-repo-id, loaded TOKENIZER-ONLY, see model.py) -- mirrors
+every other systems/*/evaluate.py's shape so a frontier tokenizer scores on
+the same held-out data (BOUQuET) with the same metrics as every other
+systems/ tokenizer. Like bpe/superbpe/flexitokens/manta, a frontier
+tokenizer's encode() takes no language argument, so one induce_fn covers
+every language.
 
---hf-repo-id takes a COMMA-SEPARATED list (same convention pretraining.
-cli_eval's own --benchmark uses) -- one job scores every listed model
-against the SAME loaded eval_groups (loaded ONCE, not re-downloaded per
-model) and writes one combined JSON, rather than one sbatch call per model.
---trust-remote-code/--hf-token apply to the WHOLE list uniformly (passing a
-token to a repo that doesn't need one, or --trust-remote-code to a repo
-that doesn't require custom code, is a harmless no-op) -- if different
-repos in a real comparison genuinely need different tokens, run them as
-separate invocations instead.
+--hf-repo-id takes a COMMA-SEPARATED list -- one job scores every listed
+model against the same loaded eval_groups (loaded once) and writes one
+combined JSON, instead of one sbatch call per model. --trust-remote-code/
+--hf-token apply uniformly to the whole list (harmless no-op for repos that
+don't need them); run separate invocations if different repos need
+different tokens.
 
-A single repo's failure (gated-without-access, a tokenizer scheme model.py's
-own span-detection can't handle, a transient network error) does NOT abort
-the whole run -- main() catches per-repo and records it under a "_failed"
-key in the combined results (only present when at least one repo actually
-failed, so a fully-successful run's own result shape is unchanged) rather
-than losing every OTHER repo's already-completed results over one bad one.
+A single repo's failure (gated access, an unhandled tokenizer scheme,
+network error) does NOT abort the run -- main() catches per-repo and
+records it under a "_failed" key (only present if something failed) rather
+than losing every other repo's completed results.
 """
 
 import json
@@ -57,33 +51,28 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--trust-remote-code", action="store_true",
-        help="required by some repos (e.g. moonshotai/Kimi-K3, which ships its own tokenizer "
-        "class) to load at all -- executes that repo's own Python code; off by default, "
-        "see model.py's own docstring before turning this on; applies to every repo in "
-        "--hf-repo-id uniformly",
+        help="required by some repos (e.g. Kimi-K3, custom tokenizer class) to load at all -- "
+        "executes that repo's own Python code; off by default; applies to all --hf-repo-id entries",
     )
     parser.add_argument(
         "--hf-token", type=str, default=None,
-        help="explicit HF access token -- only needed for GATED repos (e.g. "
-        "meta-llama/Llama-3.1-8B-Instruct, which also needs its license accepted on "
-        "huggingface.co first); falls back to HF_TOKEN / a prior huggingface-cli login; "
-        "applies to every repo in --hf-repo-id uniformly",
+        help="explicit HF access token -- only needed for gated repos (e.g. Llama-3.1-8B-Instruct, "
+        "also needs license acceptance on huggingface.co); falls back to HF_TOKEN / "
+        "huggingface-cli login; applies to all --hf-repo-id entries",
     )
     parser.add_argument(
         "--eval-data-source",
         choices=["bouquet", "bouquet_test", "synthetic", "indigenous_panel"],
         default="bouquet",
         help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
-        "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
-        "reported numbers, not repeated tuning checks; "
-        "'synthetic': a small real-text placeholder (reuses systems.bpe.train's own "
-        "_SMOKE_TEST_GROUPS -- NOT common.data.synthetic's byte generator, which isn't guaranteed "
-        "valid UTF-8), for a quick sanity check with no BOUQuET network access; "
-        "'indigenous_panel': common.data.indigenous_panel's curated Indigenous-language panel "
-        "(needs a one-time common.data.prepare_indigenous_panel run first) -- scored via "
-        "evaluate_on_indigenous_panel, not evaluate_on_groups, since this panel is deliberately "
-        "mixed-anchor (see that function's own docstring); results have a different shape (see "
-        "_evaluate_one below), not directly comparable to a bouquet/bouquet_test/synthetic run's",
+        "'bouquet_test': BOUQuET TEST, the held-out split -- use for final reported numbers only; "
+        "'synthetic': small real-text placeholder (systems.bpe.train's _SMOKE_TEST_GROUPS, not "
+        "common.data.synthetic's byte generator which isn't guaranteed valid UTF-8), for a quick "
+        "sanity check with no network access; "
+        "'indigenous_panel': common.data.indigenous_panel's curated panel (needs a one-time "
+        "common.data.prepare_indigenous_panel run first) -- scored via evaluate_on_indigenous_panel "
+        "(mixed-anchor), not evaluate_on_groups; results have a different shape, not comparable "
+        "to a bouquet/bouquet_test/synthetic run's",
     )
     parser.add_argument(
         "--num-groups", type=int, default=None,
@@ -93,9 +82,8 @@ def build_arg_parser():
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="hf_frontier",
-        help="own project, separate from the systems/*/train.py per-system convention "
-        "(fanta->'fanta', bpe->'bpe', ...) and from pretraining's own 'pretraining' project -- "
-        "this compares EXTERNAL tokenizers, not one this project trained itself",
+        help="own project, separate from the systems/*/train.py per-system convention -- "
+        "this compares EXTERNAL tokenizers, not ones trained by this project",
     )
     parser.add_argument("--run-name", type=str, default="")
     return parser
@@ -119,8 +107,8 @@ def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token, indigenous_
     wrapped = HFFrontierTokenizer.load(repo_id, trust_remote_code=trust_remote_code, hf_token=hf_token)
     print(f"\nhf_repo_id={repo_id} span_method={wrapped.span_method} native_vocab_size={wrapped.vocab_size}")
 
-    # ONE induce_fn for every language -- frontier tokenizers' own encode()
-    # takes no language argument, same as bpe/superbpe/flexitokens/manta.
+    # One induce_fn for every language -- frontier tokenizers' encode() takes
+    # no language argument, same as bpe/superbpe/flexitokens/manta.
     induce_fn_by_lang = {
         lang: (lambda raw, w=wrapped: induce_spans(w, raw))
         for group in eval_groups
@@ -153,28 +141,17 @@ def main(argv=None):
                 indigenous_panel=is_indigenous_panel,
             )
         except Exception as e:
-            # One bad repo (gated-without-access, a tokenizer scheme model.py's
-            # own span-detection can't handle, a transient network error) must
-            # not lose every OTHER repo's already-completed results -- this
-            # matters far more now that --hf-repo-id can list a dozen-plus
-            # models than it did for the original handful, where a failure was
-            # rare enough to just let the whole job die and resubmit.
+            # One bad repo must not lose every other repo's completed results.
             print(f"\n[{repo_id}] FAILED: {type(e).__name__}: {e}")
             failed[repo_id] = f"{type(e).__name__}: {e}"
             continue
         all_wrapped[repo_id] = wrapped
         # token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't
-        # valid JSON, and aren't needed for the summary metrics this writes
-        # out (report_eval/report_indigenous_panel_eval's own printed output
-        # already covers them); excluded here rather than left to crash
-        # json.dumps below on a real multi-repo run (confirmed directly: an
-        # earlier version of this file's own sibling, pretraining.cli_eval,
-        # hit the identical class of bug with tuple-keyed dicts -- checked
-        # for it here before shipping, not after). indigenous_panel's own
-        # results are shaped differently (evaluate_on_indigenous_panel's own
-        # docstring) -- token_freq shows up nested inside "combined" and
-        # inside each anchor's own entry in "token_parity_by_anchor", not at
-        # the top level, so it needs stripping in both places.
+        # valid JSON and aren't needed for the summary (report_eval /
+        # report_indigenous_panel_eval already printed it); stripped here
+        # rather than crashing json.dumps below. indigenous_panel's results
+        # nest token_freq inside "combined" and inside each anchor entry of
+        # "token_parity_by_anchor", so both need stripping.
         if is_indigenous_panel:
             all_results[repo_id] = {
                 "combined": {k: v for k, v in results["combined"].items() if k != "token_freq"},
@@ -189,9 +166,7 @@ def main(argv=None):
 
     if failed:
         print(f"\n{len(failed)}/{len(repo_ids)} repo(s) failed: {list(failed)} -- see FAILED lines above for why")
-        all_results["_failed"] = failed  # only added when non-empty, so a fully-successful
-        # run's own all_results keys are unchanged from before this fix (see run_smoke_test's
-        # own `set(all_results) == {"gpt2"}` assertion, which still holds for that case)
+        all_results["_failed"] = failed  # only added when non-empty
 
     payload = json.dumps(all_results, indent=2)
     if args.output:
@@ -215,10 +190,8 @@ def main(argv=None):
             },
         )
         successful = {r: res for r, res in all_results.items() if r != "_failed"}
-        # indigenous_panel's own results nest avg_compression/gini/renyi/
-        # per_lang_compression/fertility under "combined" (see
-        # evaluate_on_indigenous_panel's own docstring) -- everything else
-        # has them at the top level.
+        # indigenous_panel nests avg_compression/gini/renyi/per_lang_compression/
+        # fertility under "combined"; everything else has them at the top level.
         summary = (lambda r: r["combined"]) if is_indigenous_panel else (lambda r: r)
         summary_rows = [
             [repo_id, all_wrapped[repo_id].span_method, all_wrapped[repo_id].vocab_size,
@@ -262,23 +235,16 @@ def main(argv=None):
 
 
 def run_smoke_test():
-    """Mirrors every other systems/*/evaluate.py's own testing convention,
-    with one real difference stated plainly: this module has no local,
-    network-free path at all (unlike a from-scratch checkpoint, there is no
-    "trained model" to construct without an HF call) -- gpt2 is used here
-    specifically because it's small, fast, ungated, and always available,
-    not because it's the recommended default for a real comparison run.
-    Verified against real synthetic (non-network BOUQuET) eval data, plus
-    a direct round-trip assertion on the span reconstruction itself so a
-    regression in model.py's own logic fails LOUDLY here, not just as a
-    quietly-wrong downstream metric. Also exercises the multi-repo/--output
-    JSON path directly (gpt2 twice under different labels -- no need for a
-    second real network-distinct tokenizer just to prove the fan-out and
-    JSON serialization both work), including a real json.dumps call, which
-    is exactly the step that would catch a tuple/bytes-key regression. And
-    exercises per-repo error isolation with a genuinely nonexistent repo
-    alongside a real one, confirming the bad one lands under "_failed"
-    rather than crashing the whole run and losing gpt2's own real result."""
+    """Unlike other systems/*/evaluate.py smoke tests, this module has no
+    local network-free path (there's no "trained model" to construct
+    without an HF call) -- gpt2 is used since it's small, fast, and always
+    available, not as a recommended default. Checks: a direct round-trip
+    assertion on span reconstruction (so a model.py regression fails
+    loudly here, not as a quiet downstream metric), the multi-repo/--output
+    JSON path (gpt2 twice under different labels, including a real
+    json.dumps to catch tuple/bytes-key regressions), and per-repo error
+    isolation (a nonexistent repo alongside a real one lands under
+    "_failed" without losing gpt2's result)."""
     import tempfile
     import os
 
@@ -297,10 +263,9 @@ def run_smoke_test():
         assert set(gpt2_result["token_parity_gm"]) == set(gpt2_result["token_parity"])
         assert gpt2_result["token_parity_spread"] >= 1.0
 
-        # Anchor-invariance, checked directly against a real tokenizer (not just standalone
-        # math): re-run with anchor_lang="deu" instead of the default "eng" and confirm
-        # token_parity_gm ends up identical -- this is the property the whole feature exists
-        # for (see common.eval.parity.anchor_invariant_parity's own docstring).
+        # Anchor-invariance against a real tokenizer: re-run with anchor_lang="deu" instead
+        # of "eng" and confirm token_parity_gm is identical (see
+        # common.eval.parity.anchor_invariant_parity).
         from common.eval.cross_tokenizer import evaluate_on_groups
         from systems.bpe.train import _SMOKE_TEST_GROUPS
 

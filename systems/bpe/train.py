@@ -1,11 +1,8 @@
 """Fitting loop for a standard byte-level BPE tokenizer (bpe.model.fit_bpe,
-wrapping HuggingFace's `tokenizers` library directly -- see that module's
-docstring for why this one, unlike every other package here, doesn't
-reimplement its own algorithm). Same non-gradient-descent shape as
-superbpe/train.py -- see that module's own docstring for the full rationale
-(no learning_rate/optimizer/num_train_epochs/max_steps fields, no periodic
-epoch-boundary eval, no seed field: all for the same reasons, since this is
-architecturally the same kind of single-shot corpus-statistics fit).
+wrapping HuggingFace's `tokenizers` library directly). Same non-gradient-
+descent shape as superbpe/train.py, for the same reasons (no
+learning_rate/optimizer/num_train_epochs/max_steps fields, no periodic
+epoch-boundary eval, no seed field -- a single-shot corpus-statistics fit).
 """
 
 import dataclasses
@@ -29,23 +26,20 @@ from .segment import induce_spans
 @dataclasses.dataclass
 class BPEConfig(BaseTokenizerConfig):
     """vocab_size/use_wandb/run_name inherited from BaseTokenizerConfig
-    unchanged except wandb_project's default. output_dir is inherited
-    unchanged in name/type, but note its MEANING here: passed straight to
-    tokenizers.Tokenizer.save() (see inference.py) -- a self-describing JSON
-    file, not a torch.save dict like every other system's checkpoint."""
+    unchanged except wandb_project's default. output_dir's MEANING differs
+    here: passed straight to tokenizers.Tokenizer.save() -- a self-describing
+    JSON file, not a torch.save dict like other systems' checkpoints."""
 
     wandb_project: str = "bpe"
-    max_eval_samples: int = 0  # 0 scores every loaded eval group -- see
-    # superbpe.train.SuperBPEConfig's own field of the same name/docstring;
-    # identical reasoning (this fires exactly once, not periodically).
+    # 0 scores every loaded eval group (see SuperBPEConfig's same field) -- fires once, not periodically.
+    max_eval_samples: int = 0
 
 
 class BPETrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (list of dicts {lang: text}, same
-    shape every other tokenizer's trainer takes), call .train(), then read
-    .model / .token_freq / .vocab off the instance (train() also returns them
-    as a tuple, matching every other trainer's convention). No extra __init__
-    needed beyond BaseTokenizerTrainer's own."""
+    shape as every other tokenizer's trainer), call .train(), then read
+    .model / .token_freq / .vocab off the instance (also returned as a
+    tuple). No extra __init__ needed."""
 
     def train(self):
         cfg = self.args
@@ -73,10 +67,9 @@ class BPETrainer(BaseTokenizerTrainer):
         self.model = model
         print(f"learned vocabulary of {model.num_parameters()} tokens")
 
-        # Harvest realized token frequencies by re-running the just-fit model
-        # over its own training corpus -- see superbpe.train.SuperBPETrainer.
-        # train's identical step for the full "why" (pipeline consistency
-        # across all six tokenizers).
+        # Harvest realized token frequencies by re-running the fit model over its own
+        # training corpus -- see SuperBPETrainer.train's identical step (pipeline
+        # consistency across tokenizers).
         token_freq = defaultdict(Counter)
         for group in self.train_groups:
             for lang, text in group.items():
@@ -118,10 +111,9 @@ class BPETrainer(BaseTokenizerTrainer):
 
 
 def _report_smoke_test_metrics(model, token_freq, final_vocab):
-    """Feed the smoke test's induced vocabulary into common.eval.metrics UNMODIFIED,
-    same as every other tokenizer's own smoke test -- confirms this baseline's
-    output is a drop-in match for the rest of this project's evaluation
-    pipeline."""
+    """Feed the smoke test's induced vocabulary into common.eval.metrics
+    unmodified, same as every other tokenizer's smoke test -- confirms this
+    baseline's output is a drop-in match for the eval pipeline."""
     avg_span_len = sum(len(s) * n for c in token_freq.values() for s, n in c.items()) / max(
         1, sum(sum(c.values()) for c in token_freq.values())
     )
@@ -145,14 +137,12 @@ def _report_smoke_test_metrics(model, token_freq, final_vocab):
     return {"avg_span_len": avg_span_len, "gini": gini}
 
 
-# A small hand-written multilingual corpus, NOT common.data.synthetic.make_synthetic_
-# parallel_groups (every other package's own smoke-test corpus) -- that
-# generator deliberately produces possibly-invalid-UTF-8 raw bytes (see its
-# own module docstring), which tokenizers' str-based training API cannot
-# accept without lossy replacement (see bpe.model._to_str's docstring for the
-# confirmed crash this avoids). Real genuine (if tiny) text in several
-# scripts, so the same per-language fairness diagnostics still have
-# something real to measure.
+# Small hand-written multilingual corpus, NOT common.data.synthetic's
+# make_synthetic_parallel_groups (every other package's smoke-test corpus)
+# -- that generator can produce invalid UTF-8, which tokenizers' str-based
+# API can't accept without lossy replacement (see bpe.model._to_str).
+# Real (if tiny) text in several scripts, so per-language diagnostics still
+# have something real to measure.
 _SMOKE_TEST_GROUPS = [
     {"eng": "The quick brown fox jumps over the lazy dog.", "deu": "Der schnelle braune Fuchs springt über den faulen Hund."},
     {"eng": "She sells seashells by the seashore.", "deu": "Sie verkauft Muscheln am Meeresufer."},
@@ -163,20 +153,14 @@ _SMOKE_TEST_GROUPS = [
 
 
 def run_smoke_test():
-    """Mirrors every other tokenizer's run_smoke_test role: a small trial run,
-    gated by two explicit assertions: (1) no crash getting here at all --
-    fitting + harvesting ran end to end over a real multilingual corpus;
-    (2) a vocabulary was actually learned beyond the base alphabet. No
-    loss-decreased check the way the gradient-based trainers have, since
-    there is no loss here at all -- see superbpe.train.run_smoke_test's own
-    docstring for the same point.
+    """Small trial run, gated by two assertions: (1) no crash end to end,
+    (2) a vocabulary was actually learned beyond the base alphabet -- no
+    loss-decreased check since BPE has no loss.
 
-    Uses a small real-text corpus (see _SMOKE_TEST_GROUPS above), not
-    common.data.synthetic's synthetic byte generator every other package's smoke test
-    reuses -- that generator isn't guaranteed valid UTF-8, and this
-    package's whole design leans on tokenizers' str-based API directly (see
-    model.py's module docstring), which requires genuinely valid text for
-    full fidelity.
+    Uses a small real-text corpus (_SMOKE_TEST_GROUPS above), not
+    common.data.synthetic's byte generator that other packages' smoke tests
+    reuse -- that generator isn't guaranteed valid UTF-8, and this package
+    leans on tokenizers' str-based API, which needs genuinely valid text.
     """
     args = BPEConfig(vocab_size=320)
     trainer = BPETrainer(args, _SMOKE_TEST_GROUPS)

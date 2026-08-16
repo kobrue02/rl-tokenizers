@@ -14,34 +14,24 @@ Usage:
         --vocab-json vocab_out/fanta_vocab_12345.json \\
         --benchmark flores_mt --lang-pairs eng:spa,eng:arz,deu_Latn:fra_Latn \\
         --max-examples 200 --output results/flores_fanta.json
-        # (flores_mt lang-pairs codes accept EITHER a short code
-        # common.data.oldi_data.LANG_SCRIPT maps (auto-resolved to its full
-        # stem) OR any of flores_plus's own ~227 native lang_Script stems
-        # directly (e.g. deu_Latn, fra_Latn) -- verified live to be
-        # genuinely fully N-way parallel across all of them, see
-        # benchmarks.py's own module docstring)
+        # flores_mt lang-pairs codes accept either a short LANG_SCRIPT code
+        # (auto-resolved) or a full flores_plus lang_Script stem directly
 
     python3 -m pretraining.cli_eval --checkpoint checkpoints/pretrain/final.pt \\
         --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \\
         --benchmark xnli,xcopa,flores_mt \\
         --langs sw,tr,zh --lang-pairs eng:spa,eng:arz --max-examples 500 \\
         --output results/all_bpe.json
-        # --benchmark takes a COMMA-SEPARATED list -- one job, one combined
-        # results file keyed by benchmark name, instead of one sbatch call
-        # per benchmark. --langs only applies to xnli/xcopa in the list,
-        # --lang-pairs only to flores_mt -- each benchmark just ignores the
-        # flag it has no use for (see run_evaluation). --langs codes not
-        # valid for one particular benchmark in the list (e.g. "en" is
-        # valid for xnli but not xcopa, which has no English config at all)
-        # get dropped for just that benchmark with a printed warning, not a
-        # crash -- see _resolve_multiple_choice_langs; sw/tr/zh above are
-        # deliberately chosen to be valid for BOTH xnli and xcopa, so this
-        # exact example scores every requested language on every benchmark
-        # with no drops at all.
+        # --benchmark takes a comma-separated list -- one combined results
+        # file instead of one job per benchmark. --langs applies to xnli/
+        # xcopa, --lang-pairs to flores_mt; each benchmark ignores the flag
+        # it has no use for. --langs codes invalid for a given benchmark
+        # (e.g. xcopa has no English config) are dropped with a warning,
+        # not a crash (see _resolve_multiple_choice_langs); sw/tr/zh above
+        # are valid for both xnli and xcopa, so nothing gets dropped here.
 
-Infrastructure only (see eval_harness.py's own docstring) -- this module is
-verified via run_smoke_test below, against a tiny freshly-initialized model,
-not against a real pretrained checkpoint.
+Infrastructure only -- verified via run_smoke_test below against a tiny
+freshly-initialized model, not a real pretrained checkpoint.
 """
 
 import argparse
@@ -64,20 +54,15 @@ _MULTIPLE_CHOICE_LANGS = {"xnli": benchmarks.XNLI_LANGS, "xcopa": benchmarks.XCO
 
 
 def _resolve_multiple_choice_langs(benchmark, langs):
-    """A shared --langs list applied across an entire --benchmark list (see
-    run_evaluation's own docstring for why that's normal, not redundant) can
-    legitimately include codes one SPECIFIC benchmark doesn't support --
-    e.g. "en" is valid for xnli but cambridgeltl/xcopa has no English config
-    at all (confirmed live on a real cluster run: it raises `ValueError:
-    BuilderConfig 'en' not found` the instant it's requested -- XCOPA is the
-    cross-lingual EXTENSION of English-only COPA, so it was never given its
-    own English translation to begin with). Filters `langs` down to the
-    intersection with this benchmark's own valid set, printing which
-    requested codes got dropped and why, rather than either crashing the
-    whole multi-benchmark run over one benchmark's narrower language
-    coverage, or silently scoring nothing for the codes it can't handle.
-    Raises if NOTHING requested is valid for this benchmark -- an empty
-    result would silently look like a real "0 examples" finding otherwise."""
+    """A shared --langs list across a --benchmark list can legitimately
+    include codes one specific benchmark doesn't support -- e.g. "en" is
+    valid for xnli but cambridgeltl/xcopa has no English config at all
+    (raises `ValueError: BuilderConfig 'en' not found`; XCOPA is a
+    cross-lingual extension of English-only COPA, never given its own
+    English translation). Filters `langs` to this benchmark's valid set,
+    printing what got dropped and why, rather than crashing the whole run
+    or silently scoring nothing. Raises if nothing requested is valid,
+    since an empty result would otherwise look like a real "0 examples" finding."""
     if langs is None:
         return None
     valid = _MULTIPLE_CHOICE_LANGS[benchmark]
@@ -99,12 +84,10 @@ _TRANSLATION_BENCHMARKS = {"flores_mt"}
 
 
 def load_pretrained_model(checkpoint_path, device="cpu"):
-    """Reconstructs a TransformerLM from a pretraining.train.save_checkpoint
-    file: that checkpoint stores TrainConfig's fields (asdict) plus
-    vocab_size, not a ModelConfig directly -- model_configs.get_preset(
-    cfg.model_size) rebuilds the architecture the same way train.train()
-    itself does, so this stays a single source of truth for "how do
-    model_size + shard_dir's vocab_size become a TransformerLM"."""
+    """Reconstructs a TransformerLM from a train.save_checkpoint file: that
+    checkpoint stores TrainConfig's fields plus vocab_size, not a
+    ModelConfig directly, so get_preset(cfg.model_size) rebuilds the
+    architecture the same way train.train() does."""
     ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
     cfg = TrainConfig(**ckpt["config"])
     model_cfg = get_preset(cfg.model_size)
@@ -118,13 +101,11 @@ def load_pretrained_model(checkpoint_path, device="cpu"):
 
 def _wandb_log_dict(results, wandb):
     """Flattens run_evaluation's {benchmark_name: results} into a single
-    dict wandb.log can take in one call -- scalar metrics for every
-    benchmark (top-level + per-language for xnli/xcopa, top-level +
-    per-pair for flores_mt), PLUS a wandb.Table of raw generated samples per
-    flores_mt pair (eval_harness.evaluate_translation already caps these at
-    max_samples_per_pair -- see that module's docstring for why the full set
-    isn't kept) so the actual generated text is something you can browse in
-    the wandb UI, not just a chrF number."""
+    dict wandb.log can take -- scalar metrics per benchmark (top-level +
+    per-language for xnli/xcopa, top-level + per-pair for flores_mt), plus
+    a wandb.Table of raw generated samples per flores_mt pair (already
+    capped at max_samples_per_pair by evaluate_translation) so generated
+    text is browsable in the wandb UI, not just a chrF number."""
     log_dict = {}
     for name, result in results.items():
         if "accuracy" in result:  # xnli/xcopa shape
@@ -216,18 +197,14 @@ def run_evaluation(
     max_new_tokens=128,
     temperature=1.0,
 ):
-    """benchmark: a single name (str) or a list of names -- e.g. "xnli" or
-    ["xnli", "xcopa", "flores_mt"]. Every requested benchmark is scored
-    against the SAME model/adapter/max_examples/etc (langs feeds
-    xnli/xcopa, lang_pairs feeds flores_mt -- a benchmark that has no use
-    for one of those two just ignores it, so passing both --langs and
-    --lang-pairs for a mixed --benchmark list is normal, not redundant).
+    """benchmark: a single name (str) or a list of names. Every requested
+    benchmark is scored against the same model/adapter/max_examples/etc
+    (langs feeds xnli/xcopa, lang_pairs feeds flores_mt; each benchmark
+    ignores the flag it has no use for, so passing both for a mixed list
+    is normal).
 
-    Returns {benchmark_name: <that benchmark's own results dict>} -- ALWAYS
-    this shape, even for a single benchmark, rather than returning that one
-    benchmark's dict unwrapped: one consistent return shape regardless of
-    how many benchmarks were requested, so callers never need to branch on
-    "was this a single name or a list" to find their results.
+    Returns {benchmark_name: <results dict>} always in this shape, even
+    for a single benchmark, so callers never branch on single-vs-list input.
     """
     names = [benchmark] if isinstance(benchmark, str) else list(benchmark)
     unknown = [b for b in names if b not in benchmarks.BENCHMARKS]
@@ -282,9 +259,8 @@ def build_arg_parser():
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
-        help="SAME default project as pretraining.train's own wandb_project -- see that "
-        "module's job_type='train' comment; this run logs job_type='eval' so both share "
-        "one project, filterable apart in the wandb UI",
+        help="same default project as train.py; this run logs job_type='eval' so both "
+        "share one project, filterable apart in the wandb UI",
     )
     parser.add_argument("--run-name", type=str, default="")
     return parser
@@ -348,16 +324,13 @@ def main(argv=None):
 def run_smoke_test():
     """Verifies the scoring plumbing end-to-end against a tiny, freshly-
     initialized (untrained) model + a real bpe tokenizer fit on a handful of
-    sentences -- NOT a claim about accuracy (an untrained model scores at
-    chance by construction), just that loglikelihood/evaluate_multiple_choice/
-    evaluate_translation run without shape/dtype/device errors on synthetic
-    examples matching benchmarks.py's own dataclass shapes.
+    sentences -- not a claim about accuracy, just that loglikelihood/
+    evaluate_multiple_choice/evaluate_translation run without shape/dtype/
+    device errors on synthetic examples matching benchmarks.py's shapes.
 
     Builds a real TokenizerAdapter directly from an in-memory BPEModel
-    (TokenizerAdapter._native_id_to_bytes + the constructor, bypassing
-    TokenizerAdapter.load's checkpoint-file requirement) rather than a
-    hand-rolled stand-in -- exercises the actual encode()/decode() path
-    every real evaluation run will use, not a simplified lookalike."""
+    (bypassing TokenizerAdapter.load's checkpoint-file requirement) so this
+    exercises the actual encode()/decode() path, not a simplified stand-in."""
     from systems.bpe.model import fit_bpe
     from systems.bpe.train import _SMOKE_TEST_GROUPS
     from .benchmarks import MultipleChoiceExample, TranslationExample
@@ -390,12 +363,9 @@ def run_smoke_test():
     assert "en->de" in mt_results["per_pair"]
     assert len(mt_results["per_pair"]["en->de"]["samples"]) == 1
 
-    # run_evaluation's comma-separated multi-benchmark dispatch, exercised
-    # against fake loaders (not real xnli/xcopa/flores_mt network calls --
-    # this is testing the CLI's own fan-out/return-shape logic, which
-    # doesn't care what the individual loaders actually return) via
-    # monkeypatching benchmarks.BENCHMARKS, restored in a finally so this
-    # doesn't leak into any other test/run in the same process.
+    # run_evaluation's multi-benchmark dispatch, exercised against fake
+    # loaders (testing fan-out/return-shape logic, not real network calls)
+    # via monkeypatching, restored in a finally so it doesn't leak.
     original_benchmarks = dict(benchmarks.BENCHMARKS)
     try:
         benchmarks.BENCHMARKS["xnli"] = lambda langs=None, split="test": iter(mc_examples)
@@ -409,10 +379,8 @@ def run_smoke_test():
         single_result = run_evaluation(model, adapter, "xnli", device="cpu")
         assert set(single_result) == {"xnli"}  # single-name input still comes back wrapped by benchmark name
 
-        # _wandb_log_dict against BOTH result shapes (multiple-choice via
-        # multi_results, translation via mt_results) -- built with the real
-        # wandb module (for real wandb.Table construction) but never
-        # actually wandb.init'd/logged, so this needs no network/login.
+        # _wandb_log_dict against both result shapes -- uses the real wandb
+        # module for real Table construction but never wandb.init's/logs.
         import wandb
 
         combined = {**multi_results, "flores_mt": mt_results}

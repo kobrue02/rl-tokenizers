@@ -1,8 +1,7 @@
-"""MAGNET-style neural tokenizer baseline (scaled down) -- a sibling package to
-fairtok/, reusing its data loading, metrics, and vocabulary-extraction utilities
-unchanged, but with its own fully differentiable (no-REINFORCE) segmentation
-model. See magnet/model.py's module docstring for the architecture and its
-explicit list of simplifications vs. Ahia et al.'s MAGNET (arxiv.org/abs/2407.08818).
+"""MAGNET-style neural tokenizer baseline (scaled down): reuses fairtok's data
+loading, metrics, and vocab-extraction utilities, but with its own fully
+differentiable (no-REINFORCE) segmentation model. See model.py for the
+architecture and simplifications vs. Ahia et al. (arxiv.org/abs/2407.08818).
 """
 
 from .model import BoundaryPredictor, MagnetModel, TransformerBlock

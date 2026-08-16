@@ -1,8 +1,7 @@
 """Checkpoint load for a trained MantaModel -- mirrors fairtok.inference's
-load_checkpoint naming convention. No save_checkpoint here: manta/train.py already
-saves {"state_dict": ..., "config": dataclasses.asdict(cfg)} inline (both at the end
-of MantaTrainer.train and at each cfg.save_steps periodic checkpoint), in exactly the
-shape this loads back.
+load_checkpoint naming. No save_checkpoint here: manta/train.py already saves
+{"state_dict": ..., "config": dataclasses.asdict(cfg)} inline, in the shape
+this loads back.
 """
 
 import torch

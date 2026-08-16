@@ -1,8 +1,6 @@
 """Command-line entry point for MantaTrainer, mirroring fairtok.cli's shape:
-every MantaConfig field becomes a `--flag`, generated from the dataclass itself.
-Real-data loading is NOT reimplemented here -- common.data.cli_data.load_groups already
-does exactly what's needed (--data-source/--langs/--num-groups against the real
-OLDI-and-friends corpus or the synthetic placeholder), and is shared verbatim by
+every MantaConfig field becomes a `--flag`, generated from the dataclass.
+Real-data loading uses common.data.cli_data.load_groups, shared verbatim by
 every tokenizer's CLI in this repo (fairtok, magnet, flexitokens, manta).
 """
 

@@ -1,7 +1,7 @@
-"""Held-out evaluation for a trained FANTA checkpoint -- mirrors fairtok/evaluate.py's
-shape; see that module's docstring for the BOUQuET-as-held-out-set rationale.
-FANTA's induce_spans is identical to MANTa's (see fanta/segment.py) -- language-
-agnostic at inference time, so no extra per-language argument is needed here.
+"""Held-out evaluation for a trained FANTA checkpoint -- mirrors
+fairtok/evaluate.py's shape (BOUQuET as the held-out set). induce_spans is
+identical to MANTa's (fanta/segment.py) and language-agnostic at inference
+time, so no per-language argument is needed here.
 """
 
 from common.eval.cross_tokenizer import run_eval_cli

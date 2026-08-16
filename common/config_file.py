@@ -1,28 +1,20 @@
-"""Shared -c/--config YAML support, used identically by every CLI entry
-point in this repo (all seven systems/*/cli.py, plus pretraining/cli.py,
-data_prep.py, cli_eval.py, cli_generate.py) -- one place to define "how does
-a YAML file override this command's flags", not eleven copies of the same
-logic (same reuse pattern as common/data/cli_data.py's load_groups).
+"""Shared -c/--config YAML support, used identically by every CLI entry point in
+this repo -- one place to define "how does a YAML file override this command's
+flags", not many copies of the same logic.
 
-Precedence, low to high: this command's own argparse defaults < the YAML
-file's values < flags passed explicitly on the command line. So
-`--vocab-size 512` on the command line always wins over `vocab_size: 256` in
-the YAML file, which lets one full_run.yml define a whole experiment while
-still allowing a one-off override without editing the file.
+Precedence, low to high: argparse defaults < YAML file values < flags passed
+explicitly on the command line. So `--vocab-size 512` on the CLI always wins over
+`vocab_size: 256` in the YAML file, letting one full_run.yml define a whole
+experiment while still allowing a one-off override.
 
-YAML keys are argparse DEST names (underscores, not dashes -- e.g.
-`vocab_size`, `data_source`, `tokenizer_checkpoint`, matching what
-`--vocab-size`/`--data-source`/`--tokenizer-checkpoint` turn into), not the
-`--flag` spelling -- this mirrors how every cli.py in this repo already maps
-dataclass field names to flags (see e.g. systems/bpe/cli.py's
-`_config_from_args`), so one mental model covers both directions.
+YAML keys are argparse DEST names (underscores, not dashes -- e.g. `vocab_size`,
+matching what `--vocab-size` turns into), not the `--flag` spelling.
 
-A REPEATED flag (argparse action="append", e.g. pretraining.cli_generate's
---prompt) takes a YAML LIST directly (`prompt: ["a", "b"]`) -- not the
-"repeat the flag" convention that has no analogue in YAML. Every other flag
-takes the SAME scalar type argparse's own `type=` would produce from a
-command-line string (e.g. `vocab_size: 50000` as a YAML int, not a quoted
-string -- though a quoted numeral still coerces correctly, see below).
+A REPEATED flag (argparse action="append", e.g. --prompt) takes a YAML LIST
+directly (`prompt: ["a", "b"]`). Every other flag takes the same scalar type
+argparse's own `type=` would produce from a command-line string (e.g.
+`vocab_size: 50000` as a YAML int, though a quoted numeral still coerces
+correctly -- see below).
 """
 
 import sys
@@ -38,23 +30,20 @@ def load_yaml_config(path):
 def parse_args_with_config(parser, argv=None):
     """Adds -c/--config to `parser` and returns the merged argparse.Namespace.
 
-    Required-ness (argparse's own `required=True`) is deliberately enforced
-    AFTER merging, not by argparse itself during the initial parse -- a
-    required flag can be satisfied by the YAML file alone (e.g. `-c
-    full_run.yml` with no other flags at all), which argparse's built-in
-    check has no way to know about until the file has actually been read.
-    Every action found `required=True` here is temporarily relaxed, then
-    re-checked by hand once the YAML file (if any) has been merged in --
-    still a hard error, just raised at the right point in the sequence.
+    Required-ness (`required=True`) is enforced AFTER merging, not by argparse
+    during the initial parse -- a required flag can be satisfied by the YAML file
+    alone (e.g. `-c full_run.yml` with no other flags), which argparse's own check
+    can't know about until the file is read. Every `required=True` action found
+    here is temporarily relaxed, then re-checked by hand once the YAML file (if
+    any) has been merged in -- still a hard error, just raised at the right point.
     """
     argv = sys.argv[1:] if argv is None else list(argv)
 
     parser.add_argument(
         "-c", "--config", type=str, default=None,
         help="YAML file of default values for this command's own flags (dest names, "
-        "e.g. vocab_size/data_source/output_dir -- see common.config_file's own "
-        "docstring) -- flags passed explicitly here on the command line still "
-        "override whatever the YAML file says",
+        "e.g. vocab_size/data_source/output_dir) -- flags passed explicitly on the "
+        "command line still override whatever the YAML file says",
     )
 
     required_dests = [a.dest for a in parser._actions if getattr(a, "required", False)]
@@ -88,10 +77,9 @@ def parse_args_with_config(parser, argv=None):
                 flag = action.option_strings[-1] if action.option_strings else key
                 raise ValueError(
                     f"{args.config}: key {key!r} is a YAML list, but {flag} expects a "
-                    "single value (a comma-separated string, for this repo's own "
-                    "comma-separated flags like --langs/--lang-pairs/--benchmark) -- "
-                    "only flags that are repeatable on the command line (action="
-                    "'append', e.g. --prompt) take a YAML list"
+                    "single value (e.g. a comma-separated string for flags like "
+                    "--langs/--lang-pairs/--benchmark) -- only flags repeatable on the "
+                    "command line (action='append', e.g. --prompt) take a YAML list"
                 )
 
             if action.choices is not None:

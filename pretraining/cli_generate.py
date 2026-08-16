@@ -1,25 +1,17 @@
-"""Standalone text generation from a pretraining.train checkpoint -- the
-dedicated entry point for TransformerLM.generate() that was flagged as an
-open question during this package's cleanup pass (generate() had a real
-implementation but no caller until pretraining.eval_harness.evaluate_translation
-started using it for FLORES-MT). That caller only ever surfaces generated
-text as an aggregate BLEU/chrF score (plus a handful of capped samples in
-its own results JSON) -- this module is for looking at what the model
-actually produces given an arbitrary prompt, with nothing else in the way.
+"""Standalone text generation from a pretraining.train checkpoint -- a
+dedicated entry point for TransformerLM.generate() to look at raw model
+output given an arbitrary prompt (eval_harness.evaluate_translation uses
+generate() too, but only surfaces an aggregate BLEU/chrF score).
 
 Two usages:
-  - Interactive, one-off (quick, no queueing needed -- a few generations
-    take seconds even unbatched/uncached, see model.py's generate()
-    docstring): run directly on a login node or inside an existing GPU
-    allocation.
+  - Interactive, one-off (quick, no queueing needed): run directly on a
+    login node or inside an existing GPU allocation.
         python3 -m pretraining.cli_generate --checkpoint checkpoints/pretrain/final.pt \\
             --system bpe --tokenizer-checkpoint checkpoints/bpe_50k.json \\
             --prompt "The quick brown fox" --max-new-tokens 100 --num-samples 3
   - Batch, as part of a SLURM pipeline (see jobs/generate_samples.sh) --
-    chain it via --dependency=afterok after a training job so a fixed
-    prompt panel's completions get generated and saved to --output
-    automatically, without a manual step someone has to remember to run.
-    --prompt can be repeated for multiple prompts in one invocation.
+    chain via --dependency=afterok after a training job. --prompt can be
+    repeated for multiple prompts in one invocation.
 """
 
 import argparse
@@ -67,8 +59,7 @@ def build_arg_parser():
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
-        help="SAME default project as pretraining.train/pretraining.cli_eval's own "
-        "wandb_project -- this run logs job_type='generate', filterable apart in the wandb UI",
+        help="same default project as train.py/cli_eval.py; logs job_type='generate'",
     )
     parser.add_argument("--run-name", type=str, default="")
     return parser
@@ -134,10 +125,9 @@ def main(argv=None):
 
 def run_smoke_test():
     """Verifies generate_text runs end to end against a tiny, freshly-
-    initialized (untrained) model + a real bpe tokenizer -- same
-    construction as pretraining.cli_eval.run_smoke_test (a real
-    TokenizerAdapter built directly from an in-memory BPEModel), not a claim
-    that an untrained model's output means anything."""
+    initialized (untrained) model + a real bpe tokenizer (same construction
+    as cli_eval.run_smoke_test) -- not a claim that an untrained model's
+    output means anything."""
     from systems.bpe.model import fit_bpe
     from systems.bpe.train import _SMOKE_TEST_GROUPS
 
@@ -159,9 +149,7 @@ def run_smoke_test():
     assert len(continuation) > 0
 
     # wandb.Table construction (the shape main() logs under --use-wandb) --
-    # built with the real wandb module but never wandb.init'd/logged, so
-    # this needs no network/login, same convention as
-    # pretraining.cli_eval.run_smoke_test's own wandb check.
+    # real wandb module, but never wandb.init'd/logged, so no network/login needed.
     import wandb
 
     table = wandb.Table(columns=["prompt", "sample_index", "completion"], data=[["The quick brown fox", 0, continuation]])

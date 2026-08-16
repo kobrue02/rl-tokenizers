@@ -1,24 +1,19 @@
 """Pretraining loop for pretraining.model.TransformerLM over packed token
 shards (pretraining.data_prep/shard_dataset).
 
-Single-GPU and multi-GPU (via `torchrun --nproc_per_node=N`, using plain
-DistributedDataParallel) both work today -- launch either way and this
-detects which one it's in via the RANK/WORLD_SIZE/LOCAL_RANK env vars
-torchrun sets. What does NOT exist yet: FSDP/model sharding. The "7b" preset
-(model_configs.PRESETS) needs roughly 24-28GB just for fp32 optimizer state
-plus bf16 weights/gradients at that parameter count -- more than one A100
-(80GB) can comfortably hold alongside activations at any useful batch size,
-so a real 7B run needs sharding across multiple GPUs' memory that plain DDP
-(which replicates the FULL model on every rank) cannot provide. That is a
-deliberate, documented gap, not an oversight -- see the conversation that
-scoped this module for the explicit choice to build DDP now and treat FSDP
-as follow-up work, rather than half-build sharding without a multi-GPU
-machine available to verify it on.
+Single-GPU and multi-GPU (via `torchrun --nproc_per_node=N`, plain
+DistributedDataParallel) both work; this detects which via the RANK/
+WORLD_SIZE/LOCAL_RANK env vars torchrun sets. Not yet built: FSDP/model
+sharding. The "7b" preset needs roughly 24-28GB just for fp32 optimizer
+state plus bf16 weights/gradients -- more than one A100 (80GB) can hold
+alongside activations at a useful batch size, so a real 7B run needs
+sharding across GPUs that plain DDP (which replicates the full model per
+rank) can't provide. A deliberate, documented gap: DDP now, FSDP as
+follow-up work.
 
-Reuses common.training.lr_schedule.build_lr_scheduler (the same HF-Trainer-style
-warmup+decay every systems/ tokenizer trainer already uses) rather than
-reimplementing a second scheduler -- one real piece of shared infrastructure
-between the tokenizer-training and LLM-pretraining halves of this project.
+Reuses common.training.lr_schedule.build_lr_scheduler (the same HF-Trainer-
+style warmup+decay every systems/ tokenizer trainer uses) rather than a
+second scheduler implementation.
 """
 
 import dataclasses
@@ -41,61 +36,43 @@ from .shard_dataset import ShardedTokenDataset, load_shard_meta
 class TrainConfig:
     model_size: str = "small"  # key into model_configs.PRESETS
     shard_dir: str = ""  # required -- output_dir from a prior data_prep.py run.
-    # vocab_size is read from shard_dir/shards_meta.json, NOT set here --
-    # keeps the model's embedding table always matching whichever tokenizer
-    # actually produced these shards, with no separate flag to keep in sync.
+    # vocab_size is read from shard_dir/shards_meta.json, not set here, so
+    # the embedding table always matches whichever tokenizer built the shards.
     seq_len: int = 1024
     per_device_batch_size: int = 8
     grad_accum_steps: int = 1  # effective batch size = per_device_batch_size
-    # * grad_accum_steps * world_size (world_size=1 outside torchrun).
+    # * grad_accum_steps * world_size (world_size=1 outside torchrun)
     total_steps: int = 10_000
     learning_rate: float = 3e-4
     weight_decay: float = 0.1
     beta1: float = 0.9
-    beta2: float = 0.95  # AdamW betas -- 0.95 (not PyTorch's default 0.999)
-    # for beta2 matches GPT-3/LLaMA/most modern pretraining recipes; higher
-    # beta2 values react too slowly to the large gradient-scale swings
-    # common early in a from-scratch pretraining run.
+    beta2: float = 0.95  # 0.95 (not PyTorch's default 0.999) matches GPT-3/
+    # LLaMA practice; higher beta2 reacts too slowly to early-training
+    # gradient-scale swings
     grad_clip: float = 1.0
-    warmup_ratio: float = 0.02  # smaller than every systems/ tokenizer
-    # trainer's own 0.1 default -- pretraining total_steps here is typically
-    # far larger (thousands to tens of thousands), so 2% is still a long
-    # ABSOLUTE warmup (hundreds to low thousands of steps), matching real
-    # large-scale pretraining practice (e.g. GPT-3/LLaMA-style runs warm up
-    # over a few hundred to ~2000 steps out of 100K+ total, a much smaller
-    # FRACTION than 10%).
-    lr_scheduler_type: str = "cosine"  # cosine decay is the standard choice
-    # for pretraining (vs. "linear", HF Trainer's own default and what every
-    # systems/ tokenizer trainer uses -- those are short runs where the
-    # difference barely matters; pretraining runs are long enough that
-    # cosine's slower-then-faster decay shape is the established practice,
-    # e.g. GPT-3/LLaMA/Chinchilla).
+    warmup_ratio: float = 0.02  # smaller than tokenizer trainers' 0.1 default,
+    # but total_steps here is typically much larger, so 2% is still a long
+    # absolute warmup (hundreds-low thousands of steps), matching GPT-3/
+    # LLaMA-style practice
+    lr_scheduler_type: str = "cosine"  # standard for pretraining (vs.
+    # "linear", HF Trainer's/tokenizer trainers' default) -- cosine's
+    # slower-then-faster decay is established practice for long runs
     log_steps: int = 10
     save_steps: int = 1000
     keep_last_n_checkpoints: int = 3  # rotating step_{step}.pt checkpoints
-    # are DELETED beyond this many most-recent ones (see save_checkpoint's
-    # own caller in train() below) -- a real incident, not a hypothetical:
-    # a "small" preset (~123M params) checkpoint (model + AdamW's 2 fp32
-    # moment buffers) is ~1.5GB, and at the old unrotated behavior a
-    # 250,000-step run saving every save_steps=1000 accumulates ~150GB of
-    # step_*.pt files that are NEVER deleted -- confirmed to be exactly
-    # what crashed a real cluster run (torch.save failing mid-write with
-    # "unexpected pos ... vs ...", a disk-quota-exhaustion signature) at
-    # step 103,000/250,000. final.pt (saved once, at the end) is NEVER
-    # rotated away regardless of this setting -- only the periodic
-    # step_{step}.pt snapshots are.
+    # beyond this many most-recent ones are deleted. Real incident: a
+    # "small" preset checkpoint is ~1.5GB, and unrotated saving every
+    # save_steps=1000 crashed a real cluster run via disk-quota exhaustion
+    # at step 103,000/250,000. final.pt is never rotated away.
     output_dir: str = "checkpoints/pretrain"
-    resume_from: str = ""  # "" starts fresh; else a path to a checkpoint
-    # saved by this same script (see save_checkpoint/load_checkpoint below).
+    resume_from: str = ""  # "" starts fresh; else a checkpoint path saved
+    # by this same script (see save_checkpoint/load_checkpoint)
     seed: int = 0
-    device: str = ""  # "" auto-detects cuda if available, else cpu -- same
-    # convention every systems/ tokenizer Config uses. Ignored under
-    # torchrun/DDP, which always uses the LOCAL_RANK-assigned GPU instead
-    # (see setup_distributed).
-    dtype: str = "bfloat16"  # or "float32" (CPU / debugging -- bf16 autocast
-    # on CPU works but gains nothing, since there's no tensor-core speedup
-    # to exploit off-GPU).
-    num_workers: int = 4  # DataLoader worker processes.
+    device: str = ""  # "" auto-detects cuda if available, else cpu; ignored
+    # under torchrun/DDP, which uses the LOCAL_RANK-assigned GPU instead
+    dtype: str = "bfloat16"  # or "float32" (CPU/debugging -- bf16 autocast
+    # on CPU gains nothing without tensor cores)
+    num_workers: int = 4  # DataLoader worker processes
     use_wandb: bool = False
     wandb_project: str = "pretraining"
     run_name: str = ""
@@ -152,11 +129,9 @@ def train(cfg: TrainConfig):
         )
         is_main = True
 
-    torch.manual_seed(cfg.seed + rank)  # each rank gets a DIFFERENT seed --
-    # see ShardedTokenDataset's own docstring for why this alone (not a
-    # DistributedSampler) is enough to make different ranks see different
-    # data: sampling there is derived purely from (seed, idx), so a per-rank
-    # seed offset gives each rank an independent stream with no shared state.
+    torch.manual_seed(cfg.seed + rank)  # each rank gets a different seed --
+    # enough (no DistributedSampler needed) since ShardedTokenDataset derives
+    # sampling purely from (seed, idx).
 
     meta = load_shard_meta(cfg.shard_dir)
     vocab_size = meta["vocab_size"]
@@ -165,17 +140,11 @@ def train(cfg: TrainConfig):
     model = TransformerLM(model_cfg, vocab_size).to(device)
     model_params = model.num_parameters()
     effective_batch_size = cfg.per_device_batch_size * cfg.grad_accum_steps * world_size
-    # Tokens/FLOPs this run is PLANNED to see, not what it's actually seen so
-    # far -- a static property of (total_steps, batch config, model size),
-    # known before the first step runs. tokens_per_param compares against
-    # Chinchilla's ~20-tokens/param compute-optimal ratio (Hoffmann et al.
-    # 2022); estimated_flops uses the standard ~6ND approximation (Kaplan et
-    # al. 2020) with N = TOTAL parameters (embedding included) -- the same
-    # loose convention most reports use, not the non-embedding-only variant
-    # some papers prefer. Both are exactly the kind of top-line numbers
-    # frontier lab reports (LLaMA/Chinchilla/OLMo) state alongside a training
-    # run, and both are free here -- no new tracking, just derived from
-    # numbers this function already has in hand.
+    # Tokens/FLOPs this run is planned to see, known before the first step
+    # runs. tokens_per_param compares against Chinchilla's ~20-tokens/param
+    # compute-optimal ratio; estimated_flops uses the standard ~6ND
+    # approximation with N = total parameters (embedding included, the
+    # loose convention most reports use).
     planned_training_tokens = effective_batch_size * cfg.total_steps * cfg.seq_len
     tokens_per_param = planned_training_tokens / model_params if model_params else 0.0
     estimated_flops = 6 * model_params * planned_training_tokens
@@ -203,13 +172,10 @@ def train(cfg: TrainConfig):
         optimizer, cfg.total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
     )
 
-    # Resumed BEFORE the dataset is built -- start_step feeds directly into
-    # ShardedTokenDataset's own index_offset below, so a resumed run
-    # continues the SAME (seed, idx) sample sequence a fresh run would have
-    # used at this point, rather than a new dataset instance restarting at
-    # idx=0 and silently replaying the samples the original run already
-    # trained on early (a real bug, caught and fixed here -- see
-    # ShardedTokenDataset.__init__'s own docstring for the full story).
+    # Resumed before the dataset is built -- start_step feeds directly into
+    # ShardedTokenDataset's index_offset below, so a resumed run continues
+    # the same (seed, idx) sequence instead of restarting at idx=0 and
+    # replaying already-trained samples (see ShardedTokenDataset.__init__).
     start_step = 0
     if cfg.resume_from:
         start_step = load_checkpoint(cfg.resume_from, model, optimizer, scheduler, device)
@@ -240,10 +206,8 @@ def train(cfg: TrainConfig):
         run = wandb.init(
             project=cfg.wandb_project,
             name=cfg.run_name or None,
-            job_type="train",  # lets pretraining.cli_eval/cli_generate's own
-            # wandb runs share this SAME project (see their own wandb_project
-            # defaults) while still being filterable apart by job_type in the
-            # wandb UI, rather than needing a separate project per pipeline stage.
+            job_type="train",  # lets cli_eval/cli_generate share this project
+            # while staying filterable apart by job_type in the wandb UI
             config={
                 **dataclasses.asdict(cfg),
                 "vocab_size": vocab_size,
@@ -265,14 +229,10 @@ def train(cfg: TrainConfig):
     step = start_step
     t_last_log = time.time()
     tokens_since_log = 0
-    saved_checkpoint_paths = []  # step_{step}.pt paths saved BY THIS PROCESS,
-    # oldest first -- rotated per TrainConfig.keep_last_n_checkpoints below.
-    # Deliberately NOT pre-populated by scanning cfg.output_dir for
-    # pre-existing step_*.pt files on a --resume-from run -- this only
-    # rotates checkpoints saved in the CURRENT process's own lifetime,
-    # never touching whatever a previous run already left behind, so
-    # resuming never risks deleting a checkpoint you might still want from
-    # before the resume.
+    saved_checkpoint_paths = []  # step_{step}.pt paths saved by this process,
+    # oldest first -- rotated per keep_last_n_checkpoints below. Not
+    # pre-populated from pre-existing files on a --resume-from run, so
+    # resuming never deletes a checkpoint from before the resume.
 
     while step < cfg.total_steps:
         optimizer.zero_grad(set_to_none=True)

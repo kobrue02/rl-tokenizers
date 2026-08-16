@@ -1,42 +1,28 @@
-"""Held-out evaluation for one or more Claude models' own token counts
-(--model, via Anthropic's public count_tokens API -- see model.py's own
-module docstring for why this is a genuinely different, narrower
-integration than systems/hf_frontier's: no local tokenizer, no byte spans,
-one real network call per document, and only compression/fertility/token
-parity are reportable -- NOT Rényi efficiency or Gini, which need actual
-per-token identities the public API doesn't expose.
+"""Held-out evaluation for one or more Claude models' token counts (--model,
+via Anthropic's public count_tokens API -- see model.py for why this is a
+narrower integration than hf_frontier's: no local tokenizer, no byte spans,
+one network call per document, and only compression/fertility/token parity
+are reportable, NOT Rényi efficiency or Gini (need per-token identities the
+public API doesn't expose).
 
---model takes a COMMA-SEPARATED list (same convention systems/hf_frontier/
-evaluate.py's own --hf-repo-id and pretraining.cli_eval's own --benchmark
-use) -- every model in the list shares ONE RateLimiter instance for the
-whole run, not one per model: Anthropic's own published RPM limits are an
-account-wide budget, not a per-model one, so a shared limiter is the safe
-assumption (splitting the budget N ways across N models would under-use it
-if only one model is actually being called at a given moment, and a
-per-model limiter could let the combined request rate exceed the account's
-real cap if multiple models happened to run concurrently -- neither of
-which applies here since this module already runs one model fully before
-starting the next, but the shared instance is correct either way).
+--model takes a COMMA-SEPARATED list -- every model shares ONE RateLimiter
+for the whole run, not one per model, since Anthropic's RPM limits are
+account-wide, not per-model.
 
-One model failing (bad model name, exhausted retries, auth failure) does
-NOT abort the rest of the list -- same per-repo error isolation
-systems/hf_frontier/evaluate.py already established, added there
-specifically because a long multi-entry list makes losing every other
-entry's already-completed result to one bad one a real, not hypothetical,
-waste of time -- doubly true here given each entry can involve tens of
-thousands of real network calls.
+One model failing (bad name, exhausted retries, auth failure) does NOT
+abort the rest of the list -- same per-repo error isolation as
+hf_frontier/evaluate.py, doubly important here since each entry can involve
+tens of thousands of real network calls.
 
 --checkpoint-dir (or its --output-derived default) makes a run resumable:
-every successfully completed (group, lang, count) call is appended to a
-per-model JSONL file as it happens, and a resumed run (same command,
-same output/checkpoint-dir) skips whatever's already recorded there
-instead of re-querying it. This matters because an org's real rate limit
-can be far below its tier's published number (confirmed live: 429s at
---rpm 2000 whose own error message stated the account's actual cap was
-100/min) -- at a low real rpm, scoring the full ~272k-pair BOUQuET test
-split can take longer than a single job's time limit, so the intended
-workflow is: submit, let it run until it's killed/times out, then
-resubmit the EXACT SAME command as many times as it takes to finish.
+every completed (group, lang, count) call is appended to a per-model JSONL
+file, and a resumed run (same command) skips what's already recorded. This
+matters because an org's real rate limit can be far below its tier's
+published number (seen: 429s at --rpm 2000 where the account's actual cap
+was 100/min) -- at a low real rpm, scoring the full ~272k-pair BOUQuET test
+split can outlast a single job's time limit, so the intended workflow is:
+submit, let it run until killed/timed out, resubmit the same command as
+many times as it takes.
 """
 
 import json
@@ -77,61 +63,52 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--rpm", type=int, default=2000,
-        help="requests-per-minute cap shared across every model in --model and every worker "
-        "thread -- match this to your actual Anthropic usage tier (Start=2000, Build=4000, "
-        "Scale=8000 at time of writing; see Anthropic's own rate-limits page for current "
-        "values). WARNING: an org's real configured limit can be LOWER than its tier's "
-        "published default (confirmed live: one org saw 429s at --rpm 2000 with the API's own "
-        "error message stating its actual cap was 100) -- if you see repeated RateLimitError "
-        "429s in the failure log, lower this to match the limit the error message itself reports, "
-        "don't assume the published tier number is what you're actually allowed",
+        help="requests-per-minute cap shared across every model/thread -- match to your "
+        "Anthropic usage tier (Start=2000, Build=4000, Scale=8000 at time of writing). "
+        "WARNING: an org's real limit can be LOWER than its tier's published default -- if "
+        "you see repeated 429s, lower this to match the limit the error message reports",
     )
     parser.add_argument(
         "--max-workers", type=int, default=25,
         help="concurrent request threads -- count_tokens has no batch endpoint, so this is "
-        "what actually lets a run approach --rpm (a purely sequential loop is latency-bound "
-        "well under even a 2000/min cap, not rate-limit-bound, see model.py's own docstring)",
+        "what lets a run approach --rpm (a sequential loop is latency-bound, not rate-limit-"
+        "bound, well under even a 2000/min cap)",
     )
     parser.add_argument(
         "--eval-data-source",
         choices=["bouquet", "bouquet_test", "synthetic", "indigenous_panel"],
         default="bouquet",
         help="'bouquet' (default): BOUQuET DEV, for tuning/exploratory comparisons; "
-        "'bouquet_test': BOUQuET TEST, the genuinely held-out split -- reserve for final "
-        "reported numbers, not repeated tuning checks; "
-        "'synthetic': a small real-text placeholder (reuses systems.bpe.train's own "
-        "_SMOKE_TEST_GROUPS -- NOT common.data.synthetic's byte generator, which isn't guaranteed "
-        "valid UTF-8), for a quick sanity check with minimal API usage; "
-        "'indigenous_panel': common.data.indigenous_panel's curated Indigenous-language panel "
-        "(needs a one-time common.data.prepare_indigenous_panel run first) -- scored via "
-        "evaluate_claude_on_indigenous_panel, not evaluate_claude_on_groups, since this panel is "
-        "deliberately mixed-anchor (see that function's own docstring); results have a different "
-        "shape, not directly comparable to a bouquet/bouquet_test/synthetic run's own",
+        "'bouquet_test': BOUQuET TEST, the held-out split -- reserve for final reported numbers; "
+        "'synthetic': small real-text placeholder (systems.bpe.train's _SMOKE_TEST_GROUPS, not "
+        "common.data.synthetic's byte generator which isn't guaranteed valid UTF-8), for a quick "
+        "sanity check with minimal API usage; "
+        "'indigenous_panel': common.data.indigenous_panel's curated panel (needs a one-time "
+        "common.data.prepare_indigenous_panel run first) -- scored via "
+        "evaluate_claude_on_indigenous_panel (mixed-anchor), not evaluate_claude_on_groups; "
+        "results have a different shape, not comparable to a bouquet/bouquet_test/synthetic run's",
     )
     parser.add_argument(
         "--num-groups", type=int, default=None,
-        help="cap the number of held-out groups scored; omit for the full set -- given no "
-        "batching, the FULL BOUQuET test split means ~272k individual API calls; this is not "
-        "capped by default (an explicit choice -- narrow it yourself if you don't want that)",
+        help="cap the number of held-out groups scored; omit for the full set -- the full "
+        "BOUQuET test split means ~272k individual API calls, uncapped by default",
     )
     parser.add_argument("--output", type=str, default=None, help="write combined JSON results here (default: print to stdout)")
     parser.add_argument(
         "--checkpoint-dir", type=str, default=None,
         help="directory to store one <model>.jsonl checkpoint file per model, appending every "
-        "successfully completed (group, lang, count) call as it happens -- lets a killed, "
-        "preempted, or timed-out job resume via the exact same command without re-querying "
-        "calls already paid for (a failed call is never checkpointed, so it's retried on the "
-        "next run, not skipped forever). Defaults to '<output>.checkpoint/' if --output is "
-        "given; if neither is set, checkpointing is disabled and an interrupted run has no "
-        "resume safety net -- pass --output or this flag explicitly for any run long enough "
-        "that a mid-run interruption would be costly to redo from scratch",
+        "successfully completed (group, lang, count) call -- lets a killed/preempted/timed-out "
+        "job resume via the exact same command without re-querying calls already paid for (a "
+        "failed call is never checkpointed, so it's retried, not skipped forever). Defaults to "
+        "'<output>.checkpoint/' if --output is given; if neither is set, checkpointing is "
+        "disabled and an interrupted run has no resume safety net",
     )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="claude_tokenizer",
-        help="own project, separate from systems/hf_frontier's own 'hf_frontier' and every "
-        "systems/*/train.py's per-system project -- this measures an external API's own "
-        "token counts, not a model or tokenizer this project trained or loaded locally",
+        help="own project, separate from hf_frontier's and every systems/*/train.py's "
+        "per-system project -- this measures an external API's token counts, not a model "
+        "or tokenizer trained/loaded locally",
     )
     parser.add_argument("--run-name", type=str, default="")
     return parser
@@ -176,29 +153,22 @@ def evaluate_claude_on_groups(
     eval_groups, count_fn, anchor_lang="eng", max_workers=25, progress_every=1000, checkpoint_path=None
 ):
     """count_fn: (text) -> int token count (e.g. ClaudeTokenCounter.count,
-    already bound to one model + rate limiter). Mirrors common.eval.
-    cross_tokenizer.evaluate_on_groups's own compression/fertility/
-    token_parity computation exactly, but WITHOUT renyi/gini -- see this
-    package's own module docstring for why those aren't available here.
+    bound to one model + rate limiter). Mirrors common.eval.cross_tokenizer.
+    evaluate_on_groups's compression/fertility/token_parity computation,
+    but WITHOUT renyi/gini (see module docstring for why).
 
-    Every (group, language) pair's count_fn call is dispatched to a
-    ThreadPoolExecutor -- this is what lets the run actually approach
-    max_workers-many requests in flight rather than one call at a time
-    waiting on network round-trip latency (see model.py's own docstring).
-    A single (group, language) call that ultimately fails (exhausted
-    retries) is dropped from the aggregate stats, not treated as a fatal
-    error for the whole run -- printed immediately (group, lang, exception)
-    as it happens, not silently swallowed or only reported as a count later.
+    Every (group, language) call is dispatched to a ThreadPoolExecutor so
+    the run can approach max_workers-many requests in flight rather than
+    being latency-bound one call at a time. A call that ultimately fails
+    (exhausted retries) is dropped from aggregate stats, not fatal to the
+    whole run -- printed immediately as it happens.
 
-    checkpoint_path: optional JSONL file that every SUCCESSFUL (group, lang,
-    count) triple is appended to (and flushed) as it completes. If the file
-    already has content (a prior run of this same command got killed,
-    preempted, or hit its job time limit), those (group, lang) pairs are
-    loaded up front and never re-queried -- this is what lets a genuinely
-    multi-day run (e.g. bouquet_test at a low real rpm cap) survive being
-    resubmitted from scratch after an interruption instead of re-paying for
-    every already-completed call. Failed calls are deliberately never
-    checkpointed, so they're retried (not skipped forever) on the next run.
+    checkpoint_path: optional JSONL file that every SUCCESSFUL (group,
+    lang, count) triple is appended to as it completes. If the file already
+    has content (a prior run got killed/preempted/timed out), those pairs
+    are loaded up front and never re-queried -- lets a multi-day run
+    survive being resubmitted without re-paying for completed calls. Failed
+    calls are never checkpointed, so they're retried next run.
 
     Returns {"per_lang_compression": {...}, "avg_compression": float,
     "fertility": {...}, "token_parity": {...}, "token_parity_anchor": str,
@@ -206,11 +176,9 @@ def evaluate_claude_on_groups(
     (always empty), "gini": None (always), "num_failed_calls": int,
     "num_total_calls": int, "num_skipped_via_checkpoint": int}.
     token_parity_gm/token_parity_spread are anchor-invariant (see
-    common.eval.parity.anchor_invariant_parity's own docstring for why a
-    single fixed anchor's ranking can flip depending on which language you
-    pick) -- computed here identically to common.eval.cross_tokenizer.
-    evaluate_on_groups's own, from the SAME token_parity dict below, at zero
-    extra API cost.
+    common.eval.parity.anchor_invariant_parity) -- computed identically to
+    evaluate_on_groups's, from the same token_parity dict, at zero extra
+    API cost.
     """
     tasks_all = [(gi, lang, text) for gi, group in enumerate(eval_groups) for lang, text in group.items()]
 
@@ -244,11 +212,8 @@ def evaluate_claude_on_groups(
                     cause = e.__cause__
                     detail = f"{type(e).__name__}: {e}"
                     if cause is not None:
-                        # count()'s own RuntimeError wraps the real reason (a rate
-                        # limit, an overload, a connection drop, ...) via `raise
-                        # ... from last_exc` -- without unwrapping it here, every
-                        # failure prints the same uninformative "failed after 5
-                        # attempts" and the actual cause is lost.
+                        # count()'s RuntimeError wraps the real reason via `raise ... from
+                        # last_exc` -- unwrap it or every failure just says "failed after 5 attempts".
                         detail += f" (caused by {type(cause).__name__}: {cause})"
                     errors.append((gi, lang, detail))
                     print(f"  [FAILED] group={gi} lang={lang}: {detail}", flush=True)
@@ -331,30 +296,24 @@ def evaluate_claude_on_indigenous_panel(
 ):
     """Claude-specific analog of common.eval.cross_tokenizer.
     evaluate_on_indigenous_panel, built around evaluate_claude_on_groups the
-    same way that function is built around common.eval.cross_tokenizer.
-    evaluate_on_groups -- see both functions' own docstrings for why this
-    panel needs dedicated handling (mixed anchors: English for crk-en/
-    iu-en, Spanish for the ten AmericasNLP pairs -- see common.data.
-    indigenous_panel's own module docstring) and why merging ratios
-    computed against different anchors would silently reintroduce anchor
-    bias rather than actually eliminating it.
+    same way. This panel needs dedicated handling because it's mixed-anchor
+    (English for crk-en/iu-en, Spanish for the ten AmericasNLP pairs -- see
+    common.data.indigenous_panel) -- merging ratios computed against
+    different anchors would silently reintroduce anchor bias.
 
-    checkpoint_path: unlike evaluate_claude_on_groups's own single
-    checkpoint file, this panel runs TWO internal evaluate_claude_on_groups
-    calls (one per anchor) -- each gets its own checkpoint file
-    ("{checkpoint_path}.{anchor}.jsonl") so a resumed run resumes each
-    anchor's own calls independently, same "submit, get killed/timed out,
-    resubmit the exact same command" workflow every checkpoint_path use in
-    this module already supports.
+    checkpoint_path: unlike the single-file case in evaluate_claude_on_groups,
+    this runs TWO internal evaluate_claude_on_groups calls (one per anchor),
+    each with its own checkpoint file ("{checkpoint_path}.{anchor}.jsonl")
+    so a resumed run resumes each anchor's calls independently.
 
     Returns {"combined": {"avg_compression", "per_lang_compression",
     "fertility", "renyi": {} (always empty), "gini": None (always) --
-    pooled across BOTH anchor subgroups, safe since these are per-language,
-    anchor-free quantities}, "token_parity_by_anchor": {anchor: <that
-    subgroup's own evaluate_claude_on_groups result>}, "morphology_spread":
+    pooled across both anchor subgroups, safe since these are per-language,
+    anchor-free}, "token_parity_by_anchor": {anchor: <that subgroup's
+    evaluate_claude_on_groups result>}, "morphology_spread":
     {"fertility_spread", "compression_spread"} (max/min across the whole
-    panel, no anchor needed), "num_total_calls"/"num_failed_calls"/
-    "num_skipped_via_checkpoint" (summed across both anchor subgroups)}.
+    panel), "num_total_calls"/"num_failed_calls"/"num_skipped_via_checkpoint"
+    (summed across both anchor subgroups)}.
     """
     from common.data.indigenous_panel import PAIRS
 
@@ -553,10 +512,8 @@ def main(argv=None):
             },
         )
         successful = {m: r for m, r in all_results.items() if m != "_failed"}
-        # indigenous_panel's own results nest avg_compression under
-        # "combined" (see evaluate_claude_on_indigenous_panel's own
-        # docstring) -- num_total_calls/num_failed_calls stay top-level
-        # either way.
+        # indigenous_panel nests avg_compression under "combined";
+        # num_total_calls/num_failed_calls stay top-level either way.
         avg_compression_of = (lambda r: r["combined"]["avg_compression"]) if is_indigenous_panel else (lambda r: r["avg_compression"])
         summary_rows = [
             [m, avg_compression_of(r), r["num_total_calls"], r["num_failed_calls"]] for m, r in successful.items()
@@ -595,31 +552,22 @@ def main(argv=None):
 
 
 def run_smoke_test():
-    """Two genuinely separate things get verified here, since this module's
-    real substance (network calls to a paid/authenticated API) can't be
-    exercised without a live ANTHROPIC_API_KEY -- not available in every
-    environment this test might run in:
+    """This module's real substance (calls to a paid/authenticated API)
+    can't be exercised without a live ANTHROPIC_API_KEY, so this checks
+    three things independent of that:
 
-    1. RateLimiter's own pacing logic -- pure, no network at all: fill a
-       tiny window to capacity, confirm a further acquire() call actually
-       blocks until the window rolls over (timed, not just "didn't crash").
-    2. evaluate_claude_on_groups's own aggregation math (compression/
-       fertility/token_parity) -- exercised against a FAKE count_fn (a
-       deterministic word-count stand-in, not a real API call) so a
-       regression in the aggregation logic itself fails loudly here,
-       independent of whether the real API is reachable.
+    1. RateLimiter's pacing -- fill a tiny window to capacity, confirm a
+       further acquire() actually blocks until the window rolls over.
+    2. evaluate_claude_on_groups's aggregation math (compression/fertility/
+       token_parity) against a FAKE count_fn (word-count stand-in), so a
+       regression fails loudly here regardless of API reachability.
+    3. Checkpoint resume -- pre-seed one (group, lang) as already "done",
+       confirm it's never re-queried (spy count_fn), reflected in
+       num_skipped_via_checkpoint, and that aggregate stats exactly match
+       an uninterrupted full run.
 
-    If ANTHROPIC_API_KEY IS set, ALSO makes one real count_tokens call as a
-    bonus confirmation that the actual SDK integration still works end to
-    end -- skipped with a printed note, not a failure, if no key is set.
-
-    3. Checkpoint resume -- pre-seed a checkpoint file with one (group, lang)
-       already "done", confirm evaluate_claude_on_groups never re-queries it
-       (a spy count_fn asserts it's not called for that pair), that the
-       skip is reflected in num_skipped_via_checkpoint, and that the
-       resulting aggregate stats exactly match an uninterrupted full run --
-       i.e. resuming from a checkpoint is invisible to the final numbers,
-       not just "doesn't crash"."""
+    If ANTHROPIC_API_KEY is set, also makes one real count_tokens call as a
+    bonus check; skipped (not failed) if no key is set."""
     import tempfile
     import time
 
@@ -656,9 +604,8 @@ def run_smoke_test():
     assert results["token_parity_spread"] >= 1.0
     json.dumps(results, default=str)  # confirms the result dict is actually JSON-serializable
 
-    # Anchor-invariance: re-run with anchor_lang="deu" instead of the default "eng" and
-    # confirm token_parity_gm is identical -- the property the whole feature exists for
-    # (see common.eval.parity.anchor_invariant_parity's own docstring).
+    # Anchor-invariance: re-run with anchor_lang="deu" instead of "eng" and confirm
+    # token_parity_gm is identical (see common.eval.parity.anchor_invariant_parity).
     deu_anchored = evaluate_claude_on_groups(fake_groups, fake_count, anchor_lang="deu", max_workers=4, progress_every=0)
     for lang in results["token_parity_gm"]:
         assert abs(results["token_parity_gm"][lang] - deu_anchored["token_parity_gm"][lang]) < 1e-9, (

@@ -1,16 +1,13 @@
 """A LLaMA-style decoder-only transformer: RMSNorm, rotary position
 embeddings (RoPE), SwiGLU-gated MLP, causal self-attention (optionally
 grouped-query, for the largest presets) via torch's fused
-scaled_dot_product_attention. This is the architecture essentially every
-current open LLM (LLaMA, Mistral, Qwen, Gemma, ...) uses at every scale from
-a few hundred million to well past 7B parameters -- see model_configs.py for
-the named size presets built on top of this one architecture.
+scaled_dot_product_attention -- the architecture essentially every current
+open LLM (LLaMA, Mistral, Qwen, Gemma, ...) uses. See model_configs.py for
+the named size presets built on this one architecture.
 
-Unlike every tokenizer baseline in systems/, this is NOT a deliberately
-scaled-down simplification of a paper's design -- it's meant to actually
-pretrain a real language model, so it uses the same architectural choices a
-real model would, just at whatever --model-size the caller picks (see
-pretraining/train.py and model_configs.PRESETS).
+Unlike the tokenizer baselines in systems/, this isn't a scaled-down
+simplification -- it uses real architectural choices, at whatever
+--model-size the caller picks (see train.py and model_configs.PRESETS).
 """
 
 import math
@@ -22,9 +19,7 @@ import torch.nn.functional as F
 
 class RMSNorm(nn.Module):
     """Root-mean-square layer norm: normalizes by RMS only (no mean
-    subtraction, no bias) -- LLaMA's normalization of choice, cheaper than
-    LayerNorm and empirically just as effective for this architecture
-    family."""
+    subtraction, no bias) -- cheaper than LayerNorm, LLaMA's norm of choice."""
 
     def __init__(self, hidden_size, eps=1e-5):
         super().__init__()
@@ -32,11 +27,9 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
     def forward(self, x):
-        # Computed in fp32 regardless of the ambient autocast dtype -- RMS
-        # norm's own reciprocal-sqrt is exactly the kind of reduction that
-        # loses meaningful precision in bf16 (small variance estimates get
-        # rounded before the correction is even applied), a well-known
-        # LLaMA-implementation detail, not a stylistic choice.
+        # Computed in fp32 regardless of ambient autocast dtype -- the
+        # reciprocal-sqrt reduction loses meaningful precision in bf16
+        # otherwise (a known LLaMA implementation detail).
         dtype = x.dtype
         x_fp32 = x.float()
         variance = x_fp32.pow(2).mean(dim=-1, keepdim=True)
@@ -46,12 +39,10 @@ class RMSNorm(nn.Module):
 
 def precompute_rope(head_dim, max_seq_len, theta=10000.0, device=None):
     """Returns (cos, sin), each (max_seq_len, head_dim) -- head_dim (not
-    head_dim/2) because each half of a rotation pair gets the SAME
-    cos/sin value repeated (see apply_rope's rotate_half convention, the
-    GPT-NeoX/LLaMA style rather than the original RoFormer paper's
-    interleaved-pairs style; the two are mathematically equivalent up to a
-    fixed permutation of dimensions, LLaMA's own implementation uses this
-    one)."""
+    head_dim/2) because each half of a rotation pair repeats the same
+    cos/sin value (GPT-NeoX/LLaMA style, not the original RoFormer
+    interleaved-pairs style; the two are equivalent up to a fixed
+    permutation of dimensions)."""
     inv_freq = 1.0 / (
         theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim)
     )  # (head_dim/2,)
@@ -63,8 +54,7 @@ def precompute_rope(head_dim, max_seq_len, theta=10000.0, device=None):
 
 def _rotate_half(x):
     """x: (..., head_dim). Splits in half and swaps-with-negation -- the
-    GPT-NeoX-style rotation companion to precompute_rope's cos/sin layout
-    (see that function's docstring)."""
+    GPT-NeoX-style rotation companion to precompute_rope's cos/sin layout."""
     x1, x2 = x.chunk(2, dim=-1)
     return torch.cat([-x2, x1], dim=-1)
 
@@ -84,14 +74,11 @@ def apply_rope(q, k, cos, sin):
 class Attention(nn.Module):
     """Causal self-attention with RoPE and optional grouped-query attention
     (num_kv_heads < num_heads -- see model_configs.py's "7b" preset). Uses
-    F.scaled_dot_product_attention rather than a hand-rolled softmax(QK^T/
-    sqrt(d))V -- lets PyTorch dispatch to a fused/flash-attention kernel on
-    supported hardware, which matters a great deal at real pretraining
-    scale (the hand-rolled version materializes a full (T, T) score matrix
-    per head, exactly the O(T^2) memory cost that made systems.fanta's own
-    dense-attention baseline OOM at far smaller scale than this -- see that
-    package's max_seq_length field for the incident that taught this
-    project that lesson)."""
+    F.scaled_dot_product_attention rather than hand-rolled softmax(QK^T/
+    sqrt(d))V so PyTorch can dispatch to a fused/flash kernel -- a
+    hand-rolled version materializes a full (T,T) score matrix per head,
+    the same O(T^2) cost that OOM'd systems.fanta's dense-attention
+    baseline at far smaller scale."""
 
     def __init__(self, hidden_size, num_heads, num_kv_heads, max_seq_len, rope_theta, dropout):
         super().__init__()
@@ -114,9 +101,7 @@ class Attention(nn.Module):
         B, T, _ = x.shape
         assert T <= self.rope_cos.shape[0], (
             f"sequence length {T} exceeds this model's max_seq_len "
-            f"{self.rope_cos.shape[0]} -- RoPE has no precomputed frequencies "
-            "past that (raising here directly rather than letting this surface "
-            "as a confusing shape mismatch inside apply_rope)"
+            f"{self.rope_cos.shape[0]} -- RoPE has no precomputed frequencies past that"
         )
         q = self.q_proj(x).view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
         k = self.k_proj(x).view(B, T, self.num_kv_heads, self.head_dim).transpose(1, 2)
@@ -127,10 +112,8 @@ class Attention(nn.Module):
         q, k = apply_rope(q, k, cos, sin)
 
         if self.num_kv_heads != self.num_heads:
-            # Grouped-query attention: each KV head is shared by
-            # num_heads/num_kv_heads query heads -- repeat_interleave so
-            # query head i uses kv head i // group_size, matching every
-            # standard GQA implementation's head-grouping convention.
+            # GQA: each KV head is shared by num_heads/num_kv_heads query
+            # heads; repeat_interleave so query head i uses kv head i//group_size.
             group_size = self.num_heads // self.num_kv_heads
             k = k.repeat_interleave(group_size, dim=1)
             v = v.repeat_interleave(group_size, dim=1)
@@ -186,9 +169,8 @@ class TransformerBlock(nn.Module):
 class TransformerLM(nn.Module):
     """Full decoder-only LM: token embedding -> N TransformerBlocks -> final
     RMSNorm -> output projection to vocab logits. vocab_size is passed
-    separately from `cfg` (a model_configs.ModelConfig, which is purely
-    architectural) since it comes from whichever tokenizer is in use, not
-    from the chosen model size -- see model_configs.py's own docstring."""
+    separately from `cfg` (purely architectural) since it comes from
+    whichever tokenizer is in use, not the chosen model size."""
 
     def __init__(self, cfg, vocab_size):
         super().__init__()
@@ -202,13 +184,11 @@ class TransformerLM(nn.Module):
             self.lm_head.weight = self.embed.weight
         self.apply(self._init_weights)
         # Second, targeted pass: rescale the two per-block projections that
-        # write directly into the residual stream (attn.o_proj, mlp.down_proj)
-        # by 1/sqrt(2 * num_layers) -- GPT-2's own documented fix for the
-        # residual stream's variance otherwise growing with depth at
-        # initialization. Needs full dotted parameter names to target just
-        # these two Linear layers, which self._init_weights (called via
-        # nn.Module.apply, one undotted module at a time) can't see -- hence
-        # a separate pass over self.named_parameters() here instead.
+        # write into the residual stream (attn.o_proj, mlp.down_proj) by
+        # 1/sqrt(2*num_layers) -- GPT-2's fix for residual variance growing
+        # with depth. Needs dotted parameter names to target just these two
+        # Linear layers, which _init_weights (called per-module via
+        # nn.Module.apply) can't see -- hence a separate named_parameters() pass.
         residual_scale = 1.0 / math.sqrt(2 * cfg.num_layers)
         for name, p in self.named_parameters():
             if name.endswith("o_proj.weight") or name.endswith("down_proj.weight"):
@@ -217,9 +197,8 @@ class TransformerLM(nn.Module):
 
     def _init_weights(self, module):
         # Standard GPT-2/LLaMA-style init: small normal on projections and
-        # embeddings. The residual-stream-writing projections get an
-        # ADDITIONAL depth-dependent rescale afterward -- see __init__'s own
-        # second pass, right after this gets called via self.apply.
+        # embeddings. Residual-stream-writing projections get an additional
+        # depth-dependent rescale afterward (see __init__'s second pass).
         if isinstance(module, nn.Linear):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
@@ -237,10 +216,9 @@ class TransformerLM(nn.Module):
 
     def forward(self, input_ids, labels=None):
         """input_ids: (B, T) long. labels: (B, T) long or None -- if given,
-        returns (logits, loss) with the standard shifted next-token
-        cross-entropy (loss is None if labels is None). Callers that
-        already have shifted (x, y) pairs (see pretraining.shard_dataset)
-        pass input_ids=x, labels=y directly -- no internal shifting here."""
+        returns (logits, loss) with standard next-token cross-entropy.
+        Callers with already-shifted (x, y) pairs (shard_dataset) pass
+        input_ids=x, labels=y directly; no internal shifting here."""
         x = self.embed(input_ids)
         for block in self.blocks:
             if self.cfg.grad_checkpointing and self.training:

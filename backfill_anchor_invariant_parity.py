@@ -1,13 +1,9 @@
-"""Backfills token_parity_gm/token_parity_spread (anchor-invariant -- see
-common.eval.parity.anchor_invariant_parity's own docstring for why a single
-fixed anchor's ranking can flip depending on which language you pick) into an
-existing systems/*/evaluate.py --output JSON file.
-
-Computed purely from that file's own already-stored token_parity -- no
-re-tokenization, no re-running any network/API calls -- needed only for
-results computed before this metric existed (results/hf_frontier_comparison.json,
-results/claude_comparison.json). Modifies each --input file IN PLACE; an
-entry that already has both fields is left untouched, not recomputed.
+"""Backfills token_parity_gm/token_parity_spread (anchor-invariant -- a fixed
+anchor's ranking can flip depending on which language you pick) into an existing
+systems/*/evaluate.py --output JSON file, computed purely from the file's own
+already-stored token_parity (no re-tokenization or network calls). Needed only
+for results computed before this metric existed. Modifies --input files IN
+PLACE; entries that already have both fields are left untouched.
 
 Usage:
     python3 backfill_anchor_invariant_parity.py --input results/hf_frontier_comparison.json

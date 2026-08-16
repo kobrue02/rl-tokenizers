@@ -1,12 +1,10 @@
 """Apply a FROZEN, already-trained policy to a corpus to harvest the final
-vocabulary. This is the step that turns "a policy that's good at fair
-byte-boundary placement" (learned on the curated Phase 1 parallel data) into
-"an actual tokenizer vocabulary" for the real pretraining corpus -- the
-behavior transfers, not the Phase 1 data itself.
+vocabulary -- turns "a policy good at fair byte-boundary placement" (learned on
+curated Phase 1 parallel data) into an actual tokenizer vocab for the real
+pretraining corpus. The learned behavior transfers, not the Phase 1 data itself.
 
-Distinct from fairtok.train: no gradients, no reward, no fairness scalar,
-no parallel groups required -- just segment whatever text you give it and
-count what comes out.
+Distinct from fairtok.train: no gradients, reward, fairness scalar, or parallel
+groups -- just segment whatever text you give it and count what comes out.
 """
 
 from collections import Counter, defaultdict
@@ -20,8 +18,7 @@ from .policy import BytePolicy, segment_bytes
 
 
 def save_checkpoint(policy, path):
-    # Read hidden_dim/num_layers off the policy itself rather than requiring the
-    # caller to track and pass them separately -- BytePolicy already stores both.
+    # hidden_dim/num_layers read off the policy itself, not passed separately.
     torch.save(
         {
             "hidden_dim": policy.hidden_dim,
@@ -45,15 +42,12 @@ def load_checkpoint(path):
 def build_vocab_from_corpus(
     policy, texts, vocab_size, deterministic=True, progress=None
 ):
-    """texts: either a flat iterable of str/bytes documents (a single unlabeled
-    corpus), or a dict {label: iterable_of_documents} if the corpus has
-    language/source labels worth keeping in the per-entry breakdown. This
-    doesn't need parallel groups across languages the way Phase 1 training
-    data does -- the fairness objective already shaped the policy; this step
-    is just applying it.
+    """texts: a flat iterable of str/bytes documents, or a dict {label:
+    iterable_of_documents} to keep language/source labels in the per-entry
+    breakdown. No parallel groups needed here (unlike Phase 1 training data) --
+    the fairness objective already shaped the policy; this just applies it.
 
-    progress: optional callable(iterable, desc) -> iterable, e.g. tqdm.auto.tqdm,
-    to show progress without hard-coding a UI dependency into this function.
+    progress: optional callable(iterable, desc) -> iterable, e.g. tqdm.auto.tqdm.
     """
     if not isinstance(texts, dict):
         texts = {"corpus": texts}

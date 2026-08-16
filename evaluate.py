@@ -1,15 +1,12 @@
-"""Single driver CLI for evaluating any trained tokenizer checkpoint in this repo on
-held-out data -- mirrors train.py's dispatch pattern exactly (see that file's module
-docstring for the full rationale: each tokenizer keeps its own argparse parser, so an
-unrecognized flag is a hard error, not silently accepted).
+"""Driver CLI for evaluating any trained tokenizer checkpoint on held-out data.
+Mirrors train.py's dispatch pattern: each tokenizer keeps its own argparse parser,
+so an unrecognized flag is a hard error, not silently accepted.
 
 Usage:
     python evaluate.py <tokenizer> --checkpoint PATH [tokenizer-specific flags...]
     python evaluate.py {fairtok,magnet,flexitokens,manta} --help   # that tokenizer's own flags
 
-Held-out data defaults to BOUQuET dev (disjoint from every --data-source train.py
-trains on) -- see fairtok/evaluate.py's module docstring for the full rationale and
-common.eval.cross_tokenizer for the shared scoring logic every tokenizer's own evaluate.py uses.
+Held-out data defaults to BOUQuET dev (disjoint from anything train.py trains on).
 """
 
 import importlib
@@ -23,15 +20,8 @@ TOKENIZERS = {
     "fanta": "systems.fanta.evaluate",
     "superbpe": "systems.superbpe.evaluate",
     "bpe": "systems.bpe.evaluate",
-    "hf_frontier": "systems.hf_frontier.evaluate",  # not a trained tokenizer
-    # this project fits itself -- an arbitrary HuggingFace repo's own
-    # tokenizer (--hf-repo-id), loaded tokenizer-only, see that module's
-    # own docstring.
-    "claude_tokenizer": "systems.claude_tokenizer.evaluate",  # also not a
-    # trained tokenizer this project fits, and not even a local one --
-    # token COUNTS only, via Anthropic's own count_tokens API, so it can't
-    # report renyi/gini the way every other tokenizer here can (see that
-    # module's own docstring for why).
+    "hf_frontier": "systems.hf_frontier.evaluate",  # arbitrary HF tokenizer (--hf-repo-id), not one this project trains
+    "claude_tokenizer": "systems.claude_tokenizer.evaluate",  # token counts only via Anthropic's count_tokens API; no renyi/gini
 }
 
 
@@ -64,9 +54,8 @@ def main(argv=None):
         return 2
 
     module = importlib.import_module(TOKENIZERS[tokenizer])
-    # Same reasoning as train.py: every tokenizer's evaluate.main() returns a results
-    # dict for interactive/notebook use, not an exit code -- discard it here so a
-    # successful run exits 0 instead of sys.exit()-ing on a truthy dict.
+    # evaluate.main() returns a results dict (for notebook use), not an exit code --
+    # discard it so a successful run exits 0 instead of sys.exit()-ing on a truthy dict.
     module.main(argv[1:])
     return 0
 

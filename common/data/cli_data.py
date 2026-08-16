@@ -1,52 +1,45 @@
 """Shared --data-source/--langs/--num-groups CLI data-loading logic, used
 identically by every tokenizer's CLI in this repo (fairtok.cli, magnet.cli,
-flexitokens.cli, manta.cli, fanta.cli, superbpe.cli, bpe.cli) -- extracted
-here so it's implemented exactly once instead of copy-pasted per tokenizer.
+flexitokens.cli, manta.cli, fanta.cli, superbpe.cli, bpe.cli) -- implemented
+once here instead of copy-pasted per tokenizer.
 
-Every named source goes through common.data.corpora.stream_groups -- the SAME
-registry pretraining.data_prep draws on for LLM pretraining, not a separate
-tokenizer-training-only list. See that module's own docstring for which
-sources are genuinely cross-lingual PARALLEL (oldi_seed/flores_dev, and
-bible_nlp once prepared) vs. BITEXT (smol/ccmatrix/un_pc/europarl/tatoeba_mt,
-one language pair per group) vs. single-language MONOLINGUAL (glot500/
-fineweb_edu/olmo_mix) -- the latter still trains a tokenizer fine through the
-plain next-byte CE loss every trainer has, it just contributes nothing to any
-fairness loss term that needs genuinely parallel content within a group.
+Every named source goes through common.data.corpora.stream_groups, the same
+registry pretraining.data_prep uses for LLM pretraining. See that module's
+docstring for which sources are cross-lingual PARALLEL (oldi_seed/
+flores_dev, and bible_nlp once prepared) vs. BITEXT (smol/ccmatrix/un_pc/
+europarl/tatoeba_mt, one pair per group) vs. single-language MONOLINGUAL
+(glot500/fineweb_edu/olmo_mix) -- monolingual sources still train a
+tokenizer fine via next-byte CE loss, they just can't feed a fairness loss
+that needs parallel content within a group.
 
-Every source now defaults to loading EVERY language it natively offers (no
-curated subset of any kind any more -- bible_nlp is the one deliberate
-exception, which has no default at all and always requires an explicit
---langs, given the real cost of scanning it -- see common.data.corpora's own
-docstring). Config files decide WHICH corpora feed a given training run:
---data-source takes either one source name, the literal "all" (the original
-oldi_seed+flores_dev+smol pool, kept for backward compatibility with existing
-configs -- each of the three now loads every language it has), or a
-comma-separated list of several source names to pool together for one
-run (e.g. "oldi_seed,ccmatrix,europarl") -- --langs/--dataset-config aren't
-supported alongside a multi-source list (they aren't source-specific), so
-override either by training on a single source at a time instead.
+Every source now defaults to loading EVERY language it offers, except
+bible_nlp (no default at all -- always requires an explicit --langs, given
+the real cost of scanning it). Config files decide WHICH corpora feed a
+run: --data-source takes one source name, the literal "all" (the legacy
+oldi_seed+flores_dev+smol pool, kept for backward compatibility), or a
+comma-separated list to pool several sources (e.g.
+"oldi_seed,ccmatrix,europarl") -- --langs/--dataset-config aren't supported
+alongside a multi-source list since they aren't source-specific; train on a
+single source at a time to override either.
 """
 
 import itertools
 
 from .corpora import ALL_SOURCES, BITEXT_SOURCES, MONOLINGUAL_SOURCES, stream_groups
 
-# Derived from common.data.corpora.ALL_SOURCES (+ "all", this module's own pooling
-# special-case -- see module docstring) rather than a second hardcoded list:
-# a new source registered in corpora.py becomes selectable here automatically,
-# with no separate list to remember to update in sync.
+# Derived from ALL_SOURCES (+ "all", see module docstring) rather than a
+# second hardcoded list: a new source registered in corpora.py becomes
+# selectable here automatically.
 DATA_SOURCES = ALL_SOURCES + ["all"]
 
-# The legacy "all" meta-source, predating general multi-source pooling --
-# kept as sugar for it (expanded to these 3 names, see _expand_data_sources)
-# rather than its own separate pooling code path, so both go through the
-# exact same per-source loading logic in _load_one_source below.
+# Legacy "all" meta-source, predating general multi-source pooling -- kept
+# as sugar for it (expanded to these 3 names, see _expand_data_sources), so
+# both paths go through the same per-source loading in _load_one_source.
 _ALL_META_SOURCES = ["oldi_seed", "flores_dev", "smol"]
 
-# A monolingual/bitext source's own stream is lazy/effectively unbounded (a
-# live HF Hub stream, not a small fixed file the way oldi_seed/flores_dev
-# are) -- materializing one without SOME bound would try to download an
-# unbounded amount of data. Used only when --num-groups isn't given.
+# A monolingual/bitext source streams lazily/effectively unbounded (a live
+# HF Hub stream) -- bound materialization explicitly rather than draining
+# it to exhaustion. Used only when --num-groups isn't given.
 _DEFAULT_MONOLINGUAL_GROUPS_PER_LANG = 2000
 
 _DEFAULT_DATA_SOURCE_HELP = (
@@ -63,15 +56,12 @@ _DEFAULT_LANGS_HELP = (
 
 def add_data_source_args(parser, data_source_help=None, langs_help=None):
     """--data-source/--num-groups/--langs, the three flags every systems/*/
-    cli.py's build_arg_parser already added identically (confirmed live:
-    five of seven byte-identical; bpe adds an extra UTF-8 caveat sentence to
-    --data-source's help, fairtok adds an extra clarifying clause to
-    --langs's -- both passed through via the optional *_help params rather
-    than silently overwritten with the plain default text). --data-source has
-    no `choices=` constraint (unlike before) since it now also accepts a
-    comma-separated list of several DATA_SOURCES names -- load_groups
-    validates each individual name itself and raises a clear error on an
-    unknown one, rather than argparse rejecting the whole multi-name string."""
+    cli.py's build_arg_parser adds identically (help text overridable via
+    the optional *_help params for tokenizer-specific caveats, e.g. bpe's
+    extra UTF-8 note or fairtok's extra --langs clause). --data-source has
+    no `choices=` constraint since it may be a comma-separated list of
+    several DATA_SOURCES names; load_groups validates each name and raises
+    a clear error on an unknown one."""
     parser.add_argument("--data-source", type=str, default="all", help=data_source_help or _DEFAULT_DATA_SOURCE_HELP)
     parser.add_argument(
         "--num-groups", type=int, default=None,
@@ -81,9 +71,8 @@ def add_data_source_args(parser, data_source_help=None, langs_help=None):
 
 
 def _expand_data_sources(data_source_str):
-    """Splits --data-source on commas, expanding any literal "all" entry into
-    its own fixed 3-source legacy pool (_ALL_META_SOURCES) -- see that
-    constant's own comment."""
+    """Splits --data-source on commas, expanding any literal "all" entry
+    into _ALL_META_SOURCES."""
     names = []
     for name in data_source_str.split(","):
         names.extend(_ALL_META_SOURCES if name == "all" else [name])
@@ -91,8 +80,8 @@ def _expand_data_sources(data_source_str):
 
 
 def _load_one_source(name, langs, dataset_config, seed, num_groups):
-    """One named source's own bounded group list -- shared by load_groups'
-    single- and multi-source paths. `name` is never the literal "all" here --
+    """One named source's own bounded group list, shared by load_groups'
+    single- and multi-source paths. `name` is never "all" here --
     _expand_data_sources already expanded it before this is called."""
     if name not in ALL_SOURCES:
         raise ValueError(f"unknown --data-source {name!r} -- choose from {DATA_SOURCES}")
@@ -108,20 +97,16 @@ def _load_one_source(name, langs, dataset_config, seed, num_groups):
 
 
 def load_groups(args):
-    """args: an argparse.Namespace (or anything with the same attributes) with
-    `.langs`, `.data_source`, `.seed`, and `.num_groups` -- every tokenizer's CLI
-    in this repo adds these same four flags (see e.g. fairtok/cli.py's
-    build_arg_parser), so this function works unmodified against any of them.
-    An optional `.dataset_config` attribute (HF config name) is read too, for
-    --data-source fineweb_edu/olmo_mix and every BITEXT_SOURCES entry
-    (smol/ccmatrix/un_pc/europarl/tatoeba_mt) -- see common.data.corpora.
-    stream_groups; every tokenizer's cli.py that wants to expose those sources
-    adds that flag, the others simply never read it.
+    """args: an argparse.Namespace with `.langs`, `.data_source`, `.seed`,
+    and `.num_groups` -- every tokenizer's CLI in this repo adds these same
+    four flags, so this works unmodified against any of them. An optional
+    `.dataset_config` attribute (HF config name) is also read, for
+    fineweb_edu/olmo_mix and every BITEXT_SOURCES entry.
 
     --data-source may name more than one source (comma-separated) to pool
-    them for this run -- see module docstring. --langs/--dataset-config
+    them for this run (see module docstring). --langs/--dataset-config
     aren't supported in that case (raises ValueError) since they aren't
-    source-specific; each pooled source just uses its own default.
+    source-specific; each pooled source uses its own default.
     """
     if args.langs is None:
         langs = None
@@ -135,12 +120,11 @@ def load_groups(args):
 
     if len(data_sources) > 1:
         # "all" (langs="all", dataset_config in (None,"all")) is a no-op here --
-        # every pooled source already defaults to "all" languages/pairs on its
-        # own now, so an explicit `langs: all` in an existing config (e.g.
-        # configs/train_bpe_50k.yml's `data_source: all, langs: all`, predating
-        # this uniform default) stays valid rather than breaking. A genuinely
-        # RESTRICTIVE override (a specific language list, or a specific
-        # --dataset-config value) isn't source-specific, so that still errors.
+        # every pooled source already defaults to "all" on its own, so an
+        # explicit `langs: all` in an existing config stays valid rather than
+        # breaking. A genuinely RESTRICTIVE override (a specific language
+        # list or --dataset-config value) isn't source-specific, so that
+        # still errors.
         if (langs not in (None, "all")) or (dataset_config not in (None, "all")):
             raise ValueError(
                 f"--langs/--dataset-config aren't supported when --data-source names more than "
@@ -178,19 +162,16 @@ def load_groups(args):
 
 
 def load_bouquet_dev_for_training(args):
-    """BOUQuET dev (see common.data.oldi_data.load_bouquet_dev) -- disjoint from every
-    --data-source load_groups above trains on, used for periodic in-training
-    evaluation at epoch boundaries (see each tokenizer's own Trainer.train()).
-    Skipped (returns None) for --data-source synthetic, which has no real
-    BOUQuET counterpart. Loads EVERY language BOUQuET covers ("all") --
-    common.eval.cross_tokenizer.evaluate_on_groups already skips languages
-    the training model has no entry for.
+    """BOUQuET dev (see common.data.oldi_data.load_bouquet_dev) -- disjoint
+    from whatever load_groups trains on, used for periodic in-training
+    evaluation at epoch boundaries. Skipped (returns None) for --data-source
+    synthetic, which has no real BOUQuET counterpart. Loads every language
+    BOUQuET covers ("all") -- evaluate_on_groups already skips languages the
+    training model has no entry for.
 
-    Reserve BOUQuET's TEST split (common.data.oldi_data.load_bouquet_test) for final
-    reported numbers, via each tokenizer's own evaluate.py
-    --eval-data-source bouquet_test, run once training is done -- using dev
-    here, repeatedly, across an entire training run's worth of epoch checks, is
-    exactly the exploratory/tuning use dev exists for.
+    Reserve BOUQuET's TEST split (load_bouquet_test) for final reported
+    numbers, once training is done; dev is for the repeated,
+    exploratory/tuning use it exists for.
     """
     if args.data_source == "synthetic":
         print(

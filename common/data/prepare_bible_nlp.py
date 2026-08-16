@@ -1,52 +1,37 @@
 """One-time local prep for bible-nlp/biblenlp-corpus.
 
-common.data.corpora's own bible_nlp loader used to stream the live, ~5.2GB
-corpus.json over HTTP on EVERY training run (via ijson, no local download) --
-correct, but expensive: even a 2-language request scans however much of the
-file precedes those languages, and a missing/mistyped language code forces a
-full sequential scan before it can even raise an error (confirmed live, see
-common.data.corpora._bible_nlp_canonical_entries's own docstring). This
-script does that expensive scan ONCE, for every language the corpus has, and
-writes the result to local disk in the exact same {"id": ..., "text": ...}
-per-line JSONL shape common.data.oldi_data's own oldi_seed/flores_plus files
-use -- so afterward, common.data.corpora's bible_nlp loader is an ordinary,
-fast, local N-way intersect-by-id join, the same shape as those two sources,
-not a special live-streaming case any more.
+common.data.corpora's bible_nlp loader used to stream the live ~5.2GB
+corpus.json over HTTP on every training run -- correct but expensive (a
+missing/mistyped language code forces a full sequential scan before even
+raising an error). This script does that scan ONCE for every language and
+writes the result to local disk in the same {"id": ..., "text": ...} JSONL
+shape common.data.oldi_data's oldi_seed/flores_plus files use, so
+afterward the bible_nlp loader is an ordinary, fast, local N-way
+intersect-by-id join, not a special live-streaming case.
 
-Usage (run once, ideally on a machine/connection you don't mind tying up for
-a while -- this downloads the entire 5.2GB file in one pass):
+Usage (run once, ideally on a connection you don't mind tying up -- this
+downloads the entire 5.2GB file in one pass):
 
     python -m common.data.prepare_bible_nlp --output-dir data/bible_nlp
 
-Then --data-source bible_nlp (or common.data.corpora.stream_groups directly)
-reads from that directory. Re-run this script (safe to overwrite) if the
-upstream corpus is ever updated.
+Then --data-source bible_nlp reads from that directory. Safe to re-run if
+the upstream corpus updates.
 
 CANONICAL TRANSLATION PER LANGUAGE: some languages have multiple distinct
-Bible translations mixed together under one corpus.json key (confirmed live,
-e.g. English alone spans 43 distinct "file" values across ~1.09M verse-
-entries) -- this picks whichever single translation has the MOST verse
-entries as that language's canonical text, the same kind of one-canonical-
-choice judgment call common.data.oldi_data.LANG_SCRIPT already makes for
-scripts. metadata.json records what got picked and what didn't, per
-language, so this choice stays inspectable rather than silent:
-"file" (the chosen translation's own filename), "num_verses", "license",
-"copyright" (as recorded on the chosen translation's own entries -- NOT
-verified/normalized further, just passed through), "num_alternative_
-translations" (how many OTHER translations existed for this language but
-weren't used), and "alternative_files" (their filenames, for anyone who
-wants to go pick a different one deliberately).
+Bible translations mixed under one corpus.json key (e.g. English alone
+spans 43 "file" values across ~1.09M verse-entries) -- this picks whichever
+single translation has the MOST verse entries as canonical. metadata.json
+records what got picked and what didn't per language: "file", "num_verses",
+"license", "copyright" (passed through as-is), "num_alternative_
+translations", and "alternative_files" (for anyone who wants a different
+one).
 
-VERSE-KEY IDS: a bible_nlp entry's "verses" field is a list (usually one
-ref, sometimes a range, e.g. ["GEN 1:1", "GEN 1:2"]) -- joined here with
-";;" into a single string id (verse refs themselves never contain ";;",
-confirmed by inspection, so this is a safe, reversible-in-practice
-delimiter) to match oldi_seed/flores_plus's own flat string `id` convention.
-Two translations that segment the same underlying content into different
+VERSE-KEY IDS: a bible_nlp entry's "verses" field is a list (e.g. ["GEN
+1:1", "GEN 1:2"]) -- joined here with ";;" into a single string id (verse
+refs never contain ";;") to match oldi_seed/flores_plus's flat string `id`
+convention. Two translations that segment the same content into different
 verse RANGES won't share an id even if they cover the same verses -- a
-known, accepted limitation (same one common.data.corpora's own former
-live-streaming loader already documented), not something this script papers
-over.
+known, accepted limitation.
 """
 
 import argparse
@@ -66,16 +51,11 @@ def _verse_key_to_id(verses):
 
 
 def prepare_bible_nlp(output_dir, limit=None, request_timeout=1800):
-    """Streams corpus.json ONCE (no local download of the raw file -- same
-    hf_hub_url + requests.get(stream=True) + ijson.kvitems technique
-    common.data.corpora._bible_nlp_canonical_entries already used, just run
-    to completion instead of stopping early), writing one
-    "{output_dir}/{lang}.jsonl" per language (canonical translation only) and
-    a combined "{output_dir}/metadata.json" -- see module docstring for both
-    shapes. limit: process at most this many languages (for a quick test
-    run); None (the default) processes every language the corpus has, which
-    takes a while -- this is a genuinely large one-time download+scan, not a
-    quick command.
+    """Streams corpus.json ONCE (no local download of the raw file), writing
+    one "{output_dir}/{lang}.jsonl" per language (canonical translation
+    only) and a combined "{output_dir}/metadata.json" (see module
+    docstring). limit: process at most this many languages (quick test
+    run); None (default) processes every language, which takes a while.
 
     Returns the metadata dict (also written to disk).
     """

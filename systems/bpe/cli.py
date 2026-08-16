@@ -1,8 +1,6 @@
 """Command-line entry point for BPETrainer, mirroring superbpe.cli's shape:
-every BPEConfig field becomes a `--flag`, generated from the dataclass itself.
-Real-data loading is NOT reimplemented here -- common.data.cli_data.load_groups
-already does exactly what's needed, and is shared verbatim by every
-tokenizer's CLI in this repo.
+every BPEConfig field becomes a `--flag`. Real-data loading reuses
+common.data.cli_data.load_groups, shared by every tokenizer CLI here.
 """
 
 import argparse
@@ -19,9 +17,8 @@ from .train import BPEConfig, BPETrainer
 
 _DATA_SOURCE_HELP = (
     "'all' pools oldi_seed+flores_dev+smol (default); 'synthetic' is the placeholder corpus "
-    "(NOTE: synthetic isn't guaranteed valid UTF-8 -- see bpe/model.py's module docstring; "
-    "prefer a real --data-source for anything beyond a quick sanity check); a comma-separated "
-    "list (e.g. 'oldi_seed,ccmatrix') pools several sources for one run"
+    "(NOTE: not guaranteed valid UTF-8 -- see bpe/model.py; prefer a real --data-source beyond "
+    "a quick sanity check); a comma-separated list (e.g. 'oldi_seed,ccmatrix') pools several sources"
 )
 
 
@@ -33,7 +30,7 @@ def build_arg_parser():
     add_data_source_args(parser, data_source_help=_DATA_SOURCE_HELP)
     parser.add_argument("--seed", type=int, default=0, help="unused by BPE fitting itself "
         "(HF's BpeTrainer is deterministic given the corpus); kept so --data-source synthetic's "
-        "own corpus generation, which DOES take a seed, has one to forward.")
+        "corpus generation, which does take a seed, has one to forward.")
     add_vocab_output_args(parser, "bpe_")
     return parser
 

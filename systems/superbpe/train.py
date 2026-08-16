@@ -1,24 +1,17 @@
-"""Fitting loop for SuperBPEModel -- deliberately NOT a gradient-descent
-trainer: unlike every other package in this repo, SuperBPE has no forward
-pass, no optimizer, no per-step loss. "Training" here means fitting the
-two-stage BPE merge table (superbpe.model.fit_superbpe) once over the whole
-corpus, in a single call. This module's job is to hold the same
+"""Fitting loop for SuperBPEModel -- NOT a gradient-descent trainer: SuperBPE
+has no forward pass, optimizer, or per-step loss. "Training" means fitting
+the two-stage BPE merge table (superbpe.model.fit_superbpe) once over the
+whole corpus in a single call. This module just holds the same
 Config/Trainer/.train() shape every other tokenizer's cli.py/jobs script
-expects -- so SuperBPE can be a drop-in sixth entry in train.py's dispatcher,
-jobs/, etc. -- around that fundamentally different fitting procedure.
+expects, around that different fitting procedure.
 
-Consequences of that difference, all deliberate and documented rather than
-faked to look like the neural baselines:
-  - no learning_rate/optimizer/num_train_epochs/max_steps/per_device_train_
-    batch_size fields -- none of them apply to a single-shot corpus-statistics
-    fit.
-  - no PERIODIC epoch-boundary eval: there is exactly one "boundary" (the end
-    of fitting), so eval_groups (if given) get scored exactly once, right
-    after fit_superbpe returns -- not on a recurring schedule the way every
-    step-based trainer's own eval_induce_fn_by_lang check is.
-  - no seed field: given the same train_groups, fit_superbpe is fully
-    deterministic (tie-breaking is a fixed rule -- see
-    superbpe.model._fit_merges), so there is nothing a seed would vary.
+Consequences, all deliberate:
+  - no learning_rate/optimizer/num_train_epochs/max_steps/batch_size fields
+    -- none apply to a single-shot corpus-statistics fit.
+  - no periodic epoch-boundary eval: eval_groups (if given) get scored
+    exactly once, right after fit_superbpe returns.
+  - no seed field: fit_superbpe is fully deterministic given the same
+    train_groups (fixed tiebreak rule, see superbpe.model._fit_merges).
 """
 
 import dataclasses
@@ -47,29 +40,22 @@ class SuperBPEConfig(BaseTokenizerConfig):
     class's own docstring."""
 
     wandb_project: str = "superbpe"
-    transition_fraction: float = 0.8  # see superbpe.model.fit_superbpe's own
-    # docstring -- JUDGMENT CALL, not a value taken from the paper's single
-    # reported best configuration (the paper sweeps this, doesn't fix one).
-    max_eval_samples: int = 0  # 0 scores every loaded eval group (see
-    # common.eval.cross_tokenizer.sample_eval_groups) -- unlike the neural trainers'
-    # periodic in-training checks (small by default since those repeat every
-    # epoch), this fires exactly ONCE, so there is no repeated-cost reason to
-    # subsample by default; still available as a knob if a very broad
-    # --langs all eval set makes even a single pass slow.
-    verbose: bool = True  # print merge-fitting progress (see
-    # superbpe.model.fit_superbpe's log_every) -- real --vocab-size runs can
-    # need tens of thousands of merges, and this is the only progress signal
-    # available at all (no per-step loss/accuracy to watch, unlike the neural
-    # baselines).
+    # JUDGMENT CALL (see fit_superbpe docstring), not the paper's reported best config.
+    transition_fraction: float = 0.8
+    # 0 scores every loaded eval group (sample_eval_groups) -- fires exactly ONCE
+    # (unlike neural trainers' periodic checks), so no default reason to subsample;
+    # still a knob for a very broad --langs all eval set.
+    max_eval_samples: int = 0
+    # print merge-fitting progress (fit_superbpe's log_every) -- the only progress
+    # signal available at all, since there's no per-step loss/accuracy here.
+    verbose: bool = True
 
 
 class SuperBPETrainer(BaseTokenizerTrainer):
     """Construct with args + train_groups (list of dicts {lang: text}, same
-    shape every other tokenizer's trainer takes), call .train(), then read
-    .model / .token_freq / .vocab off the instance (train() also returns them
-    as a tuple, matching every other trainer's convention). No extra __init__
-    needed beyond BaseTokenizerTrainer's own -- SuperBPE needs no device
-    resolution or other per-system setup."""
+    shape as every other tokenizer's trainer), call .train(), then read
+    .model / .token_freq / .vocab off the instance (also returned as a
+    tuple). No extra __init__ needed -- SuperBPE needs no device setup."""
 
     def train(self):
         cfg = self.args
@@ -103,14 +89,10 @@ class SuperBPETrainer(BaseTokenizerTrainer):
             f"{len(model.merges) - model.num_stage1_merges} stage2 superword)"
         )
 
-        # Harvest realized token frequencies by re-running the just-fit model
-        # over its own training corpus -- same "count whatever the model
-        # actually produced, apply the fixed vocab budget only at the end"
-        # philosophy as every other trainer in this repo (see common.vocab's
-        # module docstring), even though BPE's own merge table already IS a
-        # frequency-driven vocabulary; this keeps the harvesting step
-        # (and therefore the final vocab_with_stats/save_vocab_json output
-        # shape) identical across all six tokenizers for a fair comparison.
+        # Harvest realized token frequencies by re-running the fit model over its own
+        # training corpus -- same "count what the model produced, apply the vocab
+        # budget at the end" philosophy as every other trainer, keeping output shape
+        # identical across tokenizers for fair comparison.
         token_freq = defaultdict(Counter)
         for group in self.train_groups:
             for lang, text in group.items():
@@ -163,10 +145,9 @@ class SuperBPETrainer(BaseTokenizerTrainer):
 
 
 def _report_smoke_test_metrics(model, token_freq, final_vocab):
-    """Feed the smoke test's induced vocabulary into common.eval.metrics UNMODIFIED,
-    same as every other tokenizer's own smoke test -- confirms SuperBPE's
-    output is a drop-in match for the rest of this project's evaluation
-    pipeline."""
+    """Feed the smoke test's induced vocabulary into common.eval.metrics
+    unmodified, same as every other tokenizer's smoke test -- confirms
+    SuperBPE's output is a drop-in match for the eval pipeline."""
     avg_span_len = sum(len(s) * n for c in token_freq.values() for s, n in c.items()) / max(
         1, sum(sum(c.values()) for c in token_freq.values())
     )
@@ -192,30 +173,21 @@ def _report_smoke_test_metrics(model, token_freq, final_vocab):
 
 
 def run_smoke_test():
-    """Mirrors every other tokenizer's run_smoke_test role: a small trial run
-    on synthetic placeholder data, gated by two explicit assertions:
-    (1) no crash getting here at all -- fitting + harvesting ran end to end
-    over a real multilingual corpus; (2) merges were actually learned (the
-    vocabulary grew past the 256-byte base alphabet) -- there is no
-    loss-decreased check the way the gradient-based trainers have, since
-    there is no loss here at all.
+    """Small trial run on synthetic placeholder data, gated by two
+    assertions: (1) no crash end to end, (2) merges were actually learned
+    (vocab grew past the 256-byte base alphabet) -- no loss-decreased check
+    since BPE has no loss.
 
-    Expect noticeably WORSE compression numbers here than the neural
-    baselines' own smoke tests report on this exact same corpus (confirmed:
-    ~1.0-2.1 here vs. ~3.9 for e.g. FANTA) -- not a bug. common.data.synthetic's
-    generator gives each SENTENCE its own freshly-randomized 3-byte repeated
-    chunk (see make_synthetic_parallel_groups/_gen_sentence), so repetition
-    is per-sequence, not corpus-wide. A neural predictor can adapt to
-    whatever a given sequence happens to repeat; classical BPE only ever
-    learns a handful of FIXED, globally-frequent merge rules from counting
-    across the whole corpus, so it has essentially nothing to exploit here.
-    Real natural language has strong global frequency structure (common
-    words/morphemes recur across many sentences), which is exactly BPE's
-    intended regime and famous strength -- this smoke test's synthetic data
-    just isn't built to showcase that. Correctness (priority order,
-    lossless roundtrip, genuine cross-word "superword" merges) is verified
-    separately, against real repeated-word text, not this corpus -- see the
-    module's own development notes.
+    Expect noticeably WORSE compression here than neural baselines' smoke
+    tests on the same corpus (~1.0-2.1 vs. ~3.9 for FANTA) -- not a bug.
+    common.data.synthetic gives each sentence its own randomized repeated
+    chunk, so repetition is per-sequence, not corpus-wide; a neural
+    predictor can adapt per-sequence, but classical BPE only learns fixed,
+    globally-frequent merges from corpus-wide counting, so it has little to
+    exploit here. Real language has strong global frequency structure
+    (BPE's actual strength) -- this synthetic data just doesn't show it.
+    Correctness (priority order, lossless roundtrip, real superword merges)
+    is verified separately against real repeated-word text.
     """
     args = SuperBPEConfig(vocab_size=320, verbose=False)
     train_groups = make_synthetic_parallel_groups(200, langs=list(LANG_PROFILES), seed=0)
