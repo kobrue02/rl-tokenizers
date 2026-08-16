@@ -244,38 +244,77 @@ def gen_spread_leaderboard_tex(
     rows, families, out_dir, data_prefix="",
     xlabel="Token-parity spread (max/min across all languages, anchor-invariant)",
     fig_name="spread_leaderboard",
+    row_height_cm=0.85,
 ):
-    yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in rows)
+    """Two side-by-side panels (left = better half of the ranking, right = worse
+    half), not one long column -- past ~35-40 tokenizers a single-column bar chart
+    at a legible row height no longer fits one page. Splitting preserves the exact
+    same per-row height/font (nothing shrinks), so legibility never degrades as
+    more tokenizers get added; it only ever gains a second column.
+
+    Both panels plot from the SAME per-family .dat files (unchanged, still keyed by
+    each row's global rank `idx`) -- pgfplots clips points outside an axis's own
+    ymin/ymax, so bounding each panel to its own half of the idx range is enough;
+    no separate per-half data files needed. Only the right panel carries a legend
+    (`forget plot` on the left avoids a duplicate).
+
+    row_height_cm=0.85 is an empirically confirmed floor (real tectonic render,
+    not eyeballed), not a guess: below ~0.8, \\scriptsize yticklabels start
+    overlapping the bar/axis area for the last few rows in a panel -- confirmed
+    broken at 0.62 (this project's own earlier single-column height formula,
+    0.65cm/row, sat in the same broken range) and clean at 0.85."""
     n = len(rows)
+    half = math.ceil(n / 2)
+    columns = [rows[:half], rows[half:]]
+    col_height = max(8.0, half * row_height_cm)
+
     preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
     for fam in families:
         r_, g_, b_ = _FAMILY_RGB[fam]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
-    body = [
-        r"\begin{tikzpicture}",
-        r"\begin{axis}[",
-        r"    xbar,",
-        r"    width=10cm, height=%.1fcm," % max(10.0, n * 0.65),
-        r"    xlabel={%s}," % xlabel,
-        r"    xmin=0,",
-        r"    ytick={%s}," % ",".join(str(r["idx"]) for r in rows),
-        r"    yticklabels={%s}," % yticklabels,
-        r"    yticklabel style={font=\scriptsize},",
-        r"    y dir=reverse,",
-        r"    ymin=-0.7, ymax=%d," % (n - 0.3),
-        r"    bar width=5pt,",
-        r"    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none, fill=none},",
-        r"    axis y line*=left, axis x line*=bottom,",
-        r"]",
-    ]
-    for fam in families:
-        col = _FAMILY_COLORS[fam]
-        body.append(
-            r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=spread, y=idx] {%sbar_%s.dat};"
-            % (col, col, data_prefix, fam_key(fam))
-        )
-        body.append(r"\addlegendentry{%s}" % fam)
-    body += [r"\end{axis}", r"\end{tikzpicture}"]
+
+    body = []
+    for ci, col_rows in enumerate(columns):
+        if not col_rows:
+            continue
+        is_last = ci == len(columns) - 1
+        idx_min = min(r["idx"] for r in col_rows)
+        idx_max = max(r["idx"] for r in col_rows)
+        yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in col_rows)
+        body.append(r"\begin{minipage}[t]{0.48\linewidth}")
+        body.append(r"\centering")
+        body += [
+            r"\begin{tikzpicture}",
+            r"\begin{axis}[",
+            r"    xbar,",
+            r"    width=\linewidth, height=%.1fcm," % col_height,
+            r"    xlabel={%s}," % xlabel,
+            r"    x label style={font=\scriptsize},",
+            r"    xmin=0,",
+            r"    ytick={%s}," % ",".join(str(r["idx"]) for r in col_rows),
+            r"    yticklabels={%s}," % yticklabels,
+            r"    yticklabel style={font=\scriptsize},",
+            r"    y dir=reverse,",
+            r"    ymin=%g, ymax=%g," % (idx_min - 0.7, idx_max + 0.3),
+            r"    bar width=5pt,",
+            # Below the axis, not to its right: with two panels already filling the
+            # line width, a right-side legend (the single-column figure's old spot)
+            # would spill past the page margin -- there's no room left of it to give.
+            r"    legend style={at={(0.5,-0.11)}, anchor=north, legend columns=2, font=\scriptsize, draw=none, fill=none},",
+            r"    axis y line*=left, axis x line*=bottom,",
+            r"]",
+        ]
+        for fam in families:
+            col = _FAMILY_COLORS[fam]
+            body.append(
+                r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt%s] table [x=spread, y=idx] {%sbar_%s.dat};"
+                % (col, col, "" if is_last else ", forget plot", data_prefix, fam_key(fam))
+            )
+            if is_last:
+                body.append(r"\addlegendentry{%s}" % fam)
+        body += [r"\end{axis}", r"\end{tikzpicture}", r"\end{minipage}"]
+        if not is_last:
+            body.append(r"\hfill")
     full_tex, _ = _write_standalone_and_body(fig_name, preamble, body, out_dir)
     return full_tex
 
@@ -376,12 +415,18 @@ def _estimate_label_width_cm(s, pt_per_char=3.6):
     return len(s) * pt_per_char * pt_to_cm
 
 
-def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42, gap=0.7):
+def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, cell_cm=0.42, gap=0.7, max_grid_height_cm=19.0):
     """Models go down the rows (family-grouped, same ordering as the leaderboard),
     languages go across the columns (worst first). The opposite orientation (33 models
     across) rendered ~18cm wide -- wider than a normal text block -- forcing an ugly
     \\resizebox shrink or a landscape page; putting the wide axis on the tall dimension
-    of a portrait page fits without shrinking."""
+    of a portrait page fits without shrinking.
+
+    cell_cm shrinks (never grows) below its default once enough rows/family-gaps would
+    push the grid past max_grid_height_cm -- a future-proofing cap so adding more
+    tokenizers degrades gracefully into slightly smaller cells instead of silently
+    overflowing the page. A no-op at the row counts this project has used so far
+    (default cell_cm already fits comfortably under the cap)."""
     worst_by_lang = {}
     for m in models.values():
         for lang, v in m["token_parity"].items():
@@ -390,6 +435,8 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     n_cols = len(top_langs)
 
     ordered, row_pos, blocks, total_height = _grouped_positions(rows, families, gap=gap)
+    if total_height > 0:
+        cell_cm = min(cell_cm, max_grid_height_cm / total_height)
     # .get(l), not [l]: top_langs comes from the UNION of every model's token_parity
     # keys, so a checkpointed in-progress eval may lack some of them -- missing pairs
     # just get no cell below, same skip-don't-crash convention used throughout.
@@ -953,7 +1000,7 @@ def generate(results_path, out_dir, data_prefix=None):
     )
     tex5, _unresolved_cost_langs = gen_api_cost_boxplot_tex(models, api_cost_dir)
 
-    _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
+    _assert_well_formed(tex1, "fig_spread_leaderboard.tex", expected_tikzpictures=2)
     _assert_well_formed(tex2, "fig_landscape.tex")
     _assert_well_formed(tex3, "fig_heatmap.tex")
     _assert_well_formed(tex4, "fig_resource_level.tex")
