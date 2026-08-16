@@ -1127,7 +1127,7 @@ def generate(results_path, out_dir, data_prefix=None):
     tex4, level_counts, unresolved_langs = gen_resource_level_tex(
         rows, models, families, resource_level_dir, data_prefix=resource_level_prefix
     )
-    tex5, unresolved_cost_langs = gen_api_cost_boxplot_tex(models, api_cost_dir)
+    tex5, _unresolved_cost_langs = gen_api_cost_boxplot_tex(models, api_cost_dir)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex")
     _assert_well_formed(tex2, "fig_landscape.tex")

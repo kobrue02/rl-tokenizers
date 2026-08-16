@@ -156,7 +156,7 @@ def _spans_via_offsets(tokenizer, text):
     raw = text.encode("utf-8")
     spans = []
     covered_until = 0
-    for tok, (start, end) in zip(tokens, enc["offset_mapping"]):
+    for tok, (_start, end) in zip(tokens, enc["offset_mapping"]):
         m = _BYTE_FALLBACK_RE.match(tok)
         if m:
             spans.append(bytes([int(m.group(1), 16)]))

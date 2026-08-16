@@ -667,7 +667,7 @@ class GRPOTrainer(BaseTokenizerTrainer):
                         returns_by_lang[lang] = discounted_returns(rewards, cfg.gamma)
 
                     advantages = group_relative_advantage(returns_by_lang)
-                    for lang, (byte_seq, records) in group_records.items():
+                    for lang, (_byte_seq, records) in group_records.items():
                         adv = advantages[lang]
                         for t, rec in enumerate(records):
                             step_lang_boundary_logits[lang].append(rec.boundary_logit)

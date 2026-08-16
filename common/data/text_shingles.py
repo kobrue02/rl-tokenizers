@@ -50,9 +50,3 @@ def shingle_hash(shingle_text):
     SAME text must hash identically for this to mean anything as a stored
     index, not just within one process's lifetime."""
     return int.from_bytes(hashlib.blake2b(shingle_text.encode("utf-8"), digest_size=8).digest(), "big")
-
-
-def shingle_hashes(text, n=DEFAULT_SHINGLE_SIZE):
-    """set[int] of shingle_hash(...) over every shingle in `text` -- the
-    memory-cheap counterpart to shingles() above."""
-    return {shingle_hash(s) for s in shingles(text, n)}

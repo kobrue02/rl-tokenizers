@@ -25,7 +25,6 @@ command-line string (e.g. `vocab_size: 50000` as a YAML int, not a quoted
 string -- though a quoted numeral still coerces correctly, see below).
 """
 
-import argparse
 import sys
 
 import yaml
