@@ -466,7 +466,20 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     n_cols = len(top_langs)
 
     ordered, row_pos, blocks, total_height = _grouped_positions(rows, families, gap=gap)
-    all_vals = [models[r["name"]]["token_parity"][l] for r in ordered for l in top_langs]
+    # .get(l) rather than [l]: top_langs is chosen from the UNION of every
+    # model's own token_parity keys (see worst_by_lang above), so a language
+    # that's one model's worst outlier isn't guaranteed to be present in
+    # every OTHER model's own token_parity dict -- confirmed live for a
+    # still-in-progress checkpointed eval (e.g. systems/claude_tokenizer's
+    # own multi-day run), whose dict only has whichever languages have
+    # actually been scored so far, not the full BOUQuET set. A model/lang
+    # pair with no data simply contributes nothing here and gets no cell
+    # below, same "missing data -> skip, don't crash" convention as every
+    # other figure in this module (e.g. gen_indigenous_panel_parity_bars_tex).
+    all_vals = [
+        v for r in ordered for l in top_langs
+        for v in [models[r["name"]]["token_parity"].get(l)] if v is not None
+    ]
     vmax = max(all_vals)
 
     def bucket_of(v):
@@ -487,11 +500,16 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
         r_, g_, b_ = _FAMILY_RGB.get(fam, _FAMILY_RGB["Other"])
         body.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
 
-    # Cells.
+    # Cells. A model with no data for this language (see all_vals above for
+    # why that happens) simply gets no filled cell here -- left blank
+    # (the tikzpicture's own background) rather than crashing or
+    # fabricating a value.
     for r in ordered:
         y = y_of(row_pos[r["name"]])
         for xi, lang in enumerate(top_langs):
-            v = models[r["name"]]["token_parity"][lang]
+            v = models[r["name"]]["token_parity"].get(lang)
+            if v is None:
+                continue
             b = bucket_of(v)
             body.append(r"\fill[heat%d] (%d,%.2f) rectangle ++(1,1);" % (b, xi, y))
 
