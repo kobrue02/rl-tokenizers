@@ -30,6 +30,8 @@ simple, obviously-correct implementation over a heap-optimized one. Slower
 per-operation, not a different algorithm -- an accepted tradeoff.
 """
 
+import json
+import os
 import re
 from collections import Counter, defaultdict
 
@@ -100,7 +102,33 @@ def bpe_encode(seq, merge_info):
         seq = _apply_one_merge(seq, best_pair, new_id)
 
 
-def _fit_merges(sequences, weights, num_merges, id_to_bytes, next_id, log_prefix=None, log_every=500):
+def _load_merge_checkpoint(path):
+    """Returns (sequences, merges) if `path` exists, else (None, []). Only these
+    two are persisted -- id_to_bytes is fully reconstructible by replaying `merges`
+    from the base 256 bytes (see _fit_merges), and pair_counts/pair_seqs are cheap
+    to recompute from sequences+weights -- so nothing else needs to survive a crash."""
+    if not path or not os.path.exists(path):
+        return None, []
+    with open(path) as f:
+        data = json.load(f)
+    merges = [(tuple(pair), new_id) for pair, new_id in data["merges"]]
+    return data["sequences"], merges
+
+
+def _save_merge_checkpoint(path, sequences, merges):
+    """Atomic write (temp file + os.replace, same convention as
+    pretraining.data_prep's own checkpoint) so a crash mid-write never leaves a
+    truncated/corrupt checkpoint that a resume would load and silently misfit from."""
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump({"sequences": sequences, "merges": [[list(pair), new_id] for pair, new_id in merges]}, f)
+    os.replace(tmp_path, path)
+
+
+def _fit_merges(
+    sequences, weights, num_merges, id_to_bytes, next_id, log_prefix=None, log_every=500,
+    checkpoint_path=None, checkpoint_every=1000,
+):
     """Shared incremental BPE-fitting loop, used by both Stage 1 (deduped
     unique pretokens) and Stage 2 (deduped unique sentences) -- see
     fit_superbpe. `sequences`: list[list[int]], MUTATED IN PLACE. `weights`:
@@ -115,12 +143,46 @@ def _fit_merges(sequences, weights, num_merges, id_to_bytes, next_id, log_prefix
     Each step applies only ONE pair, so priority order (unlike bpe_encode)
     is a non-issue here.
 
+    RESUME (checkpoint_path, optional): if it exists at startup, `sequences`
+    (the caller's fresh word/sentence sequences) is REPLACED with the
+    checkpointed ones and merges-so-far are replayed into id_to_bytes before
+    the loop starts, so a resumed run is byte-for-byte identical to an
+    uninterrupted one -- same deterministic-fit guarantee either way. Written
+    every `checkpoint_every` merges (atomic, see _save_merge_checkpoint) and
+    removed once this stage finishes, so a stale checkpoint never survives
+    past the run it belongs to.
+
     Returns list[((int,int), int)] merges in learned order (== priority
     order at encode time -- see SuperBPEModel).
     """
 
     def seq_pairs(seq):
         return list(zip(seq, seq[1:]))
+
+    merges = []
+    resumed_sequences, resumed_merges = _load_merge_checkpoint(checkpoint_path)
+    if resumed_sequences is not None:
+        # A checkpoint from a DIFFERENT corpus/config (e.g. --checkpoint-dir reused
+        # across two experiments) would silently corrupt the fit if loaded blind --
+        # sequences/weights are parallel lists built fresh from the current corpus
+        # every call, so a real resume must have the exact same length and merges
+        # can never exceed what this call was asked for.
+        if len(resumed_sequences) != len(weights) or len(resumed_merges) > num_merges:
+            raise ValueError(
+                f"{checkpoint_path}: checkpoint doesn't match this run "
+                f"({len(resumed_sequences)} sequences / {len(resumed_merges)} merges saved, "
+                f"expected {len(weights)} sequences / at most {num_merges} merges) -- "
+                "looks like it belongs to a different corpus or --vocab-size; delete it "
+                "if you're intentionally starting a different experiment."
+            )
+        sequences[:] = resumed_sequences
+        merges = resumed_merges
+        for pair, new_id in merges:
+            a, b = pair
+            id_to_bytes[new_id] = id_to_bytes[a] + id_to_bytes[b]
+        next_id += len(merges)
+        if log_prefix:
+            print(f"[superbpe] {log_prefix}: resuming from checkpoint at merge {len(merges)}/{num_merges}")
 
     pair_counts = Counter()
     pair_seqs = defaultdict(set)
@@ -129,8 +191,7 @@ def _fit_merges(sequences, weights, num_merges, id_to_bytes, next_id, log_prefix
             pair_counts[pair] += w
             pair_seqs[pair].add(idx)
 
-    merges = []
-    for step in range(num_merges):
+    for step in range(len(merges), num_merges):
         if log_prefix and log_every and step % log_every == 0:
             print(f"[superbpe] {log_prefix}: merge {step}/{num_merges}")
         # Drop pairs whose count decayed to <= 0 (fully consumed) before
@@ -162,10 +223,25 @@ def _fit_merges(sequences, weights, num_merges, id_to_bytes, next_id, log_prefix
                 pair_counts[p] += w
                 pair_seqs[p].add(idx)
 
+        # Saved AFTER sequences reflect this merge (the `affected` loop above) --
+        # otherwise a resume would load a `merges` list one step ahead of what
+        # `sequences` actually has applied, corrupting every merge after that.
+        if checkpoint_path and checkpoint_every and len(merges) % checkpoint_every == 0:
+            _save_merge_checkpoint(checkpoint_path, sequences, merges)
+
+    # This stage is done (loop completed or corpus exhausted) -- a finished stage
+    # is no longer resumable, so its checkpoint would only be stale from here on
+    # (same "remove on success" convention as pretraining.data_prep's own checkpoint).
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
+
     return merges
 
 
-def fit_superbpe(sentences, vocab_size, transition_fraction=0.8, verbose=False):
+def fit_superbpe(
+    sentences, vocab_size, transition_fraction=0.8, verbose=False,
+    checkpoint_dir=None, checkpoint_every=1000,
+):
     """Fits a SuperBPEModel from a flat list of raw sentences (str or bytes,
     languages mixed -- BPE has no notion of language).
 
@@ -185,12 +261,24 @@ def fit_superbpe(sentences, vocab_size, transition_fraction=0.8, verbose=False):
     fixing one value; 0.8 is a plausible middle-of-the-literature choice,
     not a reported best configuration.
 
+    checkpoint_dir (optional): each stage gets its own checkpoint file
+    (stage1_checkpoint.json/stage2_checkpoint.json) via _fit_merges -- if either
+    stage was interrupted, re-calling this function with the SAME checkpoint_dir
+    resumes it exactly (stage 1's setup, or stage 2's re-encoding of sentences
+    through stage 1's merges, always reruns regardless -- cheap relative to the
+    merge-fitting loop itself, and its own result gets discarded in favor of the
+    checkpointed `sequences` when a stage resumes anyway).
+
     Returns a SuperBPEModel.
     """
     id_to_bytes = {i: bytes([i]) for i in range(256)}
     total_merges = max(0, vocab_size - 256)
     stage1_merges = round(transition_fraction * total_merges)
     stage2_merges = total_merges - stage1_merges
+    stage1_ckpt = os.path.join(checkpoint_dir, "stage1_checkpoint.json") if checkpoint_dir else None
+    stage2_ckpt = os.path.join(checkpoint_dir, "stage2_checkpoint.json") if checkpoint_dir else None
+    if checkpoint_dir:
+        os.makedirs(checkpoint_dir, exist_ok=True)
 
     word_counts = Counter()
     for sent in sentences:
@@ -202,6 +290,7 @@ def fit_superbpe(sentences, vocab_size, transition_fraction=0.8, verbose=False):
     stage1_merges_list = _fit_merges(
         word_seqs, word_weights, stage1_merges, id_to_bytes, next_id=256,
         log_prefix="stage1 (within-word)" if verbose else None,
+        checkpoint_path=stage1_ckpt, checkpoint_every=checkpoint_every,
     )
     stage1_merge_info = {
         pair: (rank, new_id) for rank, (pair, new_id) in enumerate(stage1_merges_list)
@@ -221,6 +310,7 @@ def fit_superbpe(sentences, vocab_size, transition_fraction=0.8, verbose=False):
     stage2_merges_list = _fit_merges(
         sentence_seqs, sentence_weights, stage2_merges, id_to_bytes, next_id=next_id,
         log_prefix="stage2 (superword)" if verbose else None,
+        checkpoint_path=stage2_ckpt, checkpoint_every=checkpoint_every,
     )
 
     return SuperBPEModel(

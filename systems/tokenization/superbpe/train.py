@@ -49,6 +49,12 @@ class SuperBPEConfig(BaseTokenizerConfig):
     # print merge-fitting progress (fit_superbpe's log_every) -- the only progress
     # signal available at all, since there's no per-step loss/accuracy here.
     verbose: bool = True
+    # "" disables resumability. Each stage's merge-fitting loop (fit_superbpe/
+    # _fit_merges) periodically checkpoints sequences+merges-so-far here and
+    # resumes from it automatically on the next run with the SAME path -- added
+    # after a real ~8h SLURM timeout lost an entire from-scratch stage2 fit with
+    # no way to continue it.
+    checkpoint_dir: str = ""
 
 
 class SuperBPETrainer(BaseTokenizerTrainer):
@@ -80,7 +86,8 @@ class SuperBPETrainer(BaseTokenizerTrainer):
             )
 
         model = fit_superbpe(
-            sentences, cfg.vocab_size, cfg.transition_fraction, verbose=cfg.verbose
+            sentences, cfg.vocab_size, cfg.transition_fraction, verbose=cfg.verbose,
+            checkpoint_dir=cfg.checkpoint_dir or None,
         )
         self.model = model
         print(

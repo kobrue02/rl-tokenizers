@@ -23,8 +23,22 @@
 # few hundred) finishes in seconds, but a real --vocab-size 50000 run over the
 # full pooled corpus needs tens of thousands of merges and will take
 # substantially longer wall-clock than the neural baselines' own GPU training.
-# Not benchmarked at that exact scale yet -- if 8 hours isn't enough, that's a
-# real signal to profile _fit_merges rather than just widening this further.
+# Confirmed live: an 8h run got through all of stage1 but died partway into
+# stage2 (whole-sentence sequences cost more per merge than stage1's
+# pretoken-level ones) -- --checkpoint-dir below now makes that resumable
+# instead of a total loss, but --time may still need widening for a full
+# --vocab-size 50000 run; profile _fit_merges if even repeated resumes don't
+# converge.
+#
+# --checkpoint-dir is a FIXED path (not tagged by SLURM_JOB_ID, unlike
+# CHECKPOINT_PATH below) so resubmitting this exact job after a timeout finds
+# the same in-progress fit and continues it -- see fit_superbpe/_fit_merges's
+# own docstrings. Resuming reproduces the EXACT same result as an uninterrupted
+# run (fully deterministic fit, no seed). Only clear this directory if you're
+# intentionally starting a genuinely different experiment (different corpus/
+# --vocab-size) -- reusing it across two different configs raises a loud
+# ValueError rather than silently corrupting the fit, but a stale directory
+# from an abandoned run still needs a manual `rm -rf` first.
 #
 # Usage:
 #   sbatch jobs/train_superbpe.sh --data-source all --langs all --vocab-size 50000
@@ -63,14 +77,18 @@ cd $PROJECT_ROOT
 uv sync
 mkdir -p logs checkpoints vocab_out
 
-# 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
+# 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh.
+# FIT_CHECKPOINT_DIR is deliberately NOT job-id-tagged -- see the --checkpoint-dir
+# comment above for why it needs to stay fixed across resubmissions.
 CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/superbpe_${SLURM_JOB_ID}.pt"
+FIT_CHECKPOINT_DIR="$PROJECT_ROOT/checkpoints/superbpe_fit_checkpoint"
 echo "Starting SuperBPE fitting with args: $@"
 python3 train.py superbpe \
     --use-wandb \
     --wandb-project superbpe \
     --run-name "slurm-${SLURM_JOB_ID}" \
     --output-dir "$CHECKPOINT_PATH" \
+    --checkpoint-dir "$FIT_CHECKPOINT_DIR" \
     --vocab-out "$PROJECT_ROOT/vocab_out/superbpe_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/superbpe_vocab_stats_${SLURM_JOB_ID}.json" \
     "$@"
