@@ -72,9 +72,29 @@
 # enough that losing every other repo's result over one bad one would waste
 # real cluster time; failures land under a "_failed" key in the output JSON
 # instead.
-hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony"
+#
+# 11 more added from a multilingual-tokenizer leaderboard the user supplied
+# (name + fertility/compression/vocab-size/hash export) -- each verified live
+# via HfApi().model_info (real, ungated, has a tokenizer file) AND a real
+# HFFrontierTokenizer.load() + canary round-trip before being added here,
+# same discipline as every repo above. None need --trust-remote-code (the
+# two Model2Vec-distilled Jarbas repos load fine without it too). Despite 5
+# of the 11 rounding to near-identical fertility/compression at 3 decimals
+# on that leaderboard, their vocab sizes and content hashes all differ (e.g.
+# Jarbas/m2v-256-multilingual-e5-small: 249999 tokens vs
+# bluexmas/mbart50_ko_vi: 250054, distinct hashes for every one of the 11) --
+# genuinely distinct tokenizer files, not duplicates, so none were dropped:
+# Jarbas/m2v-256-multilingual-e5-small, Jarbas/m2v-256-bge-reranker-v2-m3,
+# Yoonyoul/fine-tuned-e5-small-drugproduct, bluexmas/mbart50_ko_vi,
+# antebe/token_punct_dilute, pkupie/mc2-xlmr-large,
+# slone/mbart-large-51-myv-mul-v1, stvhuang/xlm-roberta-base-vocabexpand4822,
+# yihongLiu/xlm-r-with-transliteration-{max,average,min} (three separate
+# repos -- same base vocab, different transliteration-fallback strategy per
+# the repo's own naming, confirmed via distinct hashes rather than assumed
+# to be copies).
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony,Jarbas/m2v-256-multilingual-e5-small,Jarbas/m2v-256-bge-reranker-v2-m3,Yoonyoul/fine-tuned-e5-small-drugproduct,bluexmas/mbart50_ko_vi,antebe/token_punct_dilute,pkupie/mc2-xlmr-large,slone/mbart-large-51-myv-mul-v1,stvhuang/xlm-roberta-base-vocabexpand4822,yihongLiu/xlm-r-with-transliteration-max,yihongLiu/xlm-r-with-transliteration-average,yihongLiu/xlm-r-with-transliteration-min"
 trust_remote_code: true
 eval_data_source: bouquet_test
 output: results/hf_frontier_comparison.json
 use_wandb: true
-run_name: hf_frontier_v4_33models
+run_name: hf_frontier_v5_44models
