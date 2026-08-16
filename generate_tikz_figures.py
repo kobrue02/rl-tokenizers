@@ -85,6 +85,7 @@ _FAMILY_COLORS = {
     "Meta/Llama": "metaCol",
     "Encoder-only": "encCol",
     "Anthropic": "anthropicCol",
+    "This work": "oursCol",
     "Other": "otherCol",
 }
 _FAMILY_RGB = {
@@ -93,8 +94,20 @@ _FAMILY_RGB = {
     "Meta/Llama": (74, 111, 227),
     "Encoder-only": (140, 140, 140),
     "Anthropic": (180, 60, 60),
+    # Distinct green -- every other family is a teal/orange/blue/gray/red/
+    # purple, so this project's own 7 trained tokenizers (see
+    # _REPO_TOKENIZER_NAMES below) stand out rather than falling into the
+    # generic "Other" bucket alongside genuinely unrelated external models.
+    "This work": (34, 139, 74),
     "Other": (163, 79, 168),
 }
+# Exact system_label strings evaluate.py's own TOKENIZERS dict uses for this
+# repo's 7 trained tokenizers -- combine_eval_results.py's entries are keyed
+# by --result-key, which defaults to exactly this string (see
+# common.eval.cross_tokenizer.build_eval_arg_parser's own docstring), so an
+# exact-match set is correct here, not a name-prefix heuristic like the
+# other families below.
+_REPO_TOKENIZER_NAMES = {"fairtok", "magnet", "flexitokens", "manta", "fanta", "superbpe", "bpe"}
 _ENCODER_ONLY_NAMES = {
     "bert-base-cased", "bert-base-multilingual-cased", "distilbert-base-uncased",
     "roberta-base", "xlm-roberta-base", "microsoft/deberta-base",
@@ -147,6 +160,8 @@ def cost_color(t):
 
 
 def family_of(name):
+    if name in _REPO_TOKENIZER_NAMES:
+        return "This work"
     lname = name.lower()
     if name.startswith("tiktoken:") or name.startswith("openai"):
         return "OpenAI/tiktoken"

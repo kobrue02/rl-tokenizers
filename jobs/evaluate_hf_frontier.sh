@@ -75,6 +75,12 @@
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
+# WORK_ROOT: larger-quota Lustre workspace for cache/derived data -- see
+# jobs/prep_pretraining_data.sh's own WORK_ROOT comment for why. Expires
+# unless renewed (`ws_extend rl-tokenizers <n>`) -- only cache/derived
+# data lives here, never code.
+WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers
+
 # 2. Modules
 module load devel/python/3.13.3-llvm-19.1
 
@@ -83,7 +89,7 @@ if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.cache/huggingface/token" ]; then
     export HF_TOKEN=$(cat "$HOME/.cache/huggingface/token")
 fi
 : "${HF_TOKEN:?No HF_TOKEN and no cached login at ~/.cache/huggingface/token -- run \`huggingface-cli login\` on this cluster (not just your laptop) or export HF_TOKEN before submitting}"
-export HF_HOME=$PROJECT_ROOT/.cache/huggingface
+export HF_HOME=$WORK_ROOT/.cache/huggingface
 export PYTHONUNBUFFERED=1
 mkdir -p "$HF_HOME"
 
