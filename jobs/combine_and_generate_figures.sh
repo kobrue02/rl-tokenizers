@@ -30,16 +30,29 @@
 # at worst reintroducing a key a real per-tokenizer source has since dropped
 # (e.g. a model removed from a later run).
 #
-# Runs backfill_anchor_invariant_parity.py on every input file before
-# combining (see that script's own docstring: computed purely from each
-# file's own already-stored token_parity, no re-tokenization or network
-# calls, and a no-op for any entry that already has both fields) --
+# ALSO excludes any results/*indigenous_panel*_comparison.json -- confirmed
+# live to be a REAL bug, not a hypothetical: results/indigenous_panel_comparison.json
+# uses the SAME model-name keys as results/hf_frontier_comparison.json (both
+# evaluate the same 33 repos) but a totally different results shape (see
+# generate_tikz_figures.py's own load_indigenous_panel_rows docstring --
+# {"combined": ..., "token_parity_by_anchor": ..., "morphology_spread": ...},
+# no token_parity_spread at all). combine_eval_results.py's "later file in
+# the list wins" merge silently overwrote every one of those 33 perfectly
+# good hf_frontier entries with the wrong-shaped indigenous-panel version,
+# which is what actually broke this job -- backfill_anchor_invariant_parity.py
+# below had already confirmed hf_frontier_comparison.json itself was fine the
+# whole time. The indigenous panel comparison has its own separate consumer
+# (generate_tikz_figures.py --indigenous-panel) and was never meant to join
+# the main BOUQuET-based comparison this job builds.
+#
+# Runs backfill_anchor_invariant_parity.py on every remaining input file
+# before combining anyway (see that script's own docstring: computed purely
+# from each file's own already-stored token_parity, no re-tokenization or
+# network calls, and a no-op for any entry that already has both fields) --
 # generate_tikz_figures.py's load_rows hard-requires token_parity_spread on
-# every entry and raises ValueError otherwise (confirmed live:
-# results/hf_frontier_comparison.json predates this metric and broke this
-# exact job the first time it ran). Backfilling unconditionally here means
-# this can never regress again just because some future results file was
-# also written before the metric existed.
+# every entry and raises ValueError otherwise. Kept as a real safety net for
+# whatever future results file genuinely does predate this metric, even
+# though it turned out not to be the cause of this particular failure.
 
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
@@ -53,6 +66,7 @@ shopt -s nullglob
 inputs=()
 for f in results/*_comparison.json; do
     [ "$f" = "results/all_tokenizers_comparison.json" ] && continue
+    [[ "$f" == *indigenous_panel* ]] && continue
     inputs+=("$f")
 done
 
