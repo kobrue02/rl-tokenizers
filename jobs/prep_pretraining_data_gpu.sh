@@ -14,7 +14,7 @@
 # GPU variant of jobs/prep_pretraining_data.sh -- for the FIVE NEURAL
 # (span-family) tokenizer systems (fairtok/magnet/flexitokens/manta/fanta),
 # whose induce_spans is a real torch forward pass per document (see
-# pretraining/data_prep.py's own PERFORMANCE section). bpe/superbpe are pure
+# systems/pretraining/data_prep.py's own PERFORMANCE section). bpe/superbpe are pure
 # Python/Rust and have NO use for a GPU here -- keep using the plain
 # jobs/prep_pretraining_data.sh (cpu_il) for those two; requesting a GPU for
 # them would just sit idle and waste a scarce allocation slot.
@@ -30,7 +30,7 @@
 # AUTO-RESUBMIT: mirrors jobs/train_pretraining.sh's own and
 # jobs/prep_pretraining_data.sh's own (see that script's own comment for the
 # full rationale) -- a run whose --max-tokens exceeds this job's own --time
-# limit gets killed mid-run; pretraining.data_prep.prep_dataset checkpoints
+# limit gets killed mid-run; systems.pretraining.data_prep.prep_dataset checkpoints
 # its own progress periodically and resumes automatically (no extra flag)
 # whenever rerun against the same --output-dir (see its own RESUME
 # docstring section), so this script resubmits itself when progress was
@@ -46,8 +46,8 @@
 # Or via a YAML config (see configs/README.md):
 #   sbatch jobs/prep_pretraining_data_gpu.sh -c configs/prep_fanta_50k.yml
 #
-# All flags forward directly to pretraining/data_prep.py -- see
-# `python3 -m pretraining.data_prep --help`.
+# All flags forward directly to systems/pretraining/data_prep.py -- see
+# `python3 -m systems.pretraining.data_prep --help`.
 #
 # PREREQUISITE: same HF_TOKEN handling as jobs/prep_pretraining_data.sh.
 
@@ -83,11 +83,11 @@ uv sync
 mkdir -p logs pretrain_data
 
 # 5. Resolve this run's output_dir from the EXACT args this job received --
-# reuses pretraining.data_prep's own parsing so this can never drift from
+# reuses systems.pretraining.data_prep's own parsing so this can never drift from
 # what it actually uses.
 OUTPUT_DIR=$(python3 -c "
 import sys
-from pretraining.data_prep import build_arg_parser
+from systems.pretraining.data_prep import build_arg_parser
 from common.config_file import parse_args_with_config
 args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
 print(args.output_dir)
@@ -108,7 +108,7 @@ BEFORE_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
 
 # 6. Run
 echo "Starting GPU pretraining data prep with args: $@"
-python3 -m pretraining.data_prep --device cuda "$@"
+python3 -m systems.pretraining.data_prep --device cuda "$@"
 PREP_EXIT=$?
 
 # 7. Done, or resubmit? See the AUTO-RESUBMIT comment at the top.

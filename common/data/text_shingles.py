@@ -1,5 +1,5 @@
 """Word n-gram shingle extraction, shared by common.data.dedup (near-
-duplicate detection within a corpus) and pretraining.contamination (overlap
+duplicate detection within a corpus) and systems.pretraining.contamination (overlap
 between a corpus and an eval benchmark) -- the same primitive, used two
 ways: dedup compares corpus documents against each other (both sides large,
 needs MinHash/LSH), contamination compares against a small, fixed benchmark

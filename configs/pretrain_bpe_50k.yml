@@ -1,4 +1,4 @@
-# pretraining/cli.py -- sbatch jobs/train_pretraining.sh -c configs/pretrain_bpe_50k.yml
+# systems/pretraining/cli.py -- sbatch jobs/train_pretraining.sh -c configs/pretrain_bpe_50k.yml
 shard_dir: pretrain_data/glot500_bpe
 model_size: small
 total_steps: 250000

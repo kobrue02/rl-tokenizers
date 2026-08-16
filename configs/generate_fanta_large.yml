@@ -1,4 +1,4 @@
-# pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_fanta_large.yml
+# systems/pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_fanta_large.yml
 checkpoint: checkpoints/pretrain_fanta_large/final.pt
 system: fanta
 tokenizer_checkpoint: checkpoints/fanta_6284655.pt

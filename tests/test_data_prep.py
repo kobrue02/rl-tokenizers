@@ -1,4 +1,4 @@
-"""End-to-end resume correctness for pretraining.data_prep.prep_dataset. Uses
+"""End-to-end resume correctness for systems.pretraining.data_prep.prep_dataset. Uses
 the deterministic in-memory "synthetic" source and a tiny bpe checkpoint built
 on the fly, so this runs fast and offline. A mid-run crash is simulated by
 monkeypatching TokenizerAdapter.encode_batch to raise partway through; the run
@@ -10,9 +10,9 @@ import os
 
 import pytest
 
-from pretraining.data_prep import prep_dataset
-from pretraining import tokenizer_adapter as tokenizer_adapter_module
-from systems.bpe.model import fit_bpe
+from systems.pretraining.data_prep import prep_dataset
+from systems.pretraining import tokenizer_adapter as tokenizer_adapter_module
+from systems.tokenization.bpe.model import fit_bpe
 
 
 @pytest.fixture

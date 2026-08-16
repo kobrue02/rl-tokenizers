@@ -13,15 +13,15 @@ import importlib
 import sys
 
 TOKENIZERS = {
-    "fairtok": "systems.fairtok.evaluate",
-    "magnet": "systems.magnet.evaluate",
-    "flexitokens": "systems.flexitokens.evaluate",
-    "manta": "systems.manta.evaluate",
-    "fanta": "systems.fanta.evaluate",
-    "superbpe": "systems.superbpe.evaluate",
-    "bpe": "systems.bpe.evaluate",
-    "hf_frontier": "systems.hf_frontier.evaluate",  # arbitrary HF tokenizer (--hf-repo-id), not one this project trains
-    "claude_tokenizer": "systems.claude_tokenizer.evaluate",  # token counts only via Anthropic's count_tokens API; no renyi/gini
+    "fairtok": "systems.tokenization.fairtok.evaluate",
+    "magnet": "systems.tokenization.magnet.evaluate",
+    "flexitokens": "systems.tokenization.flexitokens.evaluate",
+    "manta": "systems.tokenization.manta.evaluate",
+    "fanta": "systems.tokenization.fanta.evaluate",
+    "superbpe": "systems.tokenization.superbpe.evaluate",
+    "bpe": "systems.tokenization.bpe.evaluate",
+    "hf_frontier": "systems.tokenization.hf_frontier.evaluate",  # arbitrary HF tokenizer (--hf-repo-id), not one this project trains
+    "claude_tokenizer": "systems.tokenization.claude_tokenizer.evaluate",  # token counts only via Anthropic's count_tokens API; no renyi/gini
 }
 
 

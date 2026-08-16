@@ -1,4 +1,4 @@
-# systems/superbpe/cli.py -- sbatch jobs/train_superbpe.sh -c configs/train_superbpe_50k.yml
+# systems/tokenization/superbpe/cli.py -- sbatch jobs/train_superbpe.sh -c configs/train_superbpe_50k.yml
 #
 # Same data_source/langs/vocab_size as configs/train_bpe_50k.yml -- matched
 # vocab size (50k) is what makes a direct superbpe-vs-bpe comparison fair,

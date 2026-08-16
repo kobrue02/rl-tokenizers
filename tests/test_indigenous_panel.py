@@ -131,11 +131,11 @@ def test_evaluate_on_indigenous_panel_raises_on_unrecognized_anchor():
 
 def test_hf_frontier_evaluate_end_to_end_on_indigenous_panel(tmp_path, monkeypatch):
     """Exercises the full --eval-data-source indigenous_panel path through
-    systems.hf_frontier.evaluate.main (CLI parsing, group loading, the
+    systems.tokenization.hf_frontier.evaluate.main (CLI parsing, group loading, the
     evaluate_on_indigenous_panel branch, token_freq-stripped JSON output)
     against a tiny local fixture panel with a real gpt2 tokenizer (small/fast
     network load, not offline)."""
-    from systems.hf_frontier.evaluate import main
+    from systems.tokenization.hf_frontier.evaluate import main
 
     _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no"}])
     _write_pairs_jsonl(tmp_path / "nah-es.jsonl", [{"nah": "amo", "es": "no"}])
@@ -167,7 +167,7 @@ def test_generate_indigenous_panel_figures(tmp_path):
     bar chart (one .dat per tokenizer family, mean token_parity per family
     per language). This grouped-bar design replaced an earlier
     per-language-subplot layout that overflowed the page at 10 languages."""
-    from generate_tikz_figures import generate_indigenous_panel_figures
+    from scripts.generate_tikz_figures import generate_indigenous_panel_figures
 
     def fake_model_result(fertility_spread):
         return {
@@ -216,7 +216,7 @@ def test_gen_indigenous_panel_parity_bars_omits_family_with_no_data(tmp_path):
     (confirmed on a real Overleaf render -- "Anthropic" ended up labeled
     "Other"). Locks in the fix: the empty family's .dat/TeX entries must not
     exist."""
-    from generate_tikz_figures import gen_indigenous_panel_parity_bars_tex
+    from scripts.generate_tikz_figures import gen_indigenous_panel_parity_bars_tex
 
     rows = [
         {"name": "gpt2", "family": "OpenAI/tiktoken"},
@@ -292,7 +292,7 @@ def test_run_eval_cli_bouquet_branch_unaffected(monkeypatch):
 def test_run_eval_cli_output_writes_combinable_json(tmp_path):
     """--output writes {result_key: results} JSON with token_freq stripped
     (bytes keys aren't JSON-serializable), matching the shape
-    combine_eval_results.py expects. result_key defaults to system_label;
+    scripts/combine_eval_results.py expects. result_key defaults to system_label;
     --result-key overrides it to keep differently-configured runs of the
     same system as distinct entries."""
     fake_groups = [{"eng": "hello world", "deu": "hallo welt"}]
@@ -393,7 +393,7 @@ def _fake_word_count_fn(text):
 
 
 def test_evaluate_claude_on_indigenous_panel_separates_anchors():
-    from systems.claude_tokenizer.evaluate import evaluate_claude_on_indigenous_panel
+    from systems.tokenization.claude_tokenizer.evaluate import evaluate_claude_on_indigenous_panel
 
     eval_groups = [
         {"crk": "ab cd", "en": "a b c d e f g h"},  # crk needs half as many "tokens" as en
@@ -420,7 +420,7 @@ def test_evaluate_claude_on_indigenous_panel_separates_anchors():
 def test_evaluate_claude_on_indigenous_panel_checkpoint_resume(tmp_path):
     """Each anchor gets its own checkpoint file -- confirms a pre-seeded
     checkpoint for ONE anchor is respected without touching the other."""
-    from systems.claude_tokenizer.evaluate import evaluate_claude_on_indigenous_panel
+    from systems.tokenization.claude_tokenizer.evaluate import evaluate_claude_on_indigenous_panel
 
     eval_groups = [{"crk": "ab cd", "en": "a b c d"}, {"nah": "ab", "es": "a b c"}]
     ckpt_base = str(tmp_path / "claude-model")
@@ -449,9 +449,9 @@ def test_evaluate_claude_on_indigenous_panel_checkpoint_resume(tmp_path):
 
 def test_claude_evaluate_main_end_to_end_on_indigenous_panel(tmp_path, monkeypatch):
     """Exercises the full --eval-data-source indigenous_panel path through
-    systems.claude_tokenizer.evaluate.main, with ClaudeTokenCounter
+    systems.tokenization.claude_tokenizer.evaluate.main, with ClaudeTokenCounter
     monkeypatched to a fake so this stays fast, offline, and credential-free."""
-    import systems.claude_tokenizer.evaluate as claude_evaluate
+    import systems.tokenization.claude_tokenizer.evaluate as claude_evaluate
 
     _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": "namoya", "en": "no way friend"}])
     _write_pairs_jsonl(tmp_path / "nah-es.jsonl", [{"nah": "amo", "es": "no tengo nada"}])

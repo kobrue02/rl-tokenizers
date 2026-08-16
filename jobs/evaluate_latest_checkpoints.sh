@@ -26,11 +26,11 @@
 # --output results/<tokenizer>_comparison.json (--result-key defaults to the
 # tokenizer's own system_label -- see common.eval.cross_tokenizer.
 # build_eval_arg_parser's own docstring -- exactly the {result_key: results}
-# shape combine_eval_results.py already expects, the SAME pipeline
+# shape scripts/combine_eval_results.py already expects, the SAME pipeline
 # hf_frontier/claude_tokenizer's own evaluate.py runs already write into).
 # Previously these seven systems' evaluate.sh calls never passed --output at
 # all, so their results only ever printed to logs -- they never actually
-# reached combine_eval_results.py/generate_tikz_figures.py. Once every
+# reached scripts/combine_eval_results.py/scripts/generate_tikz_figures.py. Once every
 # submitted job finishes (successfully or not -- afterany, not afterok: a
 # partial batch's real results shouldn't be blocked from reaching the
 # figures just because one tokenizer's eval job failed), a final

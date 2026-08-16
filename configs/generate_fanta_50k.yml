@@ -1,4 +1,4 @@
-# pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_fanta_50k.yml
+# systems/pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_fanta_50k.yml
 checkpoint: checkpoints/pretrain_fanta/final.pt
 system: fanta
 # see configs/prep_fanta_50k.yml's own comment -- these are the REAL paths

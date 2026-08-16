@@ -1,7 +1,7 @@
-# systems/claude_tokenizer/evaluate.py -- sbatch jobs/evaluate_claude.sh -c configs/eval_claude.yml
+# systems/tokenization/claude_tokenizer/evaluate.py -- sbatch jobs/evaluate_claude.sh -c configs/eval_claude.yml
 #
 # The FULL BOUQuET test split (no --num-groups cap -- an explicit choice,
-# not an oversight, see systems/claude_tokenizer/evaluate.py's own --num-groups
+# not an oversight, see systems/tokenization/claude_tokenizer/evaluate.py's own --num-groups
 # help): ~272k (group, language) pairs, each one real count_tokens API call
 # (no batch endpoint exists). --rpm 2000 matches the "Start" usage tier's
 # published limit -- raise this if you're actually on Build (4000) or Scale

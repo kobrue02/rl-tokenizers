@@ -2,7 +2,7 @@
 (as opposed to common.data.oldi_data's own BOUQuET dev/test, a dedicated
 held-out-eval concern, untouched here) -- used identically by tokenizer
 training (common.data.cli_data.load_groups) and LLM pretraining
-(pretraining.data_prep). One shared interface for every source:
+(systems.pretraining.data_prep). One shared interface for every source:
 
     stream_groups(source, langs=None, config=None, seed=0) -> Iterator[dict[str, str]]
 
@@ -397,7 +397,7 @@ def _round_robin(iterators):
 
 def stream_groups(source, langs=None, config=None, seed=0):
     """The one entry point both common.data.cli_data.load_groups (tokenizer
-    training) and pretraining.data_prep (LLM pretraining) use.
+    training) and systems.pretraining.data_prep (LLM pretraining) use.
 
     source: one of ALL_SOURCES.
     langs: language codes for synthetic/oldi_seed/flores_dev/glot500 --

@@ -1,4 +1,4 @@
-"""Corpus-level document deduplication, applied by pretraining.data_prep to
+"""Corpus-level document deduplication, applied by systems.pretraining.data_prep to
 every document before it's tokenized/packed into shards (the same kind of
 dedup step CCNet/RefinedWeb/LLaMA's own pipelines report).
 

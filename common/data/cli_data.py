@@ -4,7 +4,7 @@ flexitokens.cli, manta.cli, fanta.cli, superbpe.cli, bpe.cli) -- implemented
 once here instead of copy-pasted per tokenizer.
 
 Every named source goes through common.data.corpora.stream_groups, the same
-registry pretraining.data_prep uses for LLM pretraining. See that module's
+registry systems.pretraining.data_prep uses for LLM systems.pretraining. See that module's
 docstring for which sources are cross-lingual PARALLEL (oldi_seed/
 flores_dev, and bible_nlp once prepared) vs. BITEXT (smol/ccmatrix/un_pc/
 europarl/tatoeba_mt, one pair per group) vs. single-language MONOLINGUAL

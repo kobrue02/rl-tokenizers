@@ -1,4 +1,4 @@
-# pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_bpe_large.yml
+# systems/pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_bpe_large.yml
 checkpoint: checkpoints/pretrain_bpe_large/final.pt
 system: bpe
 tokenizer_checkpoint: checkpoints/bpe_50k.json

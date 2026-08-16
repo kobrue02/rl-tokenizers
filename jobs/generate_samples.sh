@@ -11,13 +11,13 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# Generates qualitative text samples from a pretraining.train checkpoint --
-# see pretraining/cli_generate.py's own docstring. Chain this via
+# Generates qualitative text samples from a systems.pretraining.train checkpoint --
+# see systems/pretraining/cli_generate.py's own docstring. Chain this via
 # --dependency=afterok after jobs/train_pretraining.sh so a fixed prompt
 # panel's completions get generated and saved automatically once training
 # finishes, without a manual step someone has to remember to run (ad-hoc,
 # interactive generation with an arbitrary one-off prompt is still supported
-# directly via `python3 -m pretraining.cli_generate`, no sbatch needed for
+# directly via `python3 -m systems.pretraining.cli_generate`, no sbatch needed for
 # that -- this script is specifically for making sample generation a durable,
 # automatic part of the pipeline).
 #
@@ -35,11 +35,11 @@
 #       --max-new-tokens 100 --num-samples 3 --output results/samples_bpe.json \
 #       --use-wandb --wandb-project pretraining --run-name generate_bpe_50k
 #   # ^ --use-wandb logs every generated sample as a wandb.Table (job_type=
-#   # "generate"), in the SAME project pretraining.train/cli_eval use --
+#   # "generate"), in the SAME project systems.pretraining.train/cli_eval use --
 #   # browse actual generated text in the wandb UI instead of only results/*.json.
 #
-# All flags forward directly to pretraining/cli_generate.py -- see
-# `python3 -m pretraining.cli_generate --help`.
+# All flags forward directly to systems/pretraining/cli_generate.py -- see
+# `python3 -m systems.pretraining.cli_generate --help`.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
@@ -63,7 +63,7 @@ mkdir -p logs results
 
 # 5. Run
 echo "Starting sample generation with args: $@"
-python3 -m pretraining.cli_generate --device cuda "$@"
+python3 -m systems.pretraining.cli_generate --device cuda "$@"
 
 if [ $? -eq 0 ]; then
     echo "Sample generation complete."

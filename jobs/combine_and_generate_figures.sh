@@ -10,8 +10,8 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# Regenerates results/all_tokenizers_comparison.json (combine_eval_results.py)
-# and figures/tikz/ (generate_tikz_figures.py) from every results/*_comparison.json
+# Regenerates results/all_tokenizers_comparison.json (scripts/combine_eval_results.py)
+# and figures/tikz/ (scripts/generate_tikz_figures.py) from every results/*_comparison.json
 # file that exists at run time. Meant to run as the final step of
 # jobs/evaluate_latest_checkpoints.sh's own dependency chain (that script
 # submits this with --dependency=afterany:<eval job ids> after fanning out
@@ -34,22 +34,22 @@
 # live to be a REAL bug, not a hypothetical: results/indigenous_panel_comparison.json
 # uses the SAME model-name keys as results/hf_frontier_comparison.json (both
 # evaluate the same 33 repos) but a totally different results shape (see
-# generate_tikz_figures.py's own load_indigenous_panel_rows docstring --
+# scripts/generate_tikz_figures.py's own load_indigenous_panel_rows docstring --
 # {"combined": ..., "token_parity_by_anchor": ..., "morphology_spread": ...},
-# no token_parity_spread at all). combine_eval_results.py's "later file in
+# no token_parity_spread at all). scripts/combine_eval_results.py's "later file in
 # the list wins" merge silently overwrote every one of those 33 perfectly
 # good hf_frontier entries with the wrong-shaped indigenous-panel version,
-# which is what actually broke this job -- backfill_anchor_invariant_parity.py
+# which is what actually broke this job -- scripts/backfill_anchor_invariant_parity.py
 # below had already confirmed hf_frontier_comparison.json itself was fine the
 # whole time. The indigenous panel comparison has its own separate consumer
-# (generate_tikz_figures.py --indigenous-panel) and was never meant to join
+# (scripts/generate_tikz_figures.py --indigenous-panel) and was never meant to join
 # the main BOUQuET-based comparison this job builds.
 #
-# Runs backfill_anchor_invariant_parity.py on every remaining input file
+# Runs scripts/backfill_anchor_invariant_parity.py on every remaining input file
 # before combining anyway (see that script's own docstring: computed purely
 # from each file's own already-stored token_parity, no re-tokenization or
 # network calls, and a no-op for any entry that already has both fields) --
-# generate_tikz_figures.py's load_rows hard-requires token_parity_spread on
+# scripts/generate_tikz_figures.py's load_rows hard-requires token_parity_spread on
 # every entry and raises ValueError otherwise. Kept as a real safety net for
 # whatever future results file genuinely does predate this metric, even
 # though it turned out not to be the cause of this particular failure.
@@ -76,21 +76,21 @@ if [ "${#inputs[@]}" -eq 0 ]; then
 fi
 
 echo "Backfilling token_parity_gm/token_parity_spread where missing ..."
-python3 backfill_anchor_invariant_parity.py --input "${inputs[@]}"
+python3 -m scripts.backfill_anchor_invariant_parity --input "${inputs[@]}"
 if [ $? -ne 0 ]; then
-    echo "backfill_anchor_invariant_parity.py failed." && exit 1
+    echo "scripts/backfill_anchor_invariant_parity.py failed." && exit 1
 fi
 
 echo "Combining ${#inputs[@]} result file(s): ${inputs[*]}"
-python3 combine_eval_results.py --input "${inputs[@]}" --output results/all_tokenizers_comparison.json
+python3 -m scripts.combine_eval_results --input "${inputs[@]}" --output results/all_tokenizers_comparison.json
 if [ $? -ne 0 ]; then
-    echo "combine_eval_results.py failed." && exit 1
+    echo "scripts/combine_eval_results.py failed." && exit 1
 fi
 
 echo "Generating figures from results/all_tokenizers_comparison.json ..."
-python3 generate_tikz_figures.py --input results/all_tokenizers_comparison.json --output-dir figures/tikz
+python3 -m scripts.generate_tikz_figures --input results/all_tokenizers_comparison.json --output-dir figures/tikz
 if [ $? -eq 0 ]; then
     echo "Figures regenerated under figures/tikz/."
 else
-    echo "generate_tikz_figures.py failed." && exit 1
+    echo "scripts/generate_tikz_figures.py failed." && exit 1
 fi

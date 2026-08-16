@@ -1,4 +1,4 @@
-# pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_fanta_large.yml
+# systems/pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_fanta_large.yml
 checkpoint: checkpoints/pretrain_fanta_large/final.pt
 system: fanta
 tokenizer_checkpoint: checkpoints/fanta_6284655.pt

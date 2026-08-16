@@ -1,4 +1,4 @@
-# pretraining/cli.py -- sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
+# systems/pretraining/cli.py -- sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
 # (--gres=gpu:4 on the sbatch command line overrides the job script's own
 # default #SBATCH --gres=gpu:1 pragma -- see jobs/train_pretraining.sh's own
 # comment on this. It also auto-detects SLURM_GPUS_ON_NODE > 1 and launches

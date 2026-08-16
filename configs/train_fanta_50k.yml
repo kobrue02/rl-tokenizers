@@ -1,4 +1,4 @@
-# systems/fanta/cli.py -- sbatch jobs/train_fanta.sh -c configs/train_fanta_50k.yml
+# systems/tokenization/fanta/cli.py -- sbatch jobs/train_fanta.sh -c configs/train_fanta_50k.yml
 data_source: all
 langs: all
 vocab_size: 50000

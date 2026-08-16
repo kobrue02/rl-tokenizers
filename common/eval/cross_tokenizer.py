@@ -294,7 +294,7 @@ def eval_wandb_log_dict(results, prefix="eval"):
 
 def strip_token_freq(results, is_indigenous_panel):
     """token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't valid JSON,
-    so strip it before writing --output (an earlier version of pretraining.cli_eval
+    so strip it before writing --output (an earlier version of systems.pretraining.cli_eval
     hit the identical bug with tuple-keyed dicts). For --eval-data-source
     indigenous_panel, token_freq is nested inside "combined" and inside each
     anchor's entry in "token_parity_by_anchor", not at the top level."""
@@ -353,7 +353,7 @@ def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_h
     shape, so isn't built on this) -- extracted once rather than copy-pasted.
 
     --output/--result-key exist so results can join the same comparison pipeline
-    (combine_eval_results.py, generate_tikz_figures.py), written as {result_key:
+    (scripts/combine_eval_results.py, scripts/generate_tikz_figures.py), written as {result_key:
     results} (result_key defaults to system_label, e.g. "fanta"). Override
     --result-key to keep two differently-configured runs of the same system as
     distinct entries in one combined file.
@@ -380,8 +380,8 @@ def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_h
         "--output", type=str, default=None,
         help="write {result_key: results} JSON here (default: print only, via report_eval/"
         "report_indigenous_panel_eval, no file written) -- the same per-tokenizer results "
-        "shape systems/hf_frontier/evaluate.py and systems/claude_tokenizer/evaluate.py "
-        "already write, so combine_eval_results.py can merge this in directly",
+        "shape systems/tokenization/hf_frontier/evaluate.py and systems/tokenization/claude_tokenizer/evaluate.py "
+        "already write, so scripts/combine_eval_results.py can merge this in directly",
     )
     parser.add_argument(
         "--result-key", type=str, default=None,

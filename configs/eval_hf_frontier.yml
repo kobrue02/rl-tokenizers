@@ -1,7 +1,7 @@
-# systems/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
+# systems/tokenization/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
 #
 # 33 repos, verified live (HfApi().model_info + a real tokenizer-only load +
-# span-reconstruction round-trip via systems/hf_frontier/model.py, confirmed
+# span-reconstruction round-trip via systems/tokenization/hf_frontier/model.py, confirmed
 # for every one of these before adding it here -- none guessed):
 #   - meta-models/Muse-Glimmer-30B: a genuinely real, very recently released
 #     repo (confirmed live via HfApi -- created 2026-08-09, real safetensors
@@ -11,7 +11,7 @@
 #     this project's own "never guess a repo exists" discipline. Byte-level
 #     BPE, 200k vocab, round-trips cleanly, no fix needed.
 #   - 7 tiktoken-native encodings (OpenAI's own tiktoken package, NOT HF Hub
-#     repos at all -- see systems/hf_frontier/model.py's own module
+#     repos at all -- see systems/tokenization/hf_frontier/model.py's own module
 #     docstring, scheme 3): gpt2, r50k_base, p50k_base, p50k_edit,
 #     cl100k_base, o200k_base, o200k_harmony -- every encoding tiktoken
 #     0.13.0 ships (confirmed live via tiktoken.list_encoding_names(), not
@@ -36,7 +36,7 @@
 #     "offset_mapping"), plus bigscience/bloom and tiiuae/falcon-7b (more
 #     byte-level BPE, but genuinely distinct vocab sizes/eras).
 #   - 9 popular ENCODER tokenizers, added after fixing a real gap in
-#     systems/hf_frontier/model.py's own span reconstruction: bert-base-
+#     systems/tokenization/hf_frontier/model.py's own span reconstruction: bert-base-
 #     cased, bert-base-multilingual-cased, distilbert-base-uncased, google/
 #     electra-base-discriminator (WordPiece), xlm-roberta-base (SentencePiece
 #     unigram) -- ALL FIVE originally failed model.py's round-trip check
@@ -67,7 +67,7 @@
 # custom tokenizer class.
 #
 # One repo failing (gated-without-access, a transient network error) no
-# longer aborts the whole run -- see systems/hf_frontier/evaluate.py's own
+# longer aborts the whole run -- see systems/tokenization/hf_frontier/evaluate.py's own
 # per-repo error isolation, added specifically because this list got long
 # enough that losing every other repo's result over one bad one would waste
 # real cluster time; failures land under a "_failed" key in the output JSON

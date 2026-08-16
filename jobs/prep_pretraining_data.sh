@@ -15,7 +15,7 @@
 # uses (oldi_seed/flores_dev/smol/glot500/fineweb_edu/olmo_mix/ccmatrix/
 # un_pc/europarl/tatoeba_mt/bible_nlp, no separate pretraining-only source
 # list) -- tokenize with an already-trained systems/
-# checkpoint, pack into token shards. See pretraining/data_prep.py's own
+# checkpoint, pack into token shards. See systems/pretraining/data_prep.py's own
 # module docstring for the full design and its PERFORMANCE section for a
 # real, stated caveat: the five neural (span-family) tokenizer systems
 # encode one document at a time, no batching, and fairtok specifically
@@ -30,8 +30,8 @@
 #
 # AUTO-RESUBMIT: mirrors jobs/train_pretraining.sh's own -- a run whose
 # --max-tokens exceeds this job's own --time limit will get killed mid-run,
-# well before pretraining.data_prep.prep_dataset ever gets to write
-# shards_meta.json. See pretraining/data_prep.py's own RESUME docstring
+# well before systems.pretraining.data_prep.prep_dataset ever gets to write
+# shards_meta.json. See systems/pretraining/data_prep.py's own RESUME docstring
 # section: prep_dataset checkpoints its own progress periodically and
 # resumes automatically (no extra flag) whenever it's rerun against the
 # same --output-dir. This script checks after each run:
@@ -66,8 +66,8 @@
 #   # but exactly as available now that both halves of this project share one
 #   # registry: no source is off-limits to either consumer.
 #
-# All flags forward directly to pretraining/data_prep.py -- see
-# `python3 -m pretraining.data_prep --help`.
+# All flags forward directly to systems/pretraining/data_prep.py -- see
+# `python3 -m systems.pretraining.data_prep --help`.
 #
 # PREREQUISITE: fineweb-edu/olmo-mix/glot500 are all public but sizeable HF
 # datasets -- same HF_TOKEN handling as jobs/train.sh (a token isn't
@@ -127,11 +127,11 @@ uv sync
 mkdir -p logs pretrain_data
 
 # 5. Resolve this run's output_dir from the EXACT args this job received
-# (config file + any prior state) -- reuses pretraining.data_prep's own
+# (config file + any prior state) -- reuses systems.pretraining.data_prep's own
 # parsing so this can never drift from what it actually uses.
 OUTPUT_DIR=$(python3 -c "
 import sys
-from pretraining.data_prep import build_arg_parser
+from systems.pretraining.data_prep import build_arg_parser
 from common.config_file import parse_args_with_config
 args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
 print(args.output_dir)
@@ -152,7 +152,7 @@ BEFORE_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
 
 # 6. Run
 echo "Starting pretraining data prep with args: $@"
-python3 -m pretraining.data_prep "$@"
+python3 -m systems.pretraining.data_prep "$@"
 PREP_EXIT=$?
 
 # 7. Done, or resubmit? See the AUTO-RESUBMIT comment at the top.

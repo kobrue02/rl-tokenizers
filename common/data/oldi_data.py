@@ -16,7 +16,7 @@ intersection of flores_plus/oldi_seed/smol_sent once wmt24pp is dropped
 (wmt24pp is high/mid-resource-only and unrelated to OLDI's low-resource
 focus; including it collapses the intersection to just {eng}). Not used as
 a default anywhere any more; its one remaining consumer is
-systems/fairtok/train_morfessor_cli.py's default language list:
+systems/tokenization/fairtok/train_morfessor_cli.py's default language list:
 
     arz (Egyptian Arabic), bam (Bambara), ben (Bengali), eng (English), kas (Kashmiri),
     lij (Ligurian), mni (Manipuri), nqo (N'Ko), spa (Spanish)

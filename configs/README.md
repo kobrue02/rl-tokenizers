@@ -1,7 +1,7 @@
 # Experiment configs
 
-Every CLI entry point in this repo (all seven `systems/*/cli.py`, plus
-`pretraining/cli.py`, `data_prep.py`, `cli_eval.py`, `cli_generate.py`) now
+Every CLI entry point in this repo (all seven `systems/tokenization/*/cli.py`, plus
+`systems/pretraining/cli.py`, `data_prep.py`, `cli_eval.py`, `cli_generate.py`) now
 accepts `-c`/`--config path/to/file.yml` — see `common/config_file.py` for
 the full precedence rules. Short version:
 
@@ -27,7 +27,7 @@ stage, as in the example below.
 
 ## Picking training corpora: `data_source`
 
-`data_source` (every `systems/*/cli.py`, plus `pretraining/data_prep.py`'s
+`data_source` (every `systems/tokenization/*/cli.py`, plus `systems/pretraining/data_prep.py`'s
 `dataset`) is where a config file decides WHICH corpora feed a given run —
 see `common/data/corpora.py`'s own module docstring for the full registry
 (`oldi_seed`/`flores_dev`, `glot500`/`fineweb_edu`/`olmo_mix`,
@@ -66,7 +66,7 @@ Same shape, two differences: data prep needs a GPU (`jobs/prep_pretraining_data_
 not the CPU version -- see that script's own docstring for why: a neural
 tokenizer's induce_spans is a real forward pass per document), and every
 stage past tokenizer training needs `--vocab-json` too (see
-`pretraining/tokenizer_adapter.py`'s docstring for why the five neural
+`systems/pretraining/tokenizer_adapter.py`'s docstring for why the five neural
 systems need it and bpe/superbpe don't).
 
 ```bash
@@ -80,7 +80,7 @@ sbatch --dependency=afterok:$train_id jobs/evaluate_pretrained.sh -c configs/eva
 ```
 
 Note `pretrain_fanta_50k.yml` sets its own `output_dir: checkpoints/pretrain_fanta`
--- `pretraining.train`'s default output_dir (`checkpoints/pretrain`) is shared
+-- `systems.pretraining.train`'s default output_dir (`checkpoints/pretrain`) is shared
 across every run that doesn't override it, so two pretraining runs active at
 the same time (e.g. bpe and fanta) MUST use different `output_dir`s or one
 will overwrite the other's checkpoints. Give every new experiment its own

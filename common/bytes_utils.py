@@ -23,7 +23,7 @@ def truncate_to_max_bytes(text, max_bytes):
 
     Guards against the O(T^2) memory blowup of manta.model.SlidingWindowAttention's
     dense (B,H,T,T) score matrix -- originally only in fanta training, moved here
-    once pretraining.data_prep hit the same blowup at tokenization time (it calls
+    once systems.pretraining.data_prep hit the same blowup at tokenization time (it calls
     encode()/induce_spans on raw corpus text with no length cap of its own)."""
     if not max_bytes:
         return text, False

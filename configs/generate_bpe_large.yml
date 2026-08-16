@@ -1,4 +1,4 @@
-# pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_bpe_large.yml
+# systems/pretraining/cli_generate.py -- sbatch jobs/generate_samples.sh -c configs/generate_bpe_large.yml
 checkpoint: checkpoints/pretrain_bpe_large/final.pt
 system: bpe
 tokenizer_checkpoint: checkpoints/bpe_50k.json

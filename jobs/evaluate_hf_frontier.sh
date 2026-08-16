@@ -10,8 +10,8 @@
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
 # Held-out BOUQuET evaluation for one or more ARBITRARY HuggingFace models'
-# own tokenizers -- see systems/hf_frontier/evaluate.py's own module
-# docstring for the multi-repo/--output design and systems/hf_frontier/
+# own tokenizers -- see systems/tokenization/hf_frontier/evaluate.py's own module
+# docstring for the multi-repo/--output design and systems/tokenization/hf_frontier/
 # model.py for how tokenizer-only loading + byte-span reconstruction work.
 # No GPU requested: this only ever tokenizes text (no model inference at
 # all -- see model.py's own docstring confirming NO model weights are ever
@@ -32,7 +32,7 @@
 # the way jobs/evaluate.sh's own neural forward-pass cost does. Widen this
 # further if you add even more repos, or narrow a run with --num-groups /
 # --eval-data-source bouquet (dev, not test) for a quicker exploratory pass.
-# One repo failing (see systems/hf_frontier/evaluate.py's own per-repo error
+# One repo failing (see systems/tokenization/hf_frontier/evaluate.py's own per-repo error
 # isolation) doesn't abort the rest of the list, so a bad/gated-without-access
 # repo in the list costs time on just that one repo, not the whole job.
 #
@@ -44,7 +44,7 @@
 #       --trust-remote-code --eval-data-source bouquet_test \
 #       --output results/hf_frontier_comparison.json --use-wandb --run-name frontier_v1
 #
-# All flags forward directly to systems/hf_frontier/evaluate.py -- see
+# All flags forward directly to systems/tokenization/hf_frontier/evaluate.py -- see
 # `python3 evaluate.py hf_frontier --help`.
 #
 # PREREQUISITES:
@@ -53,7 +53,7 @@
 #     export HF_TOKEN, before submitting).
 #   - --trust-remote-code executes that repo's OWN Python code (needed for
 #     e.g. moonshotai/Kimi-K3) -- only pass it if you've reviewed what
-#     that implies, see systems/hf_frontier/model.py's own docstring.
+#     that implies, see systems/tokenization/hf_frontier/model.py's own docstring.
 #   - Gated repos (need their license accepted on huggingface.co AND your
 #     HF_TOKEN to actually have that access granted -- a plain HF_TOKEN
 #     without accepted access fails to load just that one repo's tokenizer,
@@ -67,7 +67,7 @@
 #     package (a real pyproject.toml dependency, installed via `uv sync`
 #     below -- not an extra manual step).
 #   - The 7 "tiktoken:{name}" entries (e.g. "tiktoken:cl100k_base") aren't
-#     HF Hub repos at all -- see systems/hf_frontier/model.py's own module
+#     HF Hub repos at all -- see systems/tokenization/hf_frontier/model.py's own module
 #     docstring, scheme 3 -- loaded directly via the `tiktoken` package
 #     (also a real pyproject.toml dependency), no HF_TOKEN/--trust-remote-code
 #     relevance for them.

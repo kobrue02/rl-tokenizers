@@ -11,7 +11,7 @@
 
 # Held-out BOUQuET evaluation of one or more Claude models' own token
 # counts, via Anthropic's public count_tokens API -- see
-# systems/claude_tokenizer/evaluate.py and model.py's own module docstrings
+# systems/tokenization/claude_tokenizer/evaluate.py and model.py's own module docstrings
 # for the full design. Genuinely different from every other jobs/evaluate*.sh
 # in this repo: no local tokenizer, no model weights, ONE REAL NETWORK CALL
 # PER (group, language) PAIR -- there is no batch endpoint. Only
@@ -37,7 +37,7 @@
 # remaining. Narrow with --num-groups / --eval-data-source bouquet (dev,
 # not test) for a much cheaper exploratory pass, or raise --rpm to match a
 # real rate-limit increase if you get one. One model failing (see
-# systems/claude_tokenizer/evaluate.py's own per-model error isolation)
+# systems/tokenization/claude_tokenizer/evaluate.py's own per-model error isolation)
 # doesn't abort the rest of --model's list.
 #
 # Usage:
@@ -47,7 +47,7 @@
 #       --model claude-opus-5 --eval-data-source bouquet_test --rpm 2000 \
 #       --output results/claude_comparison.json --use-wandb --run-name claude_v1
 #
-# All flags forward directly to systems/claude_tokenizer/evaluate.py -- see
+# All flags forward directly to systems/tokenization/claude_tokenizer/evaluate.py -- see
 # `python3 evaluate.py claude_tokenizer --help`.
 #
 # PREREQUISITES:
@@ -55,7 +55,7 @@
 #     account credential, DIFFERENT from and in addition to HF_TOKEN below.
 #     count_tokens is free to call but still requires authentication and is
 #     subject to your account's own RPM limit (match --rpm to your actual
-#     tier -- see systems/claude_tokenizer/evaluate.py's own --rpm help).
+#     tier -- see systems/tokenization/claude_tokenizer/evaluate.py's own --rpm help).
 #   - BOUQuET is ALSO a gated HF dataset (same HF_TOKEN requirement as
 #     jobs/evaluate.sh/jobs/evaluate_hf_frontier.sh -- run
 #     `huggingface-cli login` on this cluster, or export HF_TOKEN) --

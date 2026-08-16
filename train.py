@@ -18,13 +18,13 @@ import importlib
 import sys
 
 TOKENIZERS = {
-    "fairtok": "systems.fairtok.cli",
-    "magnet": "systems.magnet.cli",
-    "flexitokens": "systems.flexitokens.cli",
-    "manta": "systems.manta.cli",
-    "fanta": "systems.fanta.cli",
-    "superbpe": "systems.superbpe.cli",
-    "bpe": "systems.bpe.cli",
+    "fairtok": "systems.tokenization.fairtok.cli",
+    "magnet": "systems.tokenization.magnet.cli",
+    "flexitokens": "systems.tokenization.flexitokens.cli",
+    "manta": "systems.tokenization.manta.cli",
+    "fanta": "systems.tokenization.fanta.cli",
+    "superbpe": "systems.tokenization.superbpe.cli",
+    "bpe": "systems.tokenization.bpe.cli",
 }
 
 

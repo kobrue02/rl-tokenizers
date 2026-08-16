@@ -11,7 +11,7 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# Pretraining -- see pretraining/train.py's own module docstring for what's
+# Pretraining -- see systems/pretraining/train.py's own module docstring for what's
 # actually verified: single-GPU and multi-GPU DistributedDataParallel (this
 # script launches via torchrun automatically whenever more than one GPU was
 # allocated -- see SLURM_GPUS_ON_NODE handling below). NOT yet built: FSDP/
@@ -32,7 +32,7 @@
 # --time limit (e.g. the "large" preset's ~10-day estimate against this
 # job's 24h default) will get SIGTERM/SIGKILL'd by SLURM mid-loop, well
 # before train.py's own final.pt save at the bottom of its training loop
-# (pretraining/train.py) ever runs. Rather than requiring a human to notice
+# (systems/pretraining/train.py) ever runs. Rather than requiring a human to notice
 # the timeout and manually resubmit with --resume-from every time, this
 # script checks for itself once training exits:
 #   - final.pt present in output_dir -> genuinely done, exit 0, no resubmit.
@@ -57,8 +57,8 @@
 #       --model-size small --total-steps 50000 --seq-len 1024 --per-device-batch-size 16
 #   sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
 #
-# All flags forward directly to pretraining/cli.py -- see
-# `python3 -m pretraining.cli --help`.
+# All flags forward directly to systems/pretraining/cli.py -- see
+# `python3 -m systems.pretraining.cli --help`.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
@@ -84,11 +84,11 @@ mkdir -p logs checkpoints/pretrain
 
 # 5. Resolve this run's output_dir/total_steps from the EXACT args this job
 # received (config file + any CLI overrides, e.g. a --resume-from appended
-# by a prior resubmit of this same script) -- reuses pretraining.cli's own
-# parsing so this can never drift from what pretraining.cli itself uses.
+# by a prior resubmit of this same script) -- reuses systems.pretraining.cli's own
+# parsing so this can never drift from what systems.pretraining.cli itself uses.
 CFG_INFO=$(python3 -c "
 import sys
-from pretraining.cli import build_arg_parser, _config_from_args
+from systems.pretraining.cli import build_arg_parser, _config_from_args
 from common.config_file import parse_args_with_config
 args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
 cfg = _config_from_args(args)
@@ -118,9 +118,9 @@ fi
 NUM_GPUS="${SLURM_GPUS_ON_NODE:-1}"
 echo "Starting pretraining with $NUM_GPUS GPU(s), args: $@"
 if [ "$NUM_GPUS" -gt 1 ]; then
-    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m pretraining.cli "$@"
+    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m systems.pretraining.cli "$@"
 else
-    python3 -m pretraining.cli "$@"
+    python3 -m systems.pretraining.cli "$@"
 fi
 TRAIN_EXIT=$?
 

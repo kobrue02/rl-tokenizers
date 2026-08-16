@@ -1,4 +1,4 @@
-# pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data.sh -c configs/prep_bpe_50k.yml
+# systems/pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data.sh -c configs/prep_bpe_50k.yml
 dataset: glot500
 langs: all
 system: bpe

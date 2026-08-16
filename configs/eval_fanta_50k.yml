@@ -1,4 +1,4 @@
-# pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_fanta_50k.yml
+# systems/pretraining/cli_eval.py -- sbatch jobs/evaluate_pretrained.sh -c configs/eval_fanta_50k.yml
 checkpoint: checkpoints/pretrain_fanta/final.pt
 system: fanta
 # see configs/prep_fanta_50k.yml's own comment -- these are the REAL paths
@@ -9,7 +9,7 @@ vocab_json: vocab_out/fanta_vocab_6284655.json
 benchmark: "xnli,xcopa,flores_mt"
 # The union of XNLI_LANGS (15) and XCOPA_LANGS (11) -- every code here is
 # valid for at least one of the two, and _resolve_multiple_choice_langs
-# (pretraining/cli_eval.py) intersects per-benchmark automatically, so XNLI
+# (systems/pretraining/cli_eval.py) intersects per-benchmark automatically, so XNLI
 # scores all 15 of its own languages and XCOPA scores all 11 of its own,
 # with nothing dropped/warned for either (the previous "en,de,fr,ar,zh" only
 # gave XCOPA one usable language -- "zh" -- since it has no en/de/fr/ar

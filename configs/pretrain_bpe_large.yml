@@ -1,4 +1,4 @@
-# pretraining/cli.py -- sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_bpe_large.yml
+# systems/pretraining/cli.py -- sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_bpe_large.yml
 # see configs/pretrain_fanta_large.yml's own comment for the --gres=gpu:4
 # override and the scale/time rationale (identical here -- same model_size,
 # same step/token budget, just bpe's own shard_dir/output_dir).

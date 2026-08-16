@@ -12,8 +12,8 @@
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
 # Downstream benchmark evaluation (XNLI/XCOPA/FLORES-MT) for a
-# pretraining.train checkpoint -- see pretraining/benchmarks.py and
-# pretraining/eval_harness.py for the loaders/scorers this calls into.
+# systems.pretraining.train checkpoint -- see systems/pretraining/benchmarks.py and
+# systems/pretraining/eval_harness.py for the loaders/scorers this calls into.
 # Single process, no torchrun: unlike jobs/train_pretraining.sh, evaluation
 # here is one model, one GPU, no DDP -- multiple benchmarks/checkpoints are
 # just multiple separate `sbatch` submissions of this same script.
@@ -55,12 +55,12 @@
 #   # flores_mt, each benchmark in the list ignores the flag it has no use for.
 #   # --use-wandb logs every metric above (plus flores_mt's raw generated
 #   # samples as a wandb.Table) as job_type="eval", in the SAME project
-#   # pretraining.train's own run used (job_type="train") -- filter by
+#   # systems.pretraining.train's own run used (job_type="train") -- filter by
 #   # job_type in the wandb UI to see just one stage, or by run name to line
 #   # up a specific eval against the training run it evaluated.
 #
-# All flags forward directly to pretraining/cli_eval.py -- see
-# `python3 -m pretraining.cli_eval --help`.
+# All flags forward directly to systems/pretraining/cli_eval.py -- see
+# `python3 -m systems.pretraining.cli_eval --help`.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
@@ -95,7 +95,7 @@ mkdir -p logs results
 
 # 5. Run
 echo "Starting pretraining evaluation with args: $@"
-python3 -m pretraining.cli_eval --device cuda "$@"
+python3 -m systems.pretraining.cli_eval --device cuda "$@"
 
 if [ $? -eq 0 ]; then
     echo "Evaluation complete."

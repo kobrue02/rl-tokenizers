@@ -1,4 +1,4 @@
-# systems/claude_tokenizer/evaluate.py -- sbatch jobs/evaluate_claude.sh -c configs/eval_claude_indigenous_panel.yml
+# systems/tokenization/claude_tokenizer/evaluate.py -- sbatch jobs/evaluate_claude.sh -c configs/eval_claude_indigenous_panel.yml
 #
 # Same model/rpm/max_workers as configs/eval_claude.yml (see that file's
 # own comment for why rpm=90, not the "Start" tier's published 2000 --
@@ -7,7 +7,7 @@
 # panel instead of BOUQuET -- requires a one-time
 # `python -m common.data.prepare_indigenous_panel` run first. Uses
 # evaluate_claude_on_indigenous_panel (see that function's own docstring in
-# systems/claude_tokenizer/evaluate.py), which internally splits into TWO
+# systems/tokenization/claude_tokenizer/evaluate.py), which internally splits into TWO
 # anchor-scoped runs (English for crk-en/iu-en, Spanish for the ten
 # AmericasNLP pairs) since this panel is deliberately mixed-anchor --
 # checkpoint_dir below still makes the WHOLE run resumable, one <model>.
