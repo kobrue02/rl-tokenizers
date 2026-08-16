@@ -29,6 +29,17 @@
 # back into the NEW combine step as one more "source", at best redundant and
 # at worst reintroducing a key a real per-tokenizer source has since dropped
 # (e.g. a model removed from a later run).
+#
+# Runs backfill_anchor_invariant_parity.py on every input file before
+# combining (see that script's own docstring: computed purely from each
+# file's own already-stored token_parity, no re-tokenization or network
+# calls, and a no-op for any entry that already has both fields) --
+# generate_tikz_figures.py's load_rows hard-requires token_parity_spread on
+# every entry and raises ValueError otherwise (confirmed live:
+# results/hf_frontier_comparison.json predates this metric and broke this
+# exact job the first time it ran). Backfilling unconditionally here means
+# this can never regress again just because some future results file was
+# also written before the metric existed.
 
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
@@ -48,6 +59,12 @@ done
 if [ "${#inputs[@]}" -eq 0 ]; then
     echo "No results/*_comparison.json files found -- nothing to combine." >&2
     exit 1
+fi
+
+echo "Backfilling token_parity_gm/token_parity_spread where missing ..."
+python3 backfill_anchor_invariant_parity.py --input "${inputs[@]}"
+if [ $? -ne 0 ]; then
+    echo "backfill_anchor_invariant_parity.py failed." && exit 1
 fi
 
 echo "Combining ${#inputs[@]} result file(s): ${inputs[*]}"
