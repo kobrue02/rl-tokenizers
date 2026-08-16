@@ -144,7 +144,10 @@ _RESOURCE_LEVEL_LABELS = {
 _PROVIDER_PANELS = [
     {"key": "deepseek-ai/DeepSeek-V4-Pro", "display": "DeepSeek V4-Pro", "input": 0.435, "color": (214, 96, 42)},
     {"key": "tiktoken:o200k_base", "display": "GPT-4o", "input": 2.50, "color": (16, 110, 118)},
-    {"key": "claude-opus-5", "display": "Claude Opus 5", "input": 5.00, "color": (180, 70, 150)},
+    # anthropicCol (180,60,60), matching the categorical family color used in
+    # fig_resource_level/fig_heatmap/etc. -- was previously an ad hoc magenta
+    # unrelated to that palette.
+    {"key": "claude-opus-5", "display": "Claude Opus 5", "input": 5.00, "color": (180, 60, 60)},
     {"key": "moonshotai/Kimi-K3", "display": "Kimi K3", "input": 3.00, "color": (60, 150, 130)},
 ]
 
@@ -944,9 +947,43 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
         r_, g_, b_ = p["color"]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (color_names[p["key"]], r_, g_, b_))
 
+    # Pre-compute every present panel's per-level cost values up front so a single
+    # shared ymin/ymax can be applied to all 4 panels -- previously each panel
+    # auto-ranged independently, so e.g. Claude's $10-90 range and DeepSeek's
+    # $0.4-6 range used different y-axis floors/ceilings and couldn't be visually
+    # compared against each other.
+    panel_by_level = {}
+    all_costs = []
+    for panel in present_panels:
+        m = models[panel["key"]]
+        tp = m["token_parity"]
+        eng_tokens = m["fertility"]["eng_Latn"] * reference_words
+        by_level = defaultdict(list)
+        for lang, lvl in levels.items():
+            v = tp.get(lang)
+            if v is not None:
+                cost = v * eng_tokens * panel["input"] / 1_000_000
+                by_level[lvl].append(cost)
+                all_costs.append(cost)
+        panel_by_level[panel["key"]] = by_level
+    if all_costs:
+        shared_ymin = 10 ** math.floor(math.log10(min(all_costs)))
+        shared_ymax = 10 ** math.ceil(math.log10(max(all_costs)))
+    else:
+        shared_ymin, shared_ymax = 0.1, 100
+    shared_ytick = [10 ** e for e in range(int(math.log10(shared_ymin)), int(math.log10(shared_ymax)) + 1)]
+    ytick_opts = [
+        r"    log ticks with fixed point,",
+        r"    ytick={%s}," % ",".join(str(t) for t in shared_ytick),
+    ]
+
     body = []
     for i, panel in enumerate(_PROVIDER_PANELS):
         col = color_names[panel["key"]]
+        # Bottom row of the 2x2 grid (indices 2 and 3) gets the shared x-axis label --
+        # top row would just duplicate it since both rows share the same resource-level
+        # x-axis.
+        xlabel_opt = [r"    xlabel={Linguistic resource level (Joshi et al. 2020)},"] if i >= 2 else []
         body.append(r"\begin{minipage}[t]{0.48\linewidth}")
         body.append(r"\centering")
         if panel["key"] not in models:
@@ -960,16 +997,18 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
                 r"\begin{tikzpicture}",
                 r"\begin{axis}[",
                 r"    width=\linewidth, height=5.2cm,",
-                r"    ymode=log, ymin=0.1, ymax=100,",
+                r"    ymode=log, ymin=%g, ymax=%g," % (shared_ymin, shared_ymax),
                 r"    xmin=0.5, xmax=6.5,",
                 r"    title={%s}," % _panel_title(panel, models),
                 r"    title style={font=\small},",
                 r"    xtick={1,2,3,4,5,6},",
                 r"    xticklabels={0,1,2,3,4,5},",
                 r"    x tick label style={font=\tiny},",
+                *xlabel_opt,
                 r"    ylabel={Cost (USD)},",
                 r"    y label style={font=\scriptsize},",
                 r"    yticklabel style={font=\tiny},",
+                *ytick_opts,
                 r"    grid=both, grid style={gray!15},",
                 r"]",
                 r"\node[align=center, font=\footnotesize] at (axis cs:3.5,3.16) {Pending evaluation\\results};",
@@ -977,28 +1016,23 @@ def gen_api_cost_boxplot_tex(models, out_dir, reference_words=1_000_000):
                 r"\end{tikzpicture}",
             ]
         else:
-            m = models[panel["key"]]
-            tp = m["token_parity"]
-            eng_tokens = m["fertility"]["eng_Latn"] * reference_words
-            by_level = defaultdict(list)
-            for lang, lvl in levels.items():
-                v = tp.get(lang)
-                if v is not None:
-                    by_level[lvl].append(v * eng_tokens * panel["input"] / 1_000_000)
+            by_level = panel_by_level[panel["key"]]
             body += [
                 r"\begin{tikzpicture}",
                 r"\begin{axis}[",
                 r"    boxplot/draw direction=y,",
                 r"    width=\linewidth, height=5.2cm,",
-                r"    ymode=log,",
+                r"    ymode=log, ymin=%g, ymax=%g," % (shared_ymin, shared_ymax),
                 r"    title={%s}," % _panel_title(panel, models),
                 r"    title style={font=\small},",
                 r"    xtick={%s}," % ",".join(str(j + 1) for j in range(len(present_levels))),
                 r"    xticklabels={%s}," % ",".join(str(l) for l in present_levels),
                 r"    x tick label style={font=\tiny},",
+                *xlabel_opt,
                 r"    ylabel={Cost (USD)},",
                 r"    y label style={font=\scriptsize},",
                 r"    yticklabel style={font=\tiny},",
+                *ytick_opts,
                 r"    grid=both, grid style={gray!15},",
                 r"]",
             ]

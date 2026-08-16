@@ -4,7 +4,7 @@
 \begin{axis}[
     boxplot/draw direction=y,
     width=\linewidth, height=5.2cm,
-    ymode=log,
+    ymode=log, ymin=0.1, ymax=100,
     title={DeepSeek V4-Pro},
     title style={font=\small},
     xtick={1,2,3,4,5,6},
@@ -13,6 +13,8 @@
     ylabel={Cost (USD)},
     y label style={font=\scriptsize},
     yticklabel style={font=\tiny},
+    log ticks with fixed point,
+    ytick={0.1,1,10,100},
     grid=both, grid style={gray!15},
 ]
 \addplot+[boxplot prepared={median=1.120889,upper quartile=1.394162,lower quartile=1.013527,upper whisker=1.923153,lower whisker=0.584685},fill=boxcolor0,draw=boxcolor0,mark options={fill=boxcolor0,draw=boxcolor0}] coordinates {(0,2.190756) (0,2.327207) (0,3.641414) (0,4.439788) (0,5.247114) (0,5.352326)};
@@ -31,7 +33,7 @@
 \begin{axis}[
     boxplot/draw direction=y,
     width=\linewidth, height=5.2cm,
-    ymode=log,
+    ymode=log, ymin=0.1, ymax=100,
     title={GPT-4o},
     title style={font=\small},
     xtick={1,2,3,4,5,6},
@@ -40,6 +42,8 @@
     ylabel={Cost (USD)},
     y label style={font=\scriptsize},
     yticklabel style={font=\tiny},
+    log ticks with fixed point,
+    ytick={0.1,1,10,100},
     grid=both, grid style={gray!15},
 ]
 \addplot+[boxplot prepared={median=5.562983,upper quartile=6.908087,lower quartile=5.139875,upper whisker=9.276919,lower whisker=3.168479},fill=boxcolor1,draw=boxcolor1,mark options={fill=boxcolor1,draw=boxcolor1}] coordinates {(0,9.810579) (0,10.219418) (0,11.619967) (0,20.186275) (0,25.505011) (0,30.153132) (0,30.764313)};
@@ -58,15 +62,18 @@
 \begin{axis}[
     boxplot/draw direction=y,
     width=\linewidth, height=5.2cm,
-    ymode=log,
+    ymode=log, ymin=0.1, ymax=100,
     title={Claude Opus 5 (16\% complete)},
     title style={font=\small},
     xtick={1,2,3,4,5,6},
     xticklabels={0,1,2,3,4,5},
     x tick label style={font=\tiny},
+    xlabel={Linguistic resource level (Joshi et al. 2020)},
     ylabel={Cost (USD)},
     y label style={font=\scriptsize},
     yticklabel style={font=\tiny},
+    log ticks with fixed point,
+    ytick={0.1,1,10,100},
     grid=both, grid style={gray!15},
 ]
 \addplot+[boxplot prepared={median=19.099562,upper quartile=22.995253,lower quartile=16.915576,upper whisker=32.081212,lower whisker=11.100273},fill=boxcolor2,draw=boxcolor2,mark options={fill=boxcolor2,draw=boxcolor2}] coordinates {(0,33.563693) (0,50.636687) (0,53.898147) (0,61.903677) (0,73.324772)};
@@ -85,15 +92,18 @@
 \begin{axis}[
     boxplot/draw direction=y,
     width=\linewidth, height=5.2cm,
-    ymode=log,
+    ymode=log, ymin=0.1, ymax=100,
     title={Kimi K3},
     title style={font=\small},
     xtick={1,2,3,4,5,6},
     xticklabels={0,1,2,3,4,5},
     x tick label style={font=\tiny},
+    xlabel={Linguistic resource level (Joshi et al. 2020)},
     ylabel={Cost (USD)},
     y label style={font=\scriptsize},
     yticklabel style={font=\tiny},
+    log ticks with fixed point,
+    ytick={0.1,1,10,100},
     grid=both, grid style={gray!15},
 ]
 \addplot+[boxplot prepared={median=8.036581,upper quartile=9.892841,lower quartile=7.051119,upper whisker=12.653739,lower whisker=4.003865},fill=boxcolor3,draw=boxcolor3,mark options={fill=boxcolor3,draw=boxcolor3}] coordinates {(0,14.212790) (0,14.509258) (0,14.716205) (0,19.015594) (0,30.613832) (0,36.187264) (0,36.922164)};

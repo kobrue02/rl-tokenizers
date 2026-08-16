@@ -18,12 +18,10 @@
 \addlegendentry{Encoder-only}
 \addplot+[only marks, mark=*, mark size=2pt, color=anthropicCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Anthropic.dat};
 \addlegendentry{Anthropic}
-\addplot+[only marks, mark=*, mark size=2pt, color=oursCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_This_work.dat};
-\addlegendentry{This work}
 \addplot+[only marks, mark=*, mark size=2pt, color=otherCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Other.dat};
 \addlegendentry{Other}
-\node[font=\scriptsize, anchor=south east] at (axis cs:164.249,1.198) {flexitokens};
-\node[font=\scriptsize, anchor=south west] at (axis cs:4.350,20.552) {bert-base-cased};
-\node[font=\scriptsize, anchor=north east] at (axis cs:164.249,1.078) {flexitokens};
+\node[font=\scriptsize, anchor=south east] at (axis cs:3.989,4.913) {xlm-roberta-base};
+\node[font=\scriptsize, anchor=south east] at (axis cs:4.230,20.552) {bert-base-cased};
+\node[font=\scriptsize, anchor=north east] at (axis cs:4.294,19.663) {distilbert-base-uncased};
 \end{axis}
 \end{tikzpicture}
