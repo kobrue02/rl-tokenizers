@@ -83,18 +83,22 @@
 # on that leaderboard, their vocab sizes and content hashes all differ (e.g.
 # Jarbas/m2v-256-multilingual-e5-small: 249999 tokens vs
 # bluexmas/mbart50_ko_vi: 250054, distinct hashes for every one of the 11) --
-# genuinely distinct tokenizer files, not duplicates, so none were dropped:
-# Jarbas/m2v-256-multilingual-e5-small, Jarbas/m2v-256-bge-reranker-v2-m3,
-# Yoonyoul/fine-tuned-e5-small-drugproduct, bluexmas/mbart50_ko_vi,
-# antebe/token_punct_dilute, pkupie/mc2-xlmr-large,
-# slone/mbart-large-51-myv-mul-v1, stvhuang/xlm-roberta-base-vocabexpand4822,
-# yihongLiu/xlm-r-with-transliteration-{max,average,min} (three separate
-# repos -- same base vocab, different transliteration-fallback strategy per
-# the repo's own naming, confirmed via distinct hashes rather than assumed
-# to be copies).
-hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony,Jarbas/m2v-256-multilingual-e5-small,Jarbas/m2v-256-bge-reranker-v2-m3,Yoonyoul/fine-tuned-e5-small-drugproduct,bluexmas/mbart50_ko_vi,antebe/token_punct_dilute,pkupie/mc2-xlmr-large,slone/mbart-large-51-myv-mul-v1,stvhuang/xlm-roberta-base-vocabexpand4822,yihongLiu/xlm-r-with-transliteration-max,yihongLiu/xlm-r-with-transliteration-average,yihongLiu/xlm-r-with-transliteration-min"
+# genuinely distinct tokenizer FILES. 6 kept: Jarbas/m2v-256-multilingual-e5-small,
+# Jarbas/m2v-256-bge-reranker-v2-m3, Yoonyoul/fine-tuned-e5-small-drugproduct,
+# bluexmas/mbart50_ko_vi, antebe/token_punct_dilute, slone/mbart-large-51-myv-mul-v1.
+#
+# 5 later DROPPED despite distinct files/hashes: pkupie/mc2-xlmr-large,
+# stvhuang/xlm-roberta-base-vocabexpand4822, and
+# yihongLiu/xlm-r-with-transliteration-{max,average,min}. All 5 wrap the same
+# underlying XLM-R SentencePiece vocab as xlm-roberta-base (XLM-R base/large
+# share one tokenizer file; the vocabexpand/transliteration repos only add a
+# small fallback vocab on top) -- confirmed by diffing their per-language
+# renyi scores against xlm-roberta-base's, which matched to full float
+# precision for the large majority of languages. Kept as one representative:
+# xlm-roberta-base (already present from the original 33).
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony,Jarbas/m2v-256-multilingual-e5-small,Jarbas/m2v-256-bge-reranker-v2-m3,Yoonyoul/fine-tuned-e5-small-drugproduct,bluexmas/mbart50_ko_vi,antebe/token_punct_dilute,slone/mbart-large-51-myv-mul-v1"
 trust_remote_code: true
 eval_data_source: bouquet_test
 output: results/hf_frontier_comparison.json
 use_wandb: true
-run_name: hf_frontier_v5_44models
+run_name: hf_frontier_v6_39models
