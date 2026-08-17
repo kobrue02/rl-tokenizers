@@ -16,12 +16,18 @@ English-anchored.
 
 MORPHOLOGY: not every language here is equally "polysynthetic" under
 standard typological classification -- Plains Cree, Inuktitut, Nahuatl,
-Wixarika, and (to varying degrees) Bribri, Rarámuri, Shipibo-Konibo, and
-Asháninka are most consistently described as polysynthetic; Quechua,
-Aymara, and Guaraní are more standardly agglutinative (highly synthetic but
-not usually "polysynthetic" in the stricter sense). The "morphology" field
-is this project's own best-effort classification -- a starting point for
-figure grouping/filtering, not a citable typological claim.
+Wixarika, Cherokee, Mapudungun, and (to varying degrees) Bribri, Rarámuri,
+Shipibo-Konibo, and Asháninka are most consistently described as
+polysynthetic; Quechua, Aymara, and Guaraní are more standardly
+agglutinative (highly synthetic but not usually "polysynthetic" in the
+stricter sense). Māori is a further exception in the other direction --
+typologically closer to isolating/analytic than either category -- tagged
+"agglutinative" here only as the nearest bucket this project's coarse
+three-way scheme offers, included for broader Indigenous-language coverage
+rather than because it fits this panel's polysynthesis theme narrowly. The
+"morphology" field is this project's own best-effort classification -- a
+starting point for figure grouping/filtering, not a citable typological
+claim.
 
 PROVENANCE:
   - crk-en (Plains Cree): KonradBRG/plains-cree-figurative on HF -- 228
@@ -35,10 +41,27 @@ PROVENANCE:
     This panel uses only the held-out "test" split (13,082 pairs), matching
     the scale other panel entries use for a fairness comparison (not an MT
     training run).
-  - the remaining nine pairs: AmericasNLP 2021 shared task
+  - the next nine pairs: AmericasNLP 2021 shared task
     (github.com/AmericasNLP/americasnlp2021), each language's own
     train.{code}/train.es line-aligned files, fetched via
     raw.githubusercontent.com (no git clone -- see prepare_indigenous_panel).
+  - chr-en (Cherokee): ChrEn (Zhang, Frey & Bansal, EMNLP 2020,
+    github.com/ZhangShiyue/ChrEn), data/parallel/{train,dev,test}.{chr,en}
+    combined (not out_dev/out_test, the paper's separate out-of-domain eval
+    split -- a different distribution). No LICENSE file in the source
+    repo -- an academic research release with no declared license; used
+    here for non-commercial research only, cite the paper.
+  - mi-en (Māori): jinglishi0206/Maori_English_New_Zealand on HF -- 6,486
+    sentence pairs scraped from Te Ara (the Encyclopedia of New Zealand).
+    CC-BY-NC-3.0, dataset card states research-use-only.
+  - arn-es (Mapudungun): the AVENUE project's Mapudungun corpus (CMU,
+    Chilean Ministry of Education, Instituto de Estudios Indígenas at
+    Universidad de La Frontera; github.com/mingjund/mapudungun-corpus) --
+    translation-clean/*.txt per-recording transcripts (M:/C: line-paired
+    Mapudungun/Castellano utterances), combining the training/dev/test file
+    lists under dataset_splits/mt/. CC-BY-NC-SA-3.0 (research use,
+    ShareAlike on any redistribution of derived data -- moot here since
+    data/ is gitignored, see prepare_indigenous_panel).
 """
 
 # code: this pair's ISO/AmericasNLP-native language code (the key used in
@@ -161,6 +184,32 @@ PAIRS = {
         "loader": "americasnlp",
         "dir": "ashaninka-spanish",
     },
+    "chr-en": {
+        "language": "Cherokee",
+        "code": "chr",
+        "anchor": "en",
+        "family": "Iroquoian",
+        "morphology": "polysynthetic",
+        "loader": "chren",
+    },
+    "mi-en": {
+        "language": "Māori",
+        "code": "mi",
+        "anchor": "en",
+        "family": "Polynesian",
+        "morphology": "agglutinative",  # see module docstring's MORPHOLOGY
+        # section -- typologically closer to isolating, tagged this way only
+        # as the nearest bucket this project's coarse scheme offers.
+        "loader": "hf_csv",
+    },
+    "arn-es": {
+        "language": "Mapudungun",
+        "code": "arn",
+        "anchor": "es",
+        "family": "Araucanian",
+        "morphology": "polysynthetic",
+        "loader": "mapudungun",
+    },
 }
 
 AMERICASNLP_REPO = "AmericasNLP/americasnlp2021"
@@ -173,3 +222,11 @@ NRC_HANSARD_URL = (
     "?id=c7e34fa7-7629-43c2-bd6d-19b32bf64f60"
 )
 NRC_HANSARD_ARCHIVE_ROOT = "Nunavut-Hansard-Inuktitut-English-Parallel-Corpus-3.0"
+
+CHREN_REPO = "ZhangShiyue/ChrEn"
+CHREN_BRANCH = "main"
+
+MAORI_HF_REPO = "jinglishi0206/Maori_English_New_Zealand"
+
+MAPUDUNGUN_REPO = "mingjund/mapudungun-corpus"
+MAPUDUNGUN_BRANCH = "master"

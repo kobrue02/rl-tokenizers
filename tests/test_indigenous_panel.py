@@ -12,7 +12,13 @@ import pytest
 
 from common.data import corpora
 from common.data.indigenous_panel import NRC_HANSARD_ARCHIVE_ROOT
-from common.data.prepare_indigenous_panel import _extract_nrc_hansard_test_split, _write_pairs_jsonl
+from common.data.prepare_indigenous_panel import (
+    _extract_nrc_hansard_test_split,
+    _parse_mapudungun_transcript,
+    _parse_maori_csv,
+    _write_pairs_jsonl,
+    _zip_aligned_lines,
+)
 from common.eval.cross_tokenizer import evaluate_on_indigenous_panel, run_eval_cli
 
 
@@ -47,6 +53,53 @@ def test_extract_nrc_hansard_test_split_raises_on_length_mismatch(tmp_path):
     _make_synthetic_hansard_tgz(tgz_path, ["one", "two"], ["ONE"])
     with pytest.raises(ValueError, match="line count mismatch"):
         _extract_nrc_hansard_test_split(str(tgz_path))
+
+
+def test_zip_aligned_lines_zips_and_drops_blanks():
+    rows = _zip_aligned_lines("chr-en", "chr", ["a", "", "c"], "en", ["A", "", "C"], "a.chr/a.en")
+    assert rows == [{"chr": "a", "en": "A"}, {"chr": "c", "en": "C"}]
+
+
+def test_zip_aligned_lines_raises_on_length_mismatch():
+    with pytest.raises(ValueError, match="line count mismatch"):
+        _zip_aligned_lines("chr-en", "chr", ["a", "b"], "en", ["A"], "a.chr/a.en")
+
+
+def test_parse_maori_csv_zips_columns_and_drops_blanks():
+    text = 'en,mi\n"Hello there","Kia ora"\n"",""\n"Goodbye","Ka kite"\n'
+    rows = _parse_maori_csv(text)
+    assert rows == [{"mi": "Kia ora", "en": "Hello there"}, {"mi": "Ka kite", "en": "Goodbye"}]
+
+
+def test_parse_mapudungun_transcript_joins_multiline_blocks_and_skips_headers():
+    lines = [
+        "; CDR: 00.00 ",
+        "; File: fake ",
+        "",
+        "fake_x_0000_fake_00: ",
+        "M: Mari mari lamuen.",
+        "C: Buenos dias hermana.",
+        "",
+        "fake_x_0001_fake_00: ",
+        "M: Chumechi ta rupaley",
+        "M: tami mongen tufamew?.",
+        "C: Como lo esta pasando",
+        "C: tu vida aqui?",
+        "",
+    ]
+    rows = _parse_mapudungun_transcript(lines)
+    assert rows == [
+        {"arn": "Mari mari lamuen.", "es": "Buenos dias hermana."},
+        {"arn": "Chumechi ta rupaley tami mongen tufamew?.", "es": "Como lo esta pasando tu vida aqui?"},
+    ]
+
+
+def test_parse_mapudungun_transcript_drops_block_with_unequal_m_c_counts():
+    """A malformed/truncated block (more M: lines than C: lines, or vice
+    versa) is dropped rather than mis-paired -- silently zipping mismatched
+    counts would misalign every following utterance in a longer transcript."""
+    lines = ["M: one", "M: two", "C: only one", ""]
+    assert _parse_mapudungun_transcript(lines) == []
 
 
 def test_corpora_stream_indigenous_panel_single_pair(tmp_path):
@@ -196,8 +249,8 @@ def test_generate_indigenous_panel_figures(tmp_path):
     rows, families, written = generate_indigenous_panel_figures(str(results_path), str(out_dir))
 
     assert set(written) == {"en", "es"}
-    assert written["en"] == ["crk", "iu"]
-    assert len(written["es"]) == 10
+    assert written["en"] == ["chr", "crk", "iu", "mi"]  # sorted, see generate_indigenous_panel_figures
+    assert len(written["es"]) == 11
     for anchor in ("en", "es"):
         anchor_dir = out_dir / f"parity_vs_{anchor}"
         tex_path = anchor_dir / f"fig_indigenous_panel_parity_vs_{anchor}.tex"

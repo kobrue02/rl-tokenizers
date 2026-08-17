@@ -1,18 +1,22 @@
 # systems/tokenization/hf_frontier/evaluate.py -- sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier_indigenous_panel.yml
 #
-# Same 33 repos as configs/eval_hf_frontier.yml (see that file's own comment
-# for how each one was verified real before being added), scored instead on
+# Same 39 repos as configs/eval_hf_frontier.yml (see that file's own comment
+# for how each one was verified real before being added, and for the 5
+# XLM-R-family duplicates dropped from the original 44 -- none of those 5
+# were ever in this list, so this update only ADDS the 6 kept leaderboard
+# repos, nothing to remove), scored instead on
 # common.data.indigenous_panel's curated Indigenous-language panel --
 # requires a one-time `python -m common.data.prepare_indigenous_panel` run
-# first (writes to data/indigenous_panel/, the default --output-dir). See
-# common.eval.cross_tokenizer.evaluate_on_indigenous_panel's own docstring
-# for why this panel's results have a different shape (combined/
+# first (writes to data/indigenous_panel/, the default --output-dir; as of
+# the chr-en/mi-en/arn-es addition, this panel now has 13 pairs total, not
+# 10). See common.eval.cross_tokenizer.evaluate_on_indigenous_panel's own
+# docstring for why this panel's results have a different shape (combined/
 # token_parity_by_anchor/morphology_spread) than a bouquet/bouquet_test run's
 # -- scripts/generate_tikz_figures.py's own --indigenous-panel flag reads that shape
 # specifically, not load_rows.
-hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony"
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony,Jarbas/m2v-256-multilingual-e5-small,Jarbas/m2v-256-bge-reranker-v2-m3,Yoonyoul/fine-tuned-e5-small-drugproduct,bluexmas/mbart50_ko_vi,antebe/token_punct_dilute,slone/mbart-large-51-myv-mul-v1"
 trust_remote_code: true
 eval_data_source: indigenous_panel
 output: results/indigenous_panel_comparison.json
 use_wandb: true
-run_name: hf_frontier_indigenous_panel_v1
+run_name: hf_frontier_indigenous_panel_v2_39models
