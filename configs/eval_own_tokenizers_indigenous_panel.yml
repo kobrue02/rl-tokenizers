@@ -8,25 +8,23 @@
 # run first (writes to data/indigenous_panel/).
 #
 # checkpoint: whatever --output-dir each system's OWN `train.py <name>` run
-# actually wrote -- job-ID-tagged, cluster-specific, not something this repo
-# can know in advance. bpe/fanta below are copied from configs/eval_bpe_50k.yml
-# and configs/eval_fanta_50k.yml's own tokenizer_checkpoint fields (the exact
-# same artifact, just a different downstream consumer) -- CONFIRM these still
-# match your current checkpoints/ before submitting. flexitokens/magnet/manta
-# have no config anywhere in this repo recording theirs: replace the
-# <FILL_IN_...> placeholders below with the real paths (check checkpoints/ or
-# each run's own wandb config) before submitting, or this job will fail fast
-# on the first missing/wrong checkpoint.
+# actually wrote -- job-ID-tagged, cluster-specific. bpe/fanta are copied from
+# configs/eval_bpe_50k.yml and configs/eval_fanta_50k.yml's own
+# tokenizer_checkpoint fields (the exact same artifact, just a different
+# downstream consumer; fanta_6284655.pt specifically -- see that config's own
+# comment -- not the older fanta_6257621.pt also present in checkpoints/).
+# flexitokens/magnet/manta filled in from a live `ls checkpoints/` on the
+# actual cluster (2026-08-17) -- re-check if any of the 5 get retrained.
 systems:
   - name: bpe
     checkpoint: checkpoints/bpe_50k.json
   - name: fanta
     checkpoint: checkpoints/fanta_6284655.pt
   - name: flexitokens
-    checkpoint: checkpoints/flexitokens_<FILL_IN_JOB_ID>.pt
+    checkpoint: checkpoints/flexitokens_6269683.pt
   - name: magnet
-    checkpoint: checkpoints/magnet_<FILL_IN_JOB_ID>.pt
+    checkpoint: checkpoints/magnet_6269682.pt
   - name: manta
-    checkpoint: checkpoints/manta_<FILL_IN_JOB_ID>.pt
+    checkpoint: checkpoints/manta_6269684.pt
 output_dir: results
 combined_output: results/own_tokenizers_indigenous_panel.json

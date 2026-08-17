@@ -27,10 +27,10 @@
 #   - `python -m common.data.prepare_indigenous_panel` must have been run once
 #     already (writes to data/indigenous_panel/).
 #   - configs/eval_own_tokenizers_indigenous_panel.yml's checkpoint paths must
-#     point at this cluster's real checkpoints -- it ships with 3 unfilled
-#     <FILL_IN_JOB_ID> placeholders (flexitokens/magnet/manta) that WILL fail
-#     for that system specifically (see the script's own per-system error
-#     isolation -- the other systems still complete and get recorded).
+#     point at this cluster's real checkpoints -- re-check them (`ls
+#     checkpoints/`) if any of the 5 tokenizers get retrained, since a stale
+#     path there fails ONLY that system (see the script's own per-system
+#     error isolation -- the other systems still complete and get recorded).
 #   - MAGNET CAVEAT: magnet scores 0 languages on this panel by construction
 #     (see the script's own module docstring) -- not a bug, don't chase it.
 
