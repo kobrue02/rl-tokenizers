@@ -32,6 +32,14 @@ systems/tokenization/hf_frontier/evaluate.py's own per-repo loop, recorded
 under a "_failed" key in the combined output (only present if something
 failed) rather than losing every OTHER system's real results.
 
+A system whose output_path already exists is SKIPPED (reusing that file)
+rather than re-evaluated, unless --force is passed -- confirmed live to
+matter: a real run OOM-killed on the 2nd system after the 1st had already
+completed, and a naive resubmit would otherwise waste that completed work
+every time. Same "don't redo what a durable completion marker already
+proves finished" fix as systems/tokenization/superbpe/model.py's own
+stage1_result.json.
+
 Usage:
     python -m scripts.evaluate_own_tokenizers_indigenous_panel \\
         -c configs/eval_own_tokenizers_indigenous_panel.yml
@@ -39,6 +47,7 @@ Usage:
 
 import argparse
 import json
+import os
 
 import yaml
 
@@ -53,10 +62,15 @@ def build_arg_parser():
         help="YAML: {systems: [{name, checkpoint, extra_args: [...]}, ...], "
         "output_dir (default 'results'), combined_output}",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="re-evaluate every system even if its output_path already exists "
+        "(default: skip and reuse it -- see the module docstring)",
+    )
     return parser
 
 
-def run_own_tokenizers_indigenous_panel(cfg):
+def run_own_tokenizers_indigenous_panel(cfg, force=False):
     """cfg: the parsed YAML dict (see build_arg_parser's --config help).
     Returns (per_system_paths, failed) -- failed maps system name -> error
     string for any entry whose evaluate_cli.main() call raised (e.g. a
@@ -68,6 +82,10 @@ def run_own_tokenizers_indigenous_panel(cfg):
     for entry in cfg["systems"]:
         name = entry["name"]
         output_path = f"{output_dir}/{name}_indigenous_panel.json"
+        if not force and os.path.exists(output_path):
+            print(f"=== {name}: {output_path} already exists, skipping (pass --force to redo) ===")
+            per_system_paths.append(output_path)
+            continue
         print(f"=== evaluating {name} on indigenous_panel ===")
         try:
             evaluate_cli.main([
@@ -90,7 +108,7 @@ def main(argv=None):
     with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
-    per_system_paths, failed = run_own_tokenizers_indigenous_panel(cfg)
+    per_system_paths, failed = run_own_tokenizers_indigenous_panel(cfg, force=args.force)
 
     output_dir = cfg.get("output_dir", "results")
     combined_output = cfg.get("combined_output", f"{output_dir}/own_tokenizers_indigenous_panel.json")

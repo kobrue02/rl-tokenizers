@@ -3,7 +3,7 @@
 #SBATCH --partition=cpu_il
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=16
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
@@ -17,6 +17,17 @@
 # SLURM wrapper around it, only handle one system per invocation; this exists
 # so a single cheap CPU-only eval run doesn't need five separate submissions).
 # No GPU requested -- same cpu_il reasoning as jobs/evaluate.sh.
+#
+# --cpus-per-task=16 (was 4): confirmed live -- a real run OOM-killed at 4
+# cores/7.81GB (this cluster ties memory to cpus-per-task at ~1.95GB/core)
+# partway into fanta's own scoring loop, right after bpe had ALREADY
+# completed successfully while holding the full ~518k-row combined 13-pair
+# panel in memory. Since bpe proved the corpus itself fits, the extra
+# headroom fanta (and likely flexitokens/magnet/manta -- all real nn.Module
+# forward passes, unlike bpe's plain merge-table lookup) needs is its own
+# model + per-row span/token_freq accumulation over that now much-larger
+# panel, not a slow buildup across systems. 16 cores/~31GB is a generous
+# first widening, not a benchmarked number -- profile if it OOMs again.
 #
 # Usage:
 #   sbatch jobs/evaluate_own_tokenizers_indigenous_panel.sh -c configs/eval_own_tokenizers_indigenous_panel.yml

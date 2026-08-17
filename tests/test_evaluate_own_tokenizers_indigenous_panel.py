@@ -116,6 +116,59 @@ def test_main_combines_successful_systems_and_records_failures_under_failed_key(
     assert "bad checkpoint" in combined["_failed"]["flexitokens"]
 
 
+def test_run_own_tokenizers_indigenous_panel_skips_system_with_existing_output(tmp_path, monkeypatch):
+    """A resubmit after a partial failure (e.g. the real OOM this was written
+    for) must not waste time re-evaluating a system that already succeeded --
+    same "don't redo completed work" fix as superbpe's own stage1_result.json."""
+    calls = []
+
+    def fake_main(argv):
+        calls.append(argv[0])
+        name, output_path = argv[0], argv[6]
+        _write_fake_result(output_path, name, {"combined": {"avg_compression": 1.0}})
+
+    monkeypatch.setattr(evaluate_cli, "main", fake_main)
+
+    bpe_output = tmp_path / "bpe_indigenous_panel.json"
+    _write_fake_result(bpe_output, "bpe", {"combined": {"avg_compression": 9.0}})  # pre-existing "completed" result
+
+    cfg = {
+        "output_dir": str(tmp_path),
+        "systems": [
+            {"name": "bpe", "checkpoint": "checkpoints/bpe_50k.json"},
+            {"name": "fanta", "checkpoint": "checkpoints/fanta_6284655.pt"},
+        ],
+    }
+    per_system_paths, failed = run_own_tokenizers_indigenous_panel(cfg)
+
+    assert calls == ["fanta"]  # bpe skipped entirely, never re-invoked
+    assert failed == {}
+    assert per_system_paths == [str(bpe_output), f"{tmp_path}/fanta_indigenous_panel.json"]
+    with open(bpe_output) as f:
+        assert json.load(f)["bpe"]["combined"]["avg_compression"] == 9.0  # untouched
+
+
+def test_run_own_tokenizers_indigenous_panel_force_redoes_existing_output(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_main(argv):
+        calls.append(argv[0])
+        name, output_path = argv[0], argv[6]
+        _write_fake_result(output_path, name, {"combined": {"avg_compression": 1.0}})
+
+    monkeypatch.setattr(evaluate_cli, "main", fake_main)
+
+    bpe_output = tmp_path / "bpe_indigenous_panel.json"
+    _write_fake_result(bpe_output, "bpe", {"combined": {"avg_compression": 9.0}})
+
+    cfg = {"output_dir": str(tmp_path), "systems": [{"name": "bpe", "checkpoint": "checkpoints/bpe_50k.json"}]}
+    run_own_tokenizers_indigenous_panel(cfg, force=True)
+
+    assert calls == ["bpe"]
+    with open(bpe_output) as f:
+        assert json.load(f)["bpe"]["combined"]["avg_compression"] == 1.0  # overwritten
+
+
 def test_main_reports_and_returns_early_if_every_system_fails(tmp_path, monkeypatch, capsys):
     def always_fails(argv):
         raise RuntimeError("no checkpoint")
