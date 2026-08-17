@@ -1,0 +1,32 @@
+# scripts/evaluate_own_tokenizers_indigenous_panel.py -- sbatch jobs/evaluate_own_tokenizers_indigenous_panel.sh
+#
+# Runs all 5 of this project's own trained tokenizers through
+# common.data.indigenous_panel's curated Indigenous-language panel in ONE job
+# (evaluate.py only dispatches one system per invocation -- see that module's
+# own docstring -- so five separate sbatch submissions would otherwise be
+# needed). Requires a one-time `python -m common.data.prepare_indigenous_panel`
+# run first (writes to data/indigenous_panel/).
+#
+# checkpoint: whatever --output-dir each system's OWN `train.py <name>` run
+# actually wrote -- job-ID-tagged, cluster-specific, not something this repo
+# can know in advance. bpe/fanta below are copied from configs/eval_bpe_50k.yml
+# and configs/eval_fanta_50k.yml's own tokenizer_checkpoint fields (the exact
+# same artifact, just a different downstream consumer) -- CONFIRM these still
+# match your current checkpoints/ before submitting. flexitokens/magnet/manta
+# have no config anywhere in this repo recording theirs: replace the
+# <FILL_IN_...> placeholders below with the real paths (check checkpoints/ or
+# each run's own wandb config) before submitting, or this job will fail fast
+# on the first missing/wrong checkpoint.
+systems:
+  - name: bpe
+    checkpoint: checkpoints/bpe_50k.json
+  - name: fanta
+    checkpoint: checkpoints/fanta_6284655.pt
+  - name: flexitokens
+    checkpoint: checkpoints/flexitokens_<FILL_IN_JOB_ID>.pt
+  - name: magnet
+    checkpoint: checkpoints/magnet_<FILL_IN_JOB_ID>.pt
+  - name: manta
+    checkpoint: checkpoints/manta_<FILL_IN_JOB_ID>.pt
+output_dir: results
+combined_output: results/own_tokenizers_indigenous_panel.json
