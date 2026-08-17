@@ -244,7 +244,7 @@ def gen_spread_leaderboard_tex(
     rows, families, out_dir, data_prefix="",
     xlabel="Token-parity spread (max/min across all languages, anchor-invariant)",
     fig_name="spread_leaderboard",
-    row_height_cm=0.85,
+    row_height_cm=0.7,
 ):
     """Two side-by-side panels (left = better half of the ranking, right = worse
     half), not one long column -- past ~35-40 tokenizers a single-column bar chart
@@ -255,14 +255,40 @@ def gen_spread_leaderboard_tex(
     Both panels plot from the SAME per-family .dat files (unchanged, still keyed by
     each row's global rank `idx`) -- pgfplots clips points outside an axis's own
     ymin/ymax, so bounding each panel to its own half of the idx range is enough;
-    no separate per-half data files needed. Only the right panel carries a legend
-    (`forget plot` on the left avoids a duplicate).
+    no separate per-half data files needed.
 
-    row_height_cm=0.85 is an empirically confirmed floor (real tectonic render,
-    not eyeballed), not a guess: below ~0.8, \\scriptsize yticklabels start
-    overlapping the bar/axis area for the last few rows in a panel -- confirmed
-    broken at 0.62 (this project's own earlier single-column height formula,
-    0.65cm/row, sat in the same broken range) and clean at 0.85."""
+    NEITHER axis carries a pgfplots legend -- confirmed live (real tectonic
+    renders, not eyeballed) that attaching one to just the right panel misaligns
+    every row between the two panels, even with identical `height=`/`ymin`/`ymax`
+    and even with `scale only axis` added specifically to try to fix it: pgfplots
+    still shifts that ONE axis's own vertical position to make room for its
+    legend, in a way `scale only axis` doesn't neutralize. Removing the legend
+    from both axes entirely (confirmed live to restore exact row alignment) and
+    drawing it as plain TikZ swatches in a flowing paragraph AFTER both minipages
+    -- letting LaTeX's own line-breaking wrap entries, no manual row/column math
+    -- sidesteps pgfplots' legend machinery altogether.
+
+    `scale only axis` and `width=0.9\\linewidth` (not `\\linewidth`) are kept anyway:
+    the former makes the two panels' cm-per-row scale identical regardless of any
+    OTHER future asymmetry between them; the latter reserves room for the
+    rightmost x-tick label's overhang, which `scale only axis` stops pgfplots
+    auto-reserving -- confirmed live that omitting it clips the last tick (e.g.
+    "20") at the page margin.
+
+    A few more confirmed-live fixes once the above was otherwise working:
+    (1) a per-panel `xlabel` (both panels describe the same x-axis) ran the two
+    copies straight into each other at the seam between panels -- replaced with
+    ONE shared label centered under the whole two-column block.
+    (2) the two 0.48\\linewidth minipages need an outer `\\begingroup\\centering
+    ... \\endgroup` around the pair (plus the shared xlabel/legend below them) --
+    without it, plain paragraph flow is flush-left, so the ~4% leftover space
+    defaults entirely to one side instead of splitting evenly.
+    (3) the gap BETWEEN the two minipages must be a fixed `\\hspace`, not
+    `\\hfill`: `\\hfill` is stretchable glue of the SAME order `\\centering`'s own
+    before/after margins use, so the two compete for the same leftover space --
+    confirmed live that this made the whole block land off-center in an
+    unpredictable direction (which side depends on other content) rather than
+    `\\centering`'s margins reliably getting all of it."""
     n = len(rows)
     half = math.ceil(n / 2)
     columns = [rows[:half], rows[half:]]
@@ -273,7 +299,12 @@ def gen_spread_leaderboard_tex(
         r_, g_, b_ = _FAMILY_RGB[fam]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
 
-    body = []
+    # Outer centering, not just the per-panel \\centering below: the two 0.48\\linewidth
+    # minipages + \\hfill only total ~0.96\\linewidth, and without a wrapping group that
+    # leftover ~4% defaults to the right of the pair (plain paragraph flow is flush-left)
+    # instead of splitting evenly on both sides -- confirmed live (real thesis render)
+    # that the whole two-column block visibly drifted right instead of centering.
+    body = [r"\begingroup\centering"]
     for ci, col_rows in enumerate(columns):
         if not col_rows:
             continue
@@ -281,15 +312,38 @@ def gen_spread_leaderboard_tex(
         idx_min = min(r["idx"] for r in col_rows)
         idx_max = max(r["idx"] for r in col_rows)
         yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in col_rows)
-        body.append(r"\begin{minipage}[t]{0.48\linewidth}")
-        body.append(r"\centering")
+        body.append(r"\begin{minipage}[t]{0.47\linewidth}")
+        if is_last:
+            # This panel's own yticklabels sit to the LEFT of its axis line -- the
+            # longest ones overhang past this minipage's own left edge into the LEFT
+            # panel's rendered area, since minipages don't clip overflowing content --
+            # confirmed live (real tectonic render) that at plain \\centering the
+            # bottom few rows' labels bleed into the left panel's bars. A modest
+            # explicit \\hspace (not the full estimated label width -- confirmed live
+            # that reserving the FULL width here starves the data box enough to clip
+            # bars at the wide end of this panel's own range) trades a fully-eliminated
+            # overhang for a merely much-smaller one, without recreating that clipping.
+            body.append(r"\hspace{2.6cm}")
+            axis_width = r"\linewidth-2.9cm"
+        else:
+            body.append(r"\centering")
+            axis_width = r"0.9\linewidth"
         body += [
             r"\begin{tikzpicture}",
             r"\begin{axis}[",
             r"    xbar,",
-            r"    width=\linewidth, height=%.1fcm," % col_height,
-            r"    xlabel={%s}," % xlabel,
-            r"    x label style={font=\scriptsize},",
+            r"    scale only axis,",
+            r"    width=%s, height=%.1fcm," % (axis_width, col_height),
+            # No per-panel xlabel: both panels share the same x-axis meaning, and two
+            # copies -- one centered under each 0.48\\linewidth panel -- run straight
+            # into each other at the seam between them. One shared label centered
+            # under the whole two-column block (below, after both minipages) replaces
+            # both, so nothing collides.
+            # \\tiny specifically for the tick NUMBERS (not the axis label above) --
+            # shrinks the rightmost tick's own overhang past the data box's edge, a
+            # bit of extra safety margin against clipping regardless of the real
+            # page width, which this script can't know at generation time.
+            r"    x tick label style={font=\tiny},",
             r"    xmin=0,",
             r"    ytick={%s}," % ",".join(str(r["idx"]) for r in col_rows),
             r"    yticklabels={%s}," % yticklabels,
@@ -297,24 +351,52 @@ def gen_spread_leaderboard_tex(
             r"    y dir=reverse,",
             r"    ymin=%g, ymax=%g," % (idx_min - 0.7, idx_max + 0.3),
             r"    bar width=5pt,",
-            # Below the axis, not to its right: with two panels already filling the
-            # line width, a right-side legend (the single-column figure's old spot)
-            # would spill past the page margin -- there's no room left of it to give.
-            r"    legend style={at={(0.5,-0.11)}, anchor=north, legend columns=2, font=\scriptsize, draw=none, fill=none},",
             r"    axis y line*=left, axis x line*=bottom,",
             r"]",
         ]
         for fam in families:
             col = _FAMILY_COLORS[fam]
             body.append(
-                r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt%s] table [x=spread, y=idx] {%sbar_%s.dat};"
-                % (col, col, "" if is_last else ", forget plot", data_prefix, fam_key(fam))
+                r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=spread, y=idx] {%sbar_%s.dat};"
+                % (col, col, data_prefix, fam_key(fam))
             )
-            if is_last:
-                body.append(r"\addlegendentry{%s}" % fam)
         body += [r"\end{axis}", r"\end{tikzpicture}", r"\end{minipage}"]
         if not is_last:
-            body.append(r"\hfill")
+            # A FIXED gap, not \\hfill: \\hfill is stretchable glue of the same
+            # order \\centering itself uses for its own before/after margins --
+            # confirmed live that the two competing for the same leftover space
+            # (rather than \\centering's margins getting it all) made the whole
+            # block land off-center in an UNpredictable direction depending on
+            # other content, instead of splitting evenly. A fixed gap has no
+            # stretch to compete with, so all remaining slack reliably goes to
+            # \\centering's own margins instead.
+            #
+            # Expressed as a FRACTION of \\linewidth, not an absolute cm length --
+            # confirmed live that an absolute \\hspace (e.g. 0.6cm) on top of two
+            # 0.48\\linewidth panels can exceed \\linewidth on a narrower real page
+            # than this script assumed, overflowing the line and pushing the right
+            # panel onto its own page entirely. 0.47+0.47+0.02 = 0.96\\linewidth
+            # scales with whatever \\linewidth actually is, leaving a real ~4%
+            # margin for \\centering regardless.
+            body.append(r"\hspace{0.02\linewidth}")
+
+    # One shared x-axis label, not one per panel -- see the per-axis comment above.
+    body.append(r"\par\vspace{0.1cm}\scriptsize %s\par" % esc(xlabel))
+
+    # Manual legend, NOT a pgfplots legend on either axis: confirmed live that even
+    # with `scale only axis`, attaching a legend to ONE of two otherwise-identical
+    # axes still shifts that axis's own vertical position relative to the other
+    # (pgfplots reserves/centers space for it in a way `scale only axis` doesn't
+    # fully neutralize) -- misaligning every row between the two panels despite
+    # identical height/ymin/ymax. Plain TikZ swatches in a flowing paragraph
+    # (LaTeX's own line-breaking wraps them, no manual row/column math) sidesteps
+    # pgfplots' legend machinery entirely, so neither axis carries any legend
+    # content and both stay structurally identical.
+    body.append(r"\vspace{0.2cm}\scriptsize")
+    for fam in families:
+        col = _FAMILY_COLORS[fam]
+        body.append(r"\tikz{\fill[%s] (0,0) rectangle (0.9em,0.6em);}~%s\quad" % (col, esc(fam)))
+    body.append(r"\par\endgroup")
     full_tex, _ = _write_standalone_and_body(fig_name, preamble, body, out_dir)
     return full_tex
 

@@ -269,6 +269,20 @@ def fit_superbpe(
     merge-fitting loop itself, and its own result gets discarded in favor of the
     checkpointed `sequences` when a stage resumes anyway).
 
+    Once stage 1 finishes, _fit_merges deletes its OWN checkpoint (a finished
+    stage isn't resumable) -- but a crash during stage 2 still needs stage 1's
+    completed merges list to reconstruct id_to_bytes/stage1_merge_info on the
+    next call, and by then nothing durable says stage 1 is done. Confirmed
+    live: without persisting that separately, `fit_superbpe` had no way to tell
+    "stage 1 already finished" from "stage 1 never started", so a resume
+    landing in stage 2 silently REFIT ALL of stage 1 from scratch first --
+    deterministic, so not WRONG, but a real ~40k-merge run wasted on a resume
+    that should have skipped straight to stage 2. stage1_result.json persists
+    the completed list once, checked before stage 1 is attempted at all so a
+    later resume can skip it entirely; removed once the whole fit succeeds, so
+    a genuinely different experiment reusing this checkpoint_dir doesn't
+    silently inherit a stale stage 1.
+
     Returns a SuperBPEModel.
     """
     id_to_bytes = {i: bytes([i]) for i in range(256)}
@@ -277,21 +291,45 @@ def fit_superbpe(
     stage2_merges = total_merges - stage1_merges
     stage1_ckpt = os.path.join(checkpoint_dir, "stage1_checkpoint.json") if checkpoint_dir else None
     stage2_ckpt = os.path.join(checkpoint_dir, "stage2_checkpoint.json") if checkpoint_dir else None
+    stage1_result_path = os.path.join(checkpoint_dir, "stage1_result.json") if checkpoint_dir else None
     if checkpoint_dir:
         os.makedirs(checkpoint_dir, exist_ok=True)
 
-    word_counts = Counter()
-    for sent in sentences:
-        word_counts.update(pretokenize(sent))
-    words = list(word_counts.keys())
-    word_weights = [word_counts[w] for w in words]
-    word_seqs = [list(w) for w in words]
+    cached_stage1 = None
+    if stage1_result_path and os.path.exists(stage1_result_path):
+        with open(stage1_result_path) as f:
+            cached_stage1 = [(tuple(pair), new_id) for pair, new_id in json.load(f)["merges"]]
+        if len(cached_stage1) != stage1_merges:
+            raise ValueError(
+                f"{stage1_result_path}: cached stage 1 result has {len(cached_stage1)} merges, "
+                f"expected {stage1_merges} for this --vocab-size/transition-fraction -- looks like "
+                "it belongs to a different experiment; delete it if intentionally starting one."
+            )
 
-    stage1_merges_list = _fit_merges(
-        word_seqs, word_weights, stage1_merges, id_to_bytes, next_id=256,
-        log_prefix="stage1 (within-word)" if verbose else None,
-        checkpoint_path=stage1_ckpt, checkpoint_every=checkpoint_every,
-    )
+    if cached_stage1 is not None:
+        stage1_merges_list = cached_stage1
+        for pair, new_id in stage1_merges_list:
+            a, b = pair
+            id_to_bytes[new_id] = id_to_bytes[a] + id_to_bytes[b]
+    else:
+        word_counts = Counter()
+        for sent in sentences:
+            word_counts.update(pretokenize(sent))
+        words = list(word_counts.keys())
+        word_weights = [word_counts[w] for w in words]
+        word_seqs = [list(w) for w in words]
+
+        stage1_merges_list = _fit_merges(
+            word_seqs, word_weights, stage1_merges, id_to_bytes, next_id=256,
+            log_prefix="stage1 (within-word)" if verbose else None,
+            checkpoint_path=stage1_ckpt, checkpoint_every=checkpoint_every,
+        )
+        if stage1_result_path:
+            tmp_path = stage1_result_path + ".tmp"
+            with open(tmp_path, "w") as f:
+                json.dump({"merges": [[list(pair), new_id] for pair, new_id in stage1_merges_list]}, f)
+            os.replace(tmp_path, stage1_result_path)
+
     stage1_merge_info = {
         pair: (rank, new_id) for rank, (pair, new_id) in enumerate(stage1_merges_list)
     }
@@ -312,6 +350,14 @@ def fit_superbpe(
         log_prefix="stage2 (superword)" if verbose else None,
         checkpoint_path=stage2_ckpt, checkpoint_every=checkpoint_every,
     )
+
+    # The whole fit succeeded -- stage1_result_path is only needed to skip a
+    # completed stage 1 on a resume that never happens now; a stale copy left
+    # around risks a future different experiment reusing this checkpoint_dir
+    # silently inheriting the wrong stage 1 (caught by the length check above,
+    # but simplest to just not leave it there for that check to ever need to fire).
+    if stage1_result_path and os.path.exists(stage1_result_path):
+        os.remove(stage1_result_path)
 
     return SuperBPEModel(
         merges=stage1_merges_list + stage2_merges_list,

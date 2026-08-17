@@ -82,9 +82,41 @@ def test_resume_after_crash_mid_stage2_matches_baseline(tmp_path, baseline):
             sbpe.fit_superbpe(_SENTENCES, _VOCAB_SIZE, verbose=False, checkpoint_dir=str(tmp_path), checkpoint_every=3)
     finally:
         restore()
-    # Stage 1 must have finished (and cleaned up its own checkpoint) before stage 2
-    # ever starts -- only stage2's checkpoint should survive the crash.
-    assert os.listdir(tmp_path) == ["stage2_checkpoint.json"]
+    # Stage 1 must have finished (and cleaned up its own merge checkpoint) before
+    # stage 2 ever starts. It leaves behind stage1_result.json -- the durable
+    # record that lets a resume skip stage 1 instead of redoing it -- alongside
+    # stage2's own in-progress checkpoint.
+    assert sorted(os.listdir(tmp_path)) == ["stage1_result.json", "stage2_checkpoint.json"]
+
+    resumed = sbpe.fit_superbpe(_SENTENCES, _VOCAB_SIZE, verbose=False, checkpoint_dir=str(tmp_path), checkpoint_every=3)
+    assert os.listdir(tmp_path) == []
+    assert resumed.merges == baseline.merges
+    assert resumed.id_to_bytes == baseline.id_to_bytes
+
+
+def test_resume_past_completed_stage1_does_not_redo_it(tmp_path, baseline, monkeypatch):
+    """The real bug: resuming with a valid stage1_result.json present must skip
+    straight to stage 2, not recompute stage 1's ~40k merges from scratch. A crash
+    mid-stage2 is the easiest way to land in exactly that state, then we patch
+    _fit_merges to fail loudly if it's ever asked for stage1_merges again."""
+    patch, restore = _crash_after_n_saves(2, path_filter="stage2")
+    patch()
+    try:
+        with pytest.raises(RuntimeError, match="simulated crash"):
+            sbpe.fit_superbpe(_SENTENCES, _VOCAB_SIZE, verbose=False, checkpoint_dir=str(tmp_path), checkpoint_every=3)
+    finally:
+        restore()
+    assert "stage1_result.json" in os.listdir(tmp_path)
+
+    stage1_merges = baseline.num_stage1_merges
+    real_fit_merges = sbpe._fit_merges
+
+    def guarded_fit_merges(sequences, weights, num_merges, *args, **kwargs):
+        if num_merges == stage1_merges:
+            raise AssertionError("stage 1 was redone instead of being skipped via stage1_result.json")
+        return real_fit_merges(sequences, weights, num_merges, *args, **kwargs)
+
+    monkeypatch.setattr(sbpe, "_fit_merges", guarded_fit_merges)
 
     resumed = sbpe.fit_superbpe(_SENTENCES, _VOCAB_SIZE, verbose=False, checkpoint_dir=str(tmp_path), checkpoint_every=3)
     assert os.listdir(tmp_path) == []
