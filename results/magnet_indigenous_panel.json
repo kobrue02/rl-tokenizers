@@ -1,0 +1,39 @@
+{
+  "magnet": {
+    "combined": {
+      "renyi": {},
+      "gini": 0.0,
+      "per_lang_compression": {},
+      "avg_compression": 0.0,
+      "fertility": {}
+    },
+    "token_parity_by_anchor": {
+      "es": {
+        "renyi": {},
+        "gini": 0.0,
+        "per_lang_compression": {},
+        "avg_compression": 0.0,
+        "fertility": {},
+        "token_parity": {},
+        "token_parity_anchor": "es",
+        "token_parity_gm": {},
+        "token_parity_spread": 1.0
+      },
+      "en": {
+        "renyi": {},
+        "gini": 0.0,
+        "per_lang_compression": {},
+        "avg_compression": 0.0,
+        "fertility": {},
+        "token_parity": {},
+        "token_parity_anchor": "en",
+        "token_parity_gm": {},
+        "token_parity_spread": 1.0
+      }
+    },
+    "morphology_spread": {
+      "fertility_spread": 1.0,
+      "compression_spread": 1.0
+    }
+  }
+}
