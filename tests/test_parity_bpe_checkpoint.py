@@ -45,6 +45,33 @@ def baseline():
     return ckpt_fit.fit_checkpointed(_make_files(_TRAIN), _make_files(_DEV), 40, min_frequency=2)
 
 
+def test_make_picklable_helpers_mutate_in_place_not_copy():
+    """Regression test for a real, confirmed OOM: an earlier version of this
+    module converted stats/big_stats/dev_vocab/indices to brand-new plain
+    dicts at every checkpoint save (to work around pickle's own inability to
+    serialize a lambda-based defaultdict factory) -- at real corpus scale
+    (hundreds of thousands of pairs), that duplicated the entire structure
+    into memory at every checkpoint interval. The fix swaps each
+    defaultdict's OWN default_factory attribute in place instead -- confirms
+    that here directly: the returned object must be the SAME object
+    (identical id()), never a copy, and must still round-trip through
+    pickle correctly."""
+    import pickle
+    from collections import defaultdict
+
+    stats = defaultdict(lambda: __import__("numpy").zeros(3, dtype=int))
+    stats[(1, 2)] += 1
+    result = ckpt_fit._make_stats_picklable(stats, 3)
+    assert result is stats  # same object, not a copy
+    pickle.loads(pickle.dumps(stats))  # must not raise
+
+    indices = defaultdict(lambda: defaultdict(int))
+    indices[(1, 2)][0] += 1
+    result = ckpt_fit._make_indices_picklable(indices)
+    assert result is indices
+    pickle.loads(pickle.dumps(indices))
+
+
 def test_fit_checkpointed_matches_vendor_learn_bpe_directly():
     """Proves the reimplemented loop is a faithful equivalent, not an
     approximation: given identical input, it must produce EXACTLY the same

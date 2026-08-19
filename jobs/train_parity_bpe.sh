@@ -3,7 +3,7 @@
 #SBATCH --partition=cpu_il
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=16
 #SBATCH --time=08:00:00
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
@@ -41,6 +41,20 @@
 # project's real --vocab-size scale -- widen it if a real run needs
 # multiple resubmissions to converge; profile checkpointed_fit.fit_checkpointed
 # if even repeated resumes don't.
+#
+# --cpus-per-task=16 (was 4): CONFIRMED LIVE -- a real --data-source all run
+# (515k sentences, 345 languages, vocab_size=50000) OOM-killed at 4 cores
+# (this cluster ties memory to cpus-per-task at ~1.95GB/core, i.e. 7.81GB --
+# same root cause as jobs/evaluate_own_tokenizers_indigenous_panel.sh's own
+# earlier OOM). Two contributing factors, both addressed: (1) an earlier
+# version of checkpointed_fit.py's checkpoint save duplicated the entire
+# `indices` structure (tens of millions of entries at this scale) into a
+# brand-new dict at every checkpoint interval -- fixed by pickling the live
+# defaultdicts directly instead (see that module's own docstring); (2) the
+# underlying stats/sorted_vocab/indices structures for a corpus this size
+# are simply large regardless of checkpointing, so headroom was raised too.
+# 16 cores/~31GB is a generous first widening, not a benchmarked number --
+# profile further if it OOMs again even after this.
 #
 # Usage:
 #   sbatch jobs/train_parity_bpe.sh --data-source all --langs all --vocab-size 50000

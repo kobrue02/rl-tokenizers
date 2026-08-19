@@ -46,15 +46,35 @@ WHAT GETS PERSISTED, AND WHY EACH PIECE IS NEEDED (see _save_checkpoint):
   - selected_indices (moving-window variant only): the recent-language-
     selection history the window-exclusion rule depends on.
 
-Several of these are defaultdicts with a LAMBDA default factory
-(stats/big_stats/dev_vocab: lambda: numpy.zeros(N); indices: lambda:
-defaultdict(int)) -- Python's pickle can't serialize a lambda, so
-_to_plain/_from_plain convert to/from plain dicts around every save/load,
-reconstructing the same factory (with the right dimensionality, itself
-persisted) on load.
+Several of these (stats/big_stats/dev_vocab: lambda: numpy.zeros(N);
+indices: lambda: defaultdict(int)) are defaultdicts built by the VENDORED
+preprocess_input_data with a LAMBDA default_factory -- Python's pickle can't
+serialize a lambda directly. Rather than converting to a plain dict and
+back around every save/load (an EARLIER version of this file did exactly
+that, and it's a real, CONFIRMED memory problem at real corpus scale: a
+75-million-pair `indices` structure across 345 languages/515k sentences
+means `{pair: dict(inner) for pair, inner in indices.items()}` allocates a
+brand-new dict object for every single one of those pairs, at EVERY
+checkpoint interval, sitting in memory ALONGSIDE the original -- this is
+what caused a real OOM kill on an actual cluster run).
+
+Fixed by swapping each defaultdict's OWN `default_factory` ATTRIBUTE, once,
+right after preprocess_input_data returns, from the vendored lambda to a
+functools.partial/builtin equivalent that pickle CAN serialize directly
+(`functools.partial(numpy.zeros, width, dtype=int)` for
+stats/big_stats/dev_vocab; `functools.partial(defaultdict, int)` for
+indices' outer level -- its inner defaultdict(int) values are already
+picklable as-is, since `int` is a builtin, not a lambda). This is an O(1)
+attribute assignment, not a rebuild: existing key/value data is completely
+untouched, and every new key created afterward (including by the vendored
+sub-functions themselves, and through copy.deepcopy(big_stats) mid-loop --
+both confirmed to preserve a swapped factory correctly) uses the new,
+already-picklable factory. Checkpointing the live objects directly, with
+zero duplication, replaces the earlier plain-dict round trip entirely.
 """
 
 import copy
+import functools
 import os
 import pickle
 from collections import defaultdict, deque
@@ -64,27 +84,20 @@ import numpy
 from .vendor import parity_aware_learn_bpe as vendor
 
 
-def _stats_to_plain(d):
-    return dict(d)
-
-
-def _stats_from_plain(plain, width):
-    d = defaultdict(lambda: numpy.zeros(width, dtype=int))
-    d.update(plain)
+def _make_stats_picklable(d, width):
+    """Swaps `d`'s default_factory (from vendor.preprocess_input_data, which
+    this project doesn't control) for a picklable equivalent -- see module
+    docstring. Mutates `d` in place and returns it for chaining."""
+    d.default_factory = functools.partial(numpy.zeros, width, dtype=int)
     return d
 
 
-def _indices_to_plain(indices):
-    return {pair: dict(inner) for pair, inner in indices.items()}
-
-
-def _indices_from_plain(plain):
-    d = defaultdict(lambda: defaultdict(int))
-    for pair, inner in plain.items():
-        inner_d = defaultdict(int)
-        inner_d.update(inner)
-        d[pair] = inner_d
-    return d
+def _make_indices_picklable(indices):
+    """Same fix for `indices` (a NESTED defaultdict(lambda: defaultdict(int)))
+    -- only the OUTER factory needs swapping; each INNER defaultdict(int) is
+    already directly picklable (int is a builtin, not a lambda)."""
+    indices.default_factory = functools.partial(defaultdict, int)
+    return indices
 
 
 def _save_checkpoint(path, state):
@@ -145,13 +158,15 @@ def fit_checkpointed(
             )
         array_length = resumed["array_length"]
         dev_width = resumed["dev_width"]
-        stats = _stats_from_plain(resumed["stats"], array_length)
-        big_stats = _stats_from_plain(resumed["big_stats"], array_length)
+        # Already picklable defaultdicts (see module docstring) -- loaded
+        # directly, no reconstruction needed, and no duplicate copy either.
+        stats = resumed["stats"]
+        big_stats = resumed["big_stats"]
         threshold = resumed["threshold"]
         lengths = resumed["lengths"]
         sorted_vocab = resumed["sorted_vocab"]
-        dev_vocab = _stats_from_plain(resumed["dev_vocab"], dev_width)
-        indices = _indices_from_plain(resumed["indices"])
+        dev_vocab = resumed["dev_vocab"]
+        indices = resumed["indices"]
         start_i = resumed["i"]
         merge_lines = list(resumed["merge_lines"])
         selected_indices = deque(resumed["selected_indices"], maxlen=window_size) if use_moving_window else None
@@ -164,6 +179,10 @@ def fit_checkpointed(
                 num_global=num_global, num_workers=1, bpe_file=None,
             )
         dev_width = len(lengths)
+        _make_stats_picklable(stats, array_length)
+        _make_stats_picklable(big_stats, array_length)
+        _make_stats_picklable(dev_vocab, dev_width)
+        _make_indices_picklable(indices)
         start_i = 0
         merge_lines = []
         selected_indices = deque(maxlen=window_size) if use_moving_window else None
@@ -217,12 +236,14 @@ def fit_checkpointed(
         # project -- avoided here from the start).
         next_i = i + 1
         if checkpoint_path and checkpoint_every and next_i % checkpoint_every == 0:
+            # stats/big_stats/dev_vocab/indices pickled DIRECTLY -- already
+            # picklable (see module docstring), no plain-dict duplication.
             _save_checkpoint(checkpoint_path, {
                 "config_key": config_key,
                 "array_length": array_length, "dev_width": dev_width,
-                "stats": _stats_to_plain(stats), "big_stats": _stats_to_plain(big_stats),
+                "stats": stats, "big_stats": big_stats,
                 "threshold": threshold, "lengths": lengths, "sorted_vocab": sorted_vocab,
-                "dev_vocab": _stats_to_plain(dev_vocab), "indices": _indices_to_plain(indices),
+                "dev_vocab": dev_vocab, "indices": indices,
                 "i": next_i, "merge_lines": merge_lines,
                 "selected_indices": list(selected_indices) if use_moving_window else None,
             })
