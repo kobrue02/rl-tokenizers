@@ -55,11 +55,13 @@ class ParityBPEConfig(BaseTokenizerConfig):
     tokenizers.Tokenizer.save() -- a self-describing JSON file, not a
     torch.save dict like the from-scratch systems' checkpoints.
 
-    NO checkpoint_dir field, unlike this project's own from-scratch fitters
-    (superbpe) -- reusing the official implementation directly (per explicit
-    user instruction) means no mid-fit pause/resume hook exists to expose;
-    see model.py's own module docstring for why and what a real timeout at
-    this project's --vocab-size scale would mean in practice."""
+    checkpoint_dir: "" (default) calls the official implementation
+    directly, maximizing reuse for a fit that finishes in one run. A real
+    path switches to .checkpointed_fit's own reimplementation of the same
+    loop (reusing every one of the official implementation's sub-functions
+    unmodified) -- see model.py's own module docstring for why a resume
+    from this is provably BYTE-IDENTICAL to letting the fit run
+    uninterrupted, same guarantee as superbpe's own checkpoint_dir."""
 
     wandb_project: str = "parity_bpe"
     # See model.py's module docstring's VARIANTS section.
@@ -70,6 +72,8 @@ class ParityBPEConfig(BaseTokenizerConfig):
     alpha: float = 2.0  # paper's own default.
     min_frequency: int = 2  # official implementation's own CLI default --
     # stop this language's merge search once its best pair falls below this count.
+    checkpoint_dir: str = ""
+    checkpoint_every: int = 500
     # 0 scores every loaded eval group (see bpe/superbpe's own same field) --
     # fires once (this is the POST-FIT report; the SAME eval_groups also
     # drove the fit itself, see module docstring), not periodically.
@@ -123,6 +127,7 @@ class ParityBPETrainer(BaseTokenizerTrainer):
             window_size=cfg.window_size, alpha=cfg.alpha,
             min_frequency=cfg.min_frequency,
             verbose=True,
+            checkpoint_dir=cfg.checkpoint_dir or None, checkpoint_every=cfg.checkpoint_every,
         )
         self.model = model
         print(f"learned vocabulary of {model.num_parameters()} tokens")

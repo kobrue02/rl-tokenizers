@@ -20,14 +20,27 @@
 # jobs/train_superbpe.sh (single-shot, pure-Python corpus-statistics fit,
 # no gradient descent).
 #
-# NO --checkpoint-dir / resumability, unlike jobs/train_superbpe.sh's own
-# fit: the vendored learn_bpe/learn_bpe_moving_window are single monolithic
-# calls with no pause/resume hook (see model.py's own module docstring for
-# why adding one isn't a small change here). --time=08:00:00 is a first
-# estimate, NOT yet benchmarked at this project's real --vocab-size scale --
-# if a real run times out, there is currently no way to continue it; it
-# must be resubmitted from scratch. Widen --time first if that happens
-# rather than assuming a longer run will simply pick up where it left off.
+# --checkpoint-dir IS resumable, unlike a naive reuse of the official code
+# would be: the vendored learn_bpe/learn_bpe_moving_window are themselves
+# single monolithic calls with no pause/resume hook, but
+# systems/tokenization/parity_bpe/checkpointed_fit.py reimplements just
+# their OUTER LOOP (reusing every one of their own sub-functions unmodified)
+# with periodic checkpointing added -- see that module's own docstring for
+# why a resume from it is provably BYTE-IDENTICAL to letting the fit run
+# uninterrupted, not merely "comparably fair". FIXED path (not tagged by
+# SLURM_JOB_ID) so resubmitting this exact job after a timeout finds the
+# same in-progress fit and continues it -- same convention as
+# jobs/train_superbpe.sh's own --checkpoint-dir. Only clear this directory
+# if you're intentionally starting a genuinely different experiment
+# (different corpus/--vocab-size/--num-global-merges/--use-moving-window) --
+# reusing it across two different configs raises a loud ValueError rather
+# than silently corrupting the fit, but a stale directory from an abandoned
+# run still needs a manual `rm -rf` first.
+#
+# --time=08:00:00 is a first estimate, NOT yet benchmarked at this
+# project's real --vocab-size scale -- widen it if a real run needs
+# multiple resubmissions to converge; profile checkpointed_fit.fit_checkpointed
+# if even repeated resumes don't.
 #
 # Usage:
 #   sbatch jobs/train_parity_bpe.sh --data-source all --langs all --vocab-size 50000
@@ -73,17 +86,22 @@ uv sync
 mkdir -p logs checkpoints vocab_out results
 
 # 5. Run -- job-id-tagged output paths, same convention as jobs/train_superbpe.sh.
-# CHECKPOINT_PATH is a .json file (tokenizers.Tokenizer's own native
-# serialization -- see model.py's own docstring for why this is
+# CHECKPOINT_PATH (the FINAL saved model) is a .json file (tokenizers.Tokenizer's
+# own native serialization -- see model.py's own docstring for why this is
 # `tokenizers`-backed like bpe/, not torch.save-backed like superbpe/), not
-# a .pt file.
+# a .pt file. FIT_CHECKPOINT_DIR (the IN-PROGRESS fit's own resumable state,
+# see checkpointed_fit.py) is deliberately NOT job-id-tagged -- see the
+# --checkpoint-dir comment above for why it needs to stay fixed across
+# resubmissions.
 CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/parity_bpe_${SLURM_JOB_ID}.json"
+FIT_CHECKPOINT_DIR="$PROJECT_ROOT/checkpoints/parity_bpe_fit_checkpoint"
 echo "Starting Parity-aware BPE fitting with args: $@"
 python3 train.py parity_bpe \
     --use-wandb \
     --wandb-project parity_bpe \
     --run-name "slurm-${SLURM_JOB_ID}" \
     --output-dir "$CHECKPOINT_PATH" \
+    --checkpoint-dir "$FIT_CHECKPOINT_DIR" \
     --vocab-out "$PROJECT_ROOT/vocab_out/parity_bpe_vocab_${SLURM_JOB_ID}.json" \
     --vocab-stats-out "$PROJECT_ROOT/vocab_out/parity_bpe_vocab_stats_${SLURM_JOB_ID}.json" \
     "$@"

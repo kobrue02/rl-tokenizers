@@ -43,24 +43,23 @@ project's other classical-BPE baseline. ParityBPEModel below reuses that
 same inverse mapping to recover real bytes from encoded tokens, exactly like
 bpe.model.BPEModel does.
 
-NO CHECKPOINT/RESUME (a real, known consequence of reusing their code
-as-is): unlike every from-scratch fitter in this project (see
-systems.tokenization.superbpe.model's own checkpoint support, added after a
-real multi-timeout SLURM incident on THIS project), learn_bpe/
-learn_bpe_moving_window are single monolithic calls with no pause/resume
-hook -- see vendor/parity_aware_learn_bpe.py's own docstring for why adding
-one here isn't a small change (it would mean modifying vendored code, which
-undercuts the point of reusing it verbatim). Their own `bpe_file`/preload
-mechanism COULD plausibly be repurposed for coarse chunked resume (call
-learn_bpe repeatedly with a small num_symbols per call, preloading the
-previous chunk's output each time), but the pruning-threshold recompute
-that happens at every preprocess_input_data call means a chunked run is NOT
-guaranteed byte-identical to one uninterrupted call -- a real tradeoff
-against exact reproducibility, not implemented here without deciding that
-tradeoff first. Flag this before a long real-vocab-scale run on the cluster.
+CHECKPOINT/RESUME (checkpoint_dir, optional): learn_bpe/
+learn_bpe_moving_window themselves are single monolithic calls with no
+pause/resume hook of any kind. Rather than modify the vendored functions to
+add one, .checkpointed_fit reimplements just their OUTER LOOP, reusing their
+existing sub-functions (preprocess_input_data, prune_stats, replace_pair,
+update_pair_statistics, replace_pair_dict, select_language_index)
+unmodified -- see that module's own docstring for exactly what's persisted
+and why a resume is provably BYTE-IDENTICAL to an uninterrupted run (not
+merely "comparably fair"). fit_parity_bpe below calls
+vendor.learn_bpe/learn_bpe_moving_window DIRECTLY (maximum reuse of the
+official implementation, zero risk of the two code paths drifting apart)
+whenever checkpoint_dir is None -- the checkpointed path is opt-in, used
+only when actually needed for a real long-running fit.
 """
 
 import io
+import os
 
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
@@ -68,6 +67,7 @@ from tokenizers.pre_tokenizers import ByteLevel, Sequence, Whitespace
 
 from common.vocab import BYTE_TO_UNICODE
 
+from . import checkpointed_fit
 from .vendor import parity_aware_learn_bpe as vendor
 from .vendor.hf_tokenizer import build_vocab_from_merges
 
@@ -131,6 +131,7 @@ def fit_parity_bpe(
     sentences_by_lang, dev_sentences_by_lang, vocab_size,
     num_global_merges=0, use_moving_window=False, window_size=100, alpha=2,
     min_frequency=2, verbose=False,
+    checkpoint_dir=None, checkpoint_every=500,
 ):
     """Fits a ParityBPEModel by calling the OFFICIAL learn_bpe/
     learn_bpe_moving_window implementation directly (see module docstring).
@@ -146,6 +147,14 @@ def fit_parity_bpe(
     named-language concept, see README's "nth input corpus corresponds to
     the nth dev corpus"), can drive the fairness objective. Reports (never
     silently drops) any train-only/dev-only languages.
+
+    checkpoint_dir (optional): if given, fits via .checkpointed_fit instead
+    of calling vendor.learn_bpe/learn_bpe_moving_window directly -- a
+    provably byte-identical-on-resume reimplementation of the same loop
+    (see that module's own docstring), for real long-running fits that may
+    span multiple SLURM job time limits. None (default): calls the official
+    implementation directly, maximizing reuse for the common case where a
+    fit finishes in one run.
 
     Returns a ParityBPEModel.
     """
@@ -180,23 +189,34 @@ def fit_parity_bpe(
 
     infiles = [io.StringIO("\n".join(_to_str(s) for s in sentences_by_lang[lang]) + "\n") for lang in usable_langs]
     devfiles = [io.StringIO("\n".join(_to_str(s) for s in dev_sentences_by_lang[lang]) + "\n") for lang in usable_langs]
-    outfile = io.StringIO()
 
     num_symbols = max(0, vocab_size - len(ByteLevel.alphabet()))
     common_kwargs = dict(
         min_frequency=min_frequency, verbose=verbose, num_global=num_global_merges,
     )
-    if use_moving_window:
-        vendor.learn_bpe_moving_window(
-            infiles, outfile, devfiles, num_symbols, window_size=window_size, alpha=alpha, **common_kwargs
+    if checkpoint_dir:
+        checkpoint_path = os.path.join(checkpoint_dir, "parity_bpe_fit_checkpoint.pkl")
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        merges = checkpointed_fit.fit_checkpointed(
+            infiles, devfiles, num_symbols,
+            use_moving_window=use_moving_window, window_size=window_size, alpha=alpha,
+            checkpoint_path=checkpoint_path, checkpoint_every=checkpoint_every,
+            **common_kwargs,
         )
     else:
-        vendor.learn_bpe(infiles, outfile, devfiles, num_symbols, **common_kwargs)
+        outfile = io.StringIO()
+        if use_moving_window:
+            vendor.learn_bpe_moving_window(
+                infiles, outfile, devfiles, num_symbols, window_size=window_size, alpha=alpha, **common_kwargs
+            )
+        else:
+            vendor.learn_bpe(infiles, outfile, devfiles, num_symbols, **common_kwargs)
+        lines = [line for line in outfile.getvalue().splitlines() if line]
+        merges = lines[1:] if lines and lines[0].startswith("#version:") else lines
 
-    merge_lines = [line for line in outfile.getvalue().splitlines() if line]
+    merge_lines = merges
     vocab = build_vocab_from_merges(merge_lines)
-    merges = merge_lines[1:] if merge_lines and merge_lines[0].startswith("#version:") else merge_lines
-    merge_pairs = [tuple(line.split()) for line in merges]
+    merge_pairs = [tuple(line.split()) for line in merge_lines]
 
     tokenizer = Tokenizer(BPE(vocab=vocab, merges=merge_pairs, unk_token=None))
     tokenizer.pre_tokenizer = _ENCODE_PRE_TOKENIZER
