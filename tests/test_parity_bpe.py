@@ -36,6 +36,63 @@ def _learn_merges(train_by_lang, dev_by_lang, num_symbols, **kwargs):
     return lines, langs
 
 
+def test_normalize_lang_code_handles_both_conventions():
+    """Regression test for a real bug hit on a live cluster run:
+    --data-source all pools oldi_seed+flores_dev (BOUQuET-convention
+    lang_Script codes) with smol (short/hyphenated codes) -- without
+    normalization, 195 of 345 training languages were silently excluded
+    from the fit entirely because "en" != "eng_Latn" as raw dict keys, even
+    though they're the same language."""
+    cases = [
+        ("en", "eng"), ("eng_Latn", "eng"),
+        ("ar-MA", "ara"), ("pa-Arab", "pan"), ("ks-Deva", "kas"),
+        ("apc_Arab_nort3139", "apc"), ("twi_Latn_akua1239", "twi"),
+        ("aar_Latn", "aar"),
+    ]
+    for raw, expected in cases:
+        assert pbm._normalize_lang_code(raw) == expected, f"{raw!r} should normalize to {expected!r}"
+
+
+def test_normalize_lang_code_falls_back_to_raw_on_parse_failure():
+    """langcodes is lenient about underscore/hyphen-separated ALPHANUMERIC
+    garbage (it just treats the first segment as the language subtag and
+    normalizes that, e.g. "not_a_real_..." -> "not"), but genuinely
+    malformed strings (containing non-alphanumeric characters, empty, or
+    all-numeric) raise LanguageTagError -- confirmed live. The fallback
+    exists for exactly those, so this project's own code-normalization step
+    can never crash the whole fit over one weird language code."""
+    for garbage in ("???", "", "12345"):
+        assert pbm._normalize_lang_code(garbage) == garbage
+
+
+def test_short_code_matches_lang_script_dev_code(capsys):
+    """The exact scenario from the real cluster bug: train uses smol's own
+    short code ("en"), dev uses BOUQuET's lang_Script convention
+    ("eng_Latn") -- these must be recognized as the same language and BOTH
+    used, not dropped as unrelated train-only/dev-only languages."""
+    train = {"en": ["hello world hello world"] * 20}
+    dev = {"eng_Latn": ["hello world"] * 5}
+    model = fit_parity_bpe(train, dev, vocab_size=280)
+    assert model.num_parameters() > 256
+    out = capsys.readouterr().out
+    assert "have no corresponding training data" not in out
+    assert "have no dev-set compression" not in out
+
+
+def test_merged_raw_codes_pool_sentences_together(capsys):
+    """If a corpus somehow has BOTH a short code and a lang_Script code for
+    the same language as separate keys, their sentences must be POOLED
+    together under the normalized key, not arbitrarily picking one and
+    discarding the other's data."""
+    train = {"en": ["hello world"] * 10, "eng_Latn": ["goodbye world"] * 10}
+    dev = {"eng_Latn": ["hello world"] * 5}
+    model = fit_parity_bpe(train, dev, vocab_size=280)
+    assert model.num_parameters() > 256
+    out = capsys.readouterr().out
+    assert "language-code normalization merged multiple raw codes" in out
+    assert "train" in out
+
+
 def test_vendored_learn_bpe_is_reachable_and_fairness_restricted():
     """Sanity check that our data-shaping (io.StringIO per language, sorted
     order, pre_tokenizer set) correctly reaches the real vendored learn_bpe:

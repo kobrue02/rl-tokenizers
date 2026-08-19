@@ -60,7 +60,9 @@ only when actually needed for a real long-running fit.
 
 import io
 import os
+from collections import defaultdict
 
+import langcodes
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import ByteLevel, Sequence, Whitespace
@@ -72,6 +74,56 @@ from .vendor import parity_aware_learn_bpe as vendor
 from .vendor.hf_tokenizer import build_vocab_from_merges
 
 _UNICODE_TO_BYTE = {v: k for k, v in BYTE_TO_UNICODE.items()}
+
+
+def _normalize_lang_code(code, _cache={}):
+    """Best-effort canonicalization to a base ISO 639-3 code, so a short
+    code (e.g. "en", "ar-MA" -- common.data.corpora's own smol source) and
+    this project's own lang_Script convention (e.g. "eng_Latn",
+    "apc_Arab_nort3139" -- BOUQuET/oldi_seed/flores_dev) that refer to the
+    SAME language are recognized as the same key for train/dev pairing,
+    instead of being silently treated as unrelated languages and dropped.
+
+    Confirmed live to matter: a real --data-source all run (which pools
+    oldi_seed+flores_dev+smol) showed 195 of 345 training languages
+    excluded from the fit entirely, almost all of them smol's own
+    short-code languages that DO have real BOUQuET dev coverage, just under
+    a differently-spelled key ("en" vs. BOUQuET's own "eng_Latn").
+
+    langcodes.Language.get(code).to_alpha3() handles both conventions
+    directly (it already understands BCP-47-style hyphenated subtags like
+    "ar-MA"/"pa-Arab" AND this project's own underscore-separated
+    lang_Script[_variant] convention, extracting just the base language
+    subtag either way -- verified against every code in the real dropped
+    lists above). Falls back to the raw code on any parse failure, so a
+    genuinely unrecognized code stays self-consistent within its own
+    dataset rather than crashing the whole fit."""
+    if code in _cache:
+        return _cache[code]
+    try:
+        normalized = langcodes.Language.get(code).to_alpha3()
+    except Exception:
+        normalized = code
+    _cache[code] = normalized
+    return normalized
+
+
+def _group_sentences_by_normalized_lang(sentences_by_lang):
+    """{raw_lang_code: [sentence, ...]} -> ({normalized_code: [sentence,
+    ...]}, {normalized_code: [raw_code, ...]}) -- merges raw codes that
+    normalize to the SAME base language (see _normalize_lang_code) by
+    pooling their sentences together, e.g. if a corpus somehow had both
+    "en" and "eng_Latn" as separate keys, both would be treated as one
+    language's data. The second return value records which raw code(s)
+    contributed to each normalized key, purely for a clear diagnostic
+    message -- not needed for the fit itself."""
+    grouped = defaultdict(list)
+    sources = defaultdict(list)
+    for code, sentences in sentences_by_lang.items():
+        norm = _normalize_lang_code(code)
+        grouped[norm].extend(sentences)
+        sources[norm].append(code)
+    return dict(grouped), dict(sources)
 
 # Matches the official CLI's own --pretokenize default (['whitespace',
 # 'bytelevel']) exactly -- see vendor/parity_aware_learn_bpe.py's own module
@@ -145,8 +197,13 @@ def fit_parity_bpe(
     Only languages appearing in BOTH corpora, in a shared DETERMINISTIC order
     (sorted language code -- their own file-list-positional API has no
     named-language concept, see README's "nth input corpus corresponds to
-    the nth dev corpus"), can drive the fairness objective. Reports (never
-    silently drops) any train-only/dev-only languages.
+    the nth dev corpus"), can drive the fairness objective. Train/dev
+    language codes are matched after NORMALIZATION (see
+    _normalize_lang_code) -- a short code (e.g. "en") and this project's
+    own lang_Script convention (e.g. "eng_Latn") for the same language are
+    recognized as the same key, not silently treated as unrelated and
+    dropped. Reports (never silently drops without saying so) any
+    still-unmatched train-only/dev-only languages after normalization.
 
     checkpoint_dir (optional): if given, fits via .checkpointed_fit instead
     of calling vendor.learn_bpe/learn_bpe_moving_window directly -- a
@@ -160,35 +217,47 @@ def fit_parity_bpe(
     """
     vendor.pre_tokenizer = _FIT_PRE_TOKENIZER
 
-    train_langs = set(sentences_by_lang)
-    dev_langs = set(dev_sentences_by_lang)
+    train_grouped, train_sources = _group_sentences_by_normalized_lang(sentences_by_lang)
+    dev_grouped, dev_sources = _group_sentences_by_normalized_lang(dev_sentences_by_lang)
+
+    merged_train = {norm: raws for norm, raws in train_sources.items() if len(raws) > 1}
+    merged_dev = {norm: raws for norm, raws in dev_sources.items() if len(raws) > 1}
+    if merged_train or merged_dev:
+        print(
+            f"[parity_bpe] language-code normalization merged multiple raw codes into one "
+            f"language: {len(merged_train)} on the train side, {len(merged_dev)} on the dev side "
+            f"(e.g. train: {dict(list(merged_train.items())[:3])}, dev: {dict(list(merged_dev.items())[:3])})"
+        )
+
+    train_langs = set(train_grouped)
+    dev_langs = set(dev_grouped)
     usable_langs = sorted(train_langs & dev_langs)
     if not usable_langs:
         raise ValueError(
-            "fit_parity_bpe: no language appears in BOTH the training data and the dev set -- "
-            f"train languages: {sorted(train_langs)}, dev languages ({len(dev_langs)} total): "
-            f"{sorted(dev_langs)[:20]}{'...' if len(dev_langs) > 20 else ''}. Parity-aware BPE "
-            "needs at least one shared language to compute a compression-rate signal at all."
+            "fit_parity_bpe: no language appears in BOTH the training data and the dev set, even "
+            f"after code normalization -- train languages: {sorted(train_langs)}, dev languages "
+            f"({len(dev_langs)} total): {sorted(dev_langs)[:20]}{'...' if len(dev_langs) > 20 else ''}. "
+            "Parity-aware BPE needs at least one shared language to compute a compression-rate signal at all."
         )
     dropped_dev_only = dev_langs - train_langs
     if dropped_dev_only:
         print(
             f"[parity_bpe] {len(dropped_dev_only)} dev-set language(s) have no corresponding "
-            "training data -- excluded (a dev set routinely covers more languages than any one "
-            f"training run's --langs subset): {sorted(dropped_dev_only)[:10]}"
-            f"{'...' if len(dropped_dev_only) > 10 else ''}"
+            "training data even after code normalization -- excluded (a dev set routinely covers "
+            f"more languages than any one training run's --langs subset): "
+            f"{sorted(dropped_dev_only)[:10]}{'...' if len(dropped_dev_only) > 10 else ''}"
         )
     train_only = train_langs - dev_langs
     if train_only:
         print(
             f"[parity_bpe] {len(train_only)} training language(s) have no dev-set compression "
-            f"signal -- excluded from this fit entirely (the official implementation's --input/"
-            f"--dev lists are positionally paired, with no way to include a training-only "
-            f"language that contributes no dev signal): {sorted(train_only)}"
+            f"signal even after code normalization -- excluded from this fit entirely (the "
+            f"official implementation's --input/--dev lists are positionally paired, with no way "
+            f"to include a training-only language that contributes no dev signal): {sorted(train_only)}"
         )
 
-    infiles = [io.StringIO("\n".join(_to_str(s) for s in sentences_by_lang[lang]) + "\n") for lang in usable_langs]
-    devfiles = [io.StringIO("\n".join(_to_str(s) for s in dev_sentences_by_lang[lang]) + "\n") for lang in usable_langs]
+    infiles = [io.StringIO("\n".join(_to_str(s) for s in train_grouped[lang]) + "\n") for lang in usable_langs]
+    devfiles = [io.StringIO("\n".join(_to_str(s) for s in dev_grouped[lang]) + "\n") for lang in usable_langs]
 
     num_symbols = max(0, vocab_size - len(ByteLevel.alphabet()))
     common_kwargs = dict(
