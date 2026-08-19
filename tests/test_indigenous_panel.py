@@ -140,6 +140,38 @@ def test_stream_groups_indigenous_panel_round_robins_multiple_pairs(tmp_path):
     assert len(groups) == 3
 
 
+def test_stream_groups_indigenous_panel_max_samples_per_pair_caps_each_pair(tmp_path):
+    """Regression test for the confirmed arn-es blowup (256,992 rows, roughly
+    as many as the rest of the 13-pair panel combined) starving the Claude
+    indigenous-panel eval's en anchor of ever getting a turn across four
+    separate 8h SLURM windows. max_samples_per_pair must cap EACH pair's own
+    row count (first-N) independently, not the round-robined total."""
+    _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": f"a{i}", "en": f"b{i}"} for i in range(5)])
+    _write_pairs_jsonl(tmp_path / "nah-es.jsonl", [{"nah": f"c{i}", "es": f"d{i}"} for i in range(2)])
+    orig_dir = corpora.INDIGENOUS_PANEL_LOCAL_DIR
+    corpora.INDIGENOUS_PANEL_LOCAL_DIR = str(tmp_path)
+    try:
+        groups = list(corpora.stream_groups("indigenous_panel", config="all", max_samples_per_pair=2))
+    finally:
+        corpora.INDIGENOUS_PANEL_LOCAL_DIR = orig_dir
+    crk_groups = [g for g in groups if "crk" in g]
+    nah_groups = [g for g in groups if "nah" in g]
+    assert len(crk_groups) == 2  # capped down from 5
+    assert len(nah_groups) == 2  # already <= cap, untouched
+    assert crk_groups == [{"crk": "a0", "en": "b0"}, {"crk": "a1", "en": "b1"}]  # first-N, not random
+
+
+def test_stream_groups_indigenous_panel_max_samples_per_pair_omitted_is_unbounded(tmp_path):
+    _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": f"a{i}", "en": f"b{i}"} for i in range(5)])
+    orig_dir = corpora.INDIGENOUS_PANEL_LOCAL_DIR
+    corpora.INDIGENOUS_PANEL_LOCAL_DIR = str(tmp_path)
+    try:
+        groups = list(corpora.stream_groups("indigenous_panel", config="all"))
+    finally:
+        corpora.INDIGENOUS_PANEL_LOCAL_DIR = orig_dir
+    assert len(groups) == 5
+
+
 def _one_token_per_byte(raw):
     return [bytes([b]) for b in raw]
 
@@ -533,3 +565,33 @@ def test_claude_evaluate_main_end_to_end_on_indigenous_panel(tmp_path, monkeypat
     with open(out_path) as f:
         reloaded = json.load(f)
     assert reloaded == all_results
+
+
+def test_claude_evaluate_max_samples_per_pair_caps_a_dominant_pair(tmp_path, monkeypatch):
+    """Regression test for the confirmed arn-es blowup: a --max-samples-per-pair
+    flag exists specifically so a disproportionately large pair (real case:
+    arn-es at 256,992 rows) can't make the Claude eval's num_total_calls scale
+    with that one pair's full size."""
+    import systems.tokenization.claude_tokenizer.evaluate as claude_evaluate
+
+    _write_pairs_jsonl(tmp_path / "crk-en.jsonl", [{"crk": f"a{i}", "en": f"b{i}"} for i in range(50)])
+    _write_pairs_jsonl(tmp_path / "nah-es.jsonl", [{"nah": "amo", "es": "no"}])
+    monkeypatch.setattr(corpora, "INDIGENOUS_PANEL_LOCAL_DIR", str(tmp_path))
+
+    class FakeCounter:
+        def __init__(self, model, rate_limiter, api_key=None):
+            pass
+
+        def count(self, text):
+            return _fake_word_count_fn(text)
+
+    monkeypatch.setattr(claude_evaluate, "ClaudeTokenCounter", FakeCounter)
+
+    all_results = claude_evaluate.main([
+        "--model", "claude-fake-model",
+        "--eval-data-source", "indigenous_panel",
+        "--max-samples-per-pair", "3",
+    ])
+    result = all_results["claude-fake-model"]
+    # 3 crk-en rows (capped from 50) * 2 langs + 1 nah-es row (already under cap) * 2 langs
+    assert result["num_total_calls"] == 8

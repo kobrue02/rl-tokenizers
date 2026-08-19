@@ -8,16 +8,40 @@
 # `python -m common.data.prepare_indigenous_panel` run first. Uses
 # evaluate_claude_on_indigenous_panel (see that function's own docstring in
 # systems/tokenization/claude_tokenizer/evaluate.py), which internally splits into TWO
-# anchor-scoped runs (English for crk-en/iu-en, Spanish for the ten
-# AmericasNLP pairs) since this panel is deliberately mixed-anchor --
-# checkpoint_dir below still makes the WHOLE run resumable, one <model>.
-# <anchor>.jsonl file per anchor under it.
+# anchor-scoped runs (English for crk-en/iu-en/chr-en/mi-en, Spanish for the
+# ten AmericasNLP pairs + arn-es) since this panel is deliberately
+# mixed-anchor -- checkpoint_dir below still makes the WHOLE run resumable,
+# one <model>.<anchor>.jsonl file per anchor under it.
 #
-# Much smaller than the ~272k-pair BOUQuET run (this panel is ~12 language
-# pairs across a few hundred thousand sentences total, not 259 languages),
-# but still large enough at rpm=90 that this will likely span multiple
-# job time limits -- same "submit, let it time out, resubmit this EXACT
-# config" workflow as configs/eval_claude.yml, not a one-shot run.
+# max_samples_per_pair: 2000 -- REQUIRED here, not optional tuning. Confirmed
+# live: arn-es (Mapudungun) alone has 256,992 rows, roughly as many as the
+# rest of the 13-pair panel COMBINED. Every OTHER evaluator of this panel
+# (hf_frontier, this project's own 5 trained tokenizers) already completed
+# fine at full scale -- free/fast local compute doesn't care. But Claude's
+# API is rate-limited (rpm=90), and evaluate_claude_on_indigenous_panel
+# processes one whole anchor at a time: the es-anchor bucket (dominated by
+# arn-es) ballooned so large that a real run spanning FOUR separate 8h SLURM
+# windows (2026-08-15 through 2026-08-18) never finished the es anchor, and
+# the en-anchor checkpoint file (crk-en/iu-en/chr-en/mi-en, only ~44k rows)
+# stayed at literally 0 bytes the entire time -- it never got a single turn.
+# 2000/pair keeps the whole panel's total well under one 8h window at this
+# rpm (13 pairs * 2000 = 26,000 max vs. the ~500k+ unbounded total), while
+# still giving every pair a meaningfully-sized (not token, real per-pair)
+# sample. See common.data.corpora.stream_groups's own docstring for exactly
+# what this caps (first-N rows per pair, before round-robining).
+#
+# CRITICAL: results/claude_indigenous_panel.checkpoint/ from the PRE-FIX runs
+# (built against the old unbounded, differently-ordered eval_groups list)
+# MUST be deleted before submitting with this config. Checkpoint entries are
+# keyed by (group_index, lang) -- a POSITIONAL key, not a content hash (see
+# evaluate_claude_on_groups's own docstring) -- so resuming a subsampled,
+# reordered list against that stale checkpoint would silently pair old
+# counts with the WRONG new rows, not just waste the old progress:
+#   rm -rf results/claude_indigenous_panel.checkpoint/
+#
+# Still large enough at rpm=90 that this may still span more than one job
+# time limit -- same "submit, let it time out, resubmit this EXACT config"
+# workflow as configs/eval_claude.yml if so, just no longer an indefinite one.
 #
 # output/checkpoint_dir are DELIBERATELY different paths from
 # configs/eval_claude.yml's own -- that BOUQuET job is still resuming
@@ -27,7 +51,8 @@ model: "claude-opus-5"
 rpm: 90
 max_workers: 25
 eval_data_source: indigenous_panel
+max_samples_per_pair: 2000
 output: results/claude_indigenous_panel.json
 checkpoint_dir: results/claude_indigenous_panel.checkpoint
 use_wandb: true
-run_name: claude_tokenizer_indigenous_panel_v1
+run_name: claude_tokenizer_indigenous_panel_v2_capped

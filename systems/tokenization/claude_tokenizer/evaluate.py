@@ -93,6 +93,19 @@ def build_arg_parser():
         help="cap the number of held-out groups scored; omit for the full set -- the full "
         "BOUQuET test split means ~272k individual API calls, uncapped by default",
     )
+    parser.add_argument(
+        "--max-samples-per-pair", type=int, default=None,
+        help="--eval-data-source indigenous_panel ONLY: cap each pair's own row count "
+        "(see common.data.corpora.stream_groups's own docstring) before round-robining -- "
+        "confirmed live to matter for arn-es specifically, at 256,992 rows (roughly as "
+        "many as the rest of the 13-pair panel combined), which otherwise dominates the "
+        "es-anchor round-robin's tail long enough to make a full Claude API run "
+        "impractically slow (days-to-weeks at rate-limited throughput) and can starve the "
+        "en anchor of ever getting a turn (evaluate_claude_on_indigenous_panel processes "
+        "one whole anchor at a time). No effect on --eval-data-source bouquet/bouquet_test/"
+        "synthetic, and irrelevant to other (free, fast local-compute) evaluators of this "
+        "same panel.",
+    )
     parser.add_argument("--output", type=str, default=None, help="write combined JSON results here (default: print to stdout)")
     parser.add_argument(
         "--checkpoint-dir", type=str, default=None,
@@ -121,7 +134,9 @@ def _load_eval_groups(args):
     if args.eval_data_source == "indigenous_panel":
         from common.data.corpora import stream_groups
 
-        groups = list(stream_groups("indigenous_panel", config="all"))
+        groups = list(stream_groups(
+            "indigenous_panel", config="all", max_samples_per_pair=args.max_samples_per_pair
+        ))
         return groups[: args.num_groups] if args.num_groups else groups
     loader = load_bouquet_test if args.eval_data_source == "bouquet_test" else load_bouquet_dev
     groups = loader("all")

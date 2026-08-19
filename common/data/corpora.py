@@ -60,6 +60,7 @@ nothing stops training fanta on fineweb_edu, it just won't help that loss
 term.
 """
 
+import itertools
 import json
 import os
 
@@ -395,7 +396,7 @@ def _round_robin(iterators):
                 active.remove(it)
 
 
-def stream_groups(source, langs=None, config=None, seed=0):
+def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=None):
     """The one entry point both common.data.cli_data.load_groups (tokenizer
     training) and systems.pretraining.data_prep (LLM pretraining) use.
 
@@ -413,6 +414,21 @@ def stream_groups(source, langs=None, config=None, seed=0):
     pair-code or "all"/omitted for indigenous_panel (same round-robin-
     over-pairs shape, reading from a local disk cache instead of live HF
     streaming).
+
+    max_samples_per_pair: indigenous_panel ONLY (silently ignored by every
+    other source) -- caps each pair's OWN row count to at most this many
+    (first-N, not a random sample) before round-robining across pairs.
+    Confirmed live to matter: arn-es (Mapudungun) alone has 256,992 rows,
+    roughly as many as the rest of the 13-pair panel COMBINED -- for a
+    rate-limited consumer (e.g. the Claude tokenizer's per-request API
+    eval), this single pair dominates the round-robin's tail long past
+    every other pair's exhaustion, making a full run impractically slow
+    (the anchor-grouped evaluate_claude_on_indigenous_panel processes one
+    whole anchor at a time, so this can also starve a smaller anchor of
+    ever getting a turn -- see that function's own docstring). Irrelevant
+    for free/fast local-compute consumers (HF-frontier, this project's own
+    trained tokenizers), which already evaluate the panel at full scale
+    without issue.
 
     Returns an iterator of {lang: text} dicts -- multi-key for
     PARALLEL_SOURCES/STREAMED_PARALLEL_SOURCES, 2-key for BITEXT_SOURCES/
@@ -470,9 +486,14 @@ def stream_groups(source, langs=None, config=None, seed=0):
         return
     if source == "indigenous_panel":
         pairs = list_indigenous_panel_pairs() if config in (None, "all") else [config]
+
+        def _pair_stream(pair):
+            it = _stream_indigenous_panel_single(pair)
+            return itertools.islice(it, max_samples_per_pair) if max_samples_per_pair else it
+
         if len(pairs) == 1:
-            yield from _stream_indigenous_panel_single(pairs[0])
+            yield from _pair_stream(pairs[0])
             return
-        yield from _round_robin(iter(_stream_indigenous_panel_single(pair)) for pair in pairs)
+        yield from _round_robin(iter(_pair_stream(pair)) for pair in pairs)
         return
     raise ValueError(f"unknown source {source!r} -- choose from {ALL_SOURCES}")
