@@ -55,6 +55,7 @@ def derive_alpha_beta(
     margin_lambda=1.0,
     alpha_floor=0.05,
     alpha_ceiling=0.9,
+    beta_floor=0.02,
 ):
     """Per-language target boundary rate alpha_L and band floor beta_L.
 
@@ -87,8 +88,28 @@ def derive_alpha_beta(
     sigma_L with L's coefficient of variation of raw byte sentence length
     (std/mean), scaled by alpha_L to stay commensurate with it. Intuition: a
     language whose sentence lengths vary more has a less pinned-down
-    "reasonable" rate, so it gets a wider band. beta_L is clamped to
-    [0, alpha_L].
+    "reasonable" rate, so it gets a wider band.
+
+    beta_floor (JUDGMENT CALL, not in the paper): without it, beta_L is only
+    clamped to >= 0, not >= some positive value. Confirmed live to matter --
+    on real BOUQuET training data, 258 of 259 languages' coefficient of
+    variation exceeds 1/margin_lambda, driving beta_L to EXACTLY 0 for
+    99.6% of languages. boundary_hinge_loss's lower-bound term
+    (max(beta - rate, 0)) is then permanently zero for those languages --
+    the paper's own anti-collapse safeguard against "compressing less than
+    beta_L" (see that function's docstring) silently never fires. A real
+    trained checkpoint collapsed to ~0.6% boundary rate (avg 164
+    bytes/token, vs. an intended ~4 bytes/token) as a direct result: with no
+    floor and CE loss providing little pressure toward frequent
+    segmentation on its own, only alpha_L's upper bound remained, and
+    nothing stopped the rate from drifting arbitrarily low. beta_floor
+    guarantees every language keeps SOME lower-bound pressure regardless of
+    how large its computed sigma_L is; 0.02 sits comfortably below
+    alpha_floor's own 0.05 (the smallest alpha_L can ever be), so a nonzero
+    band survives even for the tightest-alpha language. beta_L is clamped
+    to [beta_floor, alpha_L] (the upper clamp still wins if beta_floor would
+    otherwise exceed alpha_L, matching the original [0, alpha_L] clamp's own
+    intent).
 
     Returns (alpha_by_lang, beta_by_lang, anchor_used -- may differ from
     `anchor_lang` if that language isn't present in the corpus).
@@ -114,7 +135,7 @@ def derive_alpha_beta(
         std_len = statistics.pstdev(all_lens) if len(all_lens) > 1 else 0.0
         cv = std_len / mean_len if mean_len > 0 else 0.0
         sigma = alpha * cv
-        beta = max(0.0, min(alpha, alpha - margin_lambda * sigma))
+        beta = min(alpha, max(beta_floor, alpha - margin_lambda * sigma))
 
         alpha_by_lang[lang] = alpha
         beta_by_lang[lang] = beta
@@ -161,6 +182,11 @@ class FlexiTokensConfig(BaseTokenizerConfig):
     alpha_anchor: float = 0.25
     alpha_floor: float = 0.05
     alpha_ceiling: float = 0.9
+    beta_floor: float = 0.02  # see derive_alpha_beta's own docstring -- without
+    # this, beta_L collapses to exactly 0 for ~99.6% of languages on real
+    # corpus data (confirmed live), silently disabling the paper's
+    # anti-under-segmentation safeguard and letting the boundary predictor
+    # drift to a near-zero boundary rate.
 
     # vocab_size (inherited, default 384).
     group_sample_size: int = 24  # cap languages rolled out per group per step,
@@ -212,6 +238,7 @@ class FlexiTokensTrainer(BaseTokenizerTrainer):
             cfg.margin_lambda,
             cfg.alpha_floor,
             cfg.alpha_ceiling,
+            cfg.beta_floor,
         )
         self.alpha_by_lang, self.beta_by_lang = alpha_by_lang, beta_by_lang
         print(f"anchor language: {anchor!r}")
