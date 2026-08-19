@@ -25,6 +25,7 @@ TOKENIZERS = {
     "fanta": "systems.tokenization.fanta.cli",
     "superbpe": "systems.tokenization.superbpe.cli",
     "bpe": "systems.tokenization.bpe.cli",
+    "parity_bpe": "systems.tokenization.parity_bpe.cli",
 }
 
 

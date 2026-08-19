@@ -1,0 +1,14 @@
+# systems/tokenization/parity_bpe/cli.py -- sbatch jobs/train_parity_bpe.sh -c configs/train_parity_bpe_window_50k.yml
+#
+# MOVING-WINDOW Parity-aware BPE variant (see parity_bpe/model.py's own
+# module docstring): refuses to re-select a language that's been picked more
+# than alpha*window_size/|languages| times in the last window_size merges,
+# preventing the algorithm from getting stuck repeatedly picking one
+# language whose compression rate barely improves per merge. window_size/
+# alpha left at ParityBPEConfig's own defaults (100/2.0), matching the
+# paper's own reported hyperparameter settings (§5.1) -- not set explicitly
+# here.
+data_source: all
+langs: all
+vocab_size: 50000
+use_moving_window: true

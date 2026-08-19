@@ -20,6 +20,7 @@ TOKENIZERS = {
     "fanta": "systems.tokenization.fanta.evaluate",
     "superbpe": "systems.tokenization.superbpe.evaluate",
     "bpe": "systems.tokenization.bpe.evaluate",
+    "parity_bpe": "systems.tokenization.parity_bpe.evaluate",
     "hf_frontier": "systems.tokenization.hf_frontier.evaluate",  # arbitrary HF tokenizer (--hf-repo-id), not one this project trains
     "claude_tokenizer": "systems.tokenization.claude_tokenizer.evaluate",  # token counts only via Anthropic's count_tokens API; no renyi/gini
 }

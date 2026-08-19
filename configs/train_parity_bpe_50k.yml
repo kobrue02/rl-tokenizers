@@ -1,0 +1,17 @@
+# systems/tokenization/parity_bpe/cli.py -- sbatch jobs/train_parity_bpe.sh -c configs/train_parity_bpe_50k.yml
+#
+# Same data_source/langs/vocab_size as configs/train_bpe_50k.yml/
+# configs/train_superbpe_50k.yml -- matched vocab size (50k) is what makes a
+# direct bpe-vs-superbpe-vs-parity_bpe comparison fair, same convention the
+# rest of this project's tokenizer comparisons already use. This is the
+# BASE Parity-aware BPE variant (num_global_merges=0, use_moving_window=
+# false -- both at ParityBPEConfig's own defaults, so not set explicitly
+# here). output_dir/vocab_out are DELIBERATELY omitted here -- jobs/
+# train_parity_bpe.sh already hardcodes job-id-tagged paths directly on its
+# own command line, and those explicit CLI flags take priority over
+# anything set here regardless of argv order (see
+# common.config_file.parse_args_with_config's own docstring) -- setting
+# them here too would just be silently ignored.
+data_source: all
+langs: all
+vocab_size: 50000

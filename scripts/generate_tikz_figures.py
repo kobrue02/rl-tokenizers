@@ -80,7 +80,7 @@ _FAMILY_RGB = {
 # Exact system_label strings evaluate.py's TOKENIZERS dict uses for this repo's
 # 7 trained tokenizers (scripts/combine_eval_results.py keys entries by --result-key,
 # which defaults to this) -- exact-match, not the prefix heuristic below.
-_REPO_TOKENIZER_NAMES = {"fairtok", "magnet", "flexitokens", "manta", "fanta", "superbpe", "bpe"}
+_REPO_TOKENIZER_NAMES = {"fairtok", "magnet", "flexitokens", "manta", "fanta", "superbpe", "bpe", "parity_bpe"}
 _ENCODER_ONLY_NAMES = {
     "bert-base-cased", "bert-base-multilingual-cased", "distilbert-base-uncased",
     "roberta-base", "xlm-roberta-base", "microsoft/deberta-base",

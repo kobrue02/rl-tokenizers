@@ -1,0 +1,13 @@
+# systems/tokenization/parity_bpe/cli.py -- sbatch jobs/train_parity_bpe.sh -c configs/train_parity_bpe_hybrid_50k.yml
+#
+# HYBRID Parity-aware BPE variant (see parity_bpe/model.py's own module
+# docstring): the first num_global_merges merges use classical BPE's pooled
+# global-frequency objective, only switching to the parity-aware objective
+# after. num_global_merges=24872 = half of this run's total mergeable budget
+# (vocab_size - 256 = 49744; the paper's own hybrid ablation uses J=K=half
+# of |m|, see its Table 1/§5.1 hyperparameter settings) -- matches that
+# convention rather than an arbitrary round number.
+data_source: all
+langs: all
+vocab_size: 50000
+num_global_merges: 24872

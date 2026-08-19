@@ -100,8 +100,14 @@ if [ $? -eq 0 ]; then
     # score at, unlike the neural baselines, so this is SuperBPE's only
     # in-training-adjacent dev check); this final job scores the genuinely
     # held-out TEST split exactly once, using the checkpoint fitting just wrote.
+    # --output/--result-key included explicitly -- CONFIRMED LIVE this was
+    # previously missing here, so the auto-submitted job only printed a
+    # report and wrote NO mergeable JSON, silently losing the ability to
+    # fold a real completed run into results/all_tokenizers_comparison.json
+    # without a manual re-run (had to be redone by hand once already).
     echo "Submitting final test-set evaluation job..."
-    sbatch jobs/evaluate.sh superbpe --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test
+    sbatch jobs/evaluate.sh superbpe --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test \
+        --output "results/superbpe_comparison.json" --result-key superbpe
 else
     echo "Fitting failed." && exit 1
 fi
