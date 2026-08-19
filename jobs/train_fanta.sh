@@ -95,9 +95,14 @@ if [ $? -eq 0 ]; then
     # fanta/train.py's epoch-boundary eval); this final job scores the
     # genuinely held-out TEST split exactly once, using the checkpoint training
     # just wrote -- no --dependency needed since training already finished by
-    # the time this line runs.
+    # the time this line runs. --output/--result-key included explicitly --
+    # confirmed live (see jobs/train_superbpe.sh's own history) that omitting
+    # them means the eval job only prints a report and writes NO mergeable
+    # JSON, silently losing the ability to fold a real completed run into
+    # results/all_tokenizers_comparison.json without a manual re-run.
     echo "Submitting final test-set evaluation job..."
-    sbatch jobs/evaluate.sh fanta --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test
+    sbatch jobs/evaluate.sh fanta --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test \
+        --output "results/fanta_comparison.json" --result-key fanta
 else
     echo "Training failed." && exit 1
 fi

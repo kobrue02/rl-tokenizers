@@ -78,8 +78,14 @@ python3 train.py bpe \
 
 if [ $? -eq 0 ]; then
     echo "Fitting complete."
+    # --output/--result-key included explicitly -- confirmed live (see
+    # jobs/train_superbpe.sh's own history) that omitting them means the
+    # eval job only prints a report and writes NO mergeable JSON, silently
+    # losing the ability to fold a real completed run into
+    # results/all_tokenizers_comparison.json without a manual re-run.
     echo "Submitting final test-set evaluation job..."
-    sbatch jobs/evaluate.sh bpe --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test
+    sbatch jobs/evaluate.sh bpe --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test \
+        --output "results/bpe_comparison.json" --result-key bpe
 else
     echo "Fitting failed." && exit 1
 fi
