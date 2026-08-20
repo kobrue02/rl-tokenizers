@@ -15,6 +15,13 @@
 # comment -- not the older fanta_6257621.pt also present in checkpoints/).
 # flexitokens/magnet/manta filled in from a live `ls checkpoints/` on the
 # actual cluster (2026-08-17) -- re-check if any of the 5 get retrained.
+#
+# parity_bpe added 2026-08-19: never had an indigenous_panel eval run at all
+# (only results/parity_bpe_comparison.json, the bouquet_test one, exists).
+# CHECKPOINT PATH BELOW IS A PLACEHOLDER -- run `ls checkpoints/ | grep
+# parity_bpe` on the cluster (see jobs/train_parity_bpe.sh's own
+# CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/parity_bpe_${SLURM_JOB_ID}.json"
+# convention) and fill in the real job-ID-tagged filename before submitting.
 systems:
   - name: bpe
     checkpoint: checkpoints/bpe_50k.json
@@ -26,5 +33,7 @@ systems:
     checkpoint: checkpoints/magnet_6269682.pt
   - name: manta
     checkpoint: checkpoints/manta_6269684.pt
+  - name: parity_bpe
+    checkpoint: checkpoints/parity_bpe_6370066.json
 output_dir: results
 combined_output: results/own_tokenizers_indigenous_panel.json
