@@ -5,72 +5,40 @@ replace_pair_dict, select_language_index) completely unmodified, straight
 from .vendor.parity_aware_learn_bpe, adding ONLY periodic save/resume of the
 loop's own live state.
 
-WHY THIS EXISTS, RATHER THAN A MODIFICATION TO vendor/parity_aware_learn_bpe.py:
-learn_bpe/learn_bpe_moving_window are single monolithic calls with no
-pause/resume hook of any kind (see that module's own docstring). The state
-a genuinely BYTE-IDENTICAL resume needs -- the live per-language pair-count
-arrays (stats/big_stats), the pruning threshold, and the loop's own step
-counter -- only exists INSIDE their loop bodies; there is no way to
-observe or inject it from outside without either (a) adding save/load hooks
-inside their function bodies, or (b) writing the loop ourselves, reusing
-their existing sub-functions as building blocks. (a) would mean modifying
-vendored code; this file does (b) instead, keeping vendor/ completely
-untouched. Confirmed line-by-line against learn_bpe/learn_bpe_moving_window
-themselves: every operation below is the SAME operation in the SAME order,
-just with save/load points added and (per model.py's own fit_parity_bpe
-docstring) the `ratio`-based variant omitted entirely, since this project
-never uses it (a real dev set, BOUQuET, is always available).
+WHY: learn_bpe/learn_bpe_moving_window are single monolithic calls with no
+pause/resume hook, and the state a byte-identical resume needs (the live
+per-language pair-count arrays, pruning threshold, step counter) only
+exists inside their loop bodies -- observing/injecting it means either
+modifying vendored code, or writing the loop ourselves reusing their
+sub-functions as building blocks. This does the latter, keeping vendor/
+untouched; confirmed line-by-line that every operation below is the same
+operation in the same order, just with save/load points added (the
+`ratio`-based variant is omitted -- this project always has a real dev
+set, BOUQuET). model.py's fit_parity_bpe calls the vendored functions
+directly when checkpoint_dir is None, and fit_checkpointed here only when
+checkpointing is requested; tests/test_parity_bpe.py confirms both paths
+produce identical merges given the same input.
 
-model.py's fit_parity_bpe calls .vendor.parity_aware_learn_bpe.learn_bpe/
-learn_bpe_moving_window DIRECTLY (maximum reuse of the official
-implementation) whenever checkpoint_dir is None; it calls fit_checkpointed
-here ONLY when checkpointing is actually requested. tests/test_parity_bpe.py
-confirms both paths produce IDENTICAL merges given the same input, so this
-reimplementation is a faithful equivalent, not an approximation.
+PERSISTED STATE (see _save_checkpoint): stats/big_stats (per-pair
+per-language frequency counts), threshold (resumed, not recomputed, which
+is what makes this byte-identical rather than merely "comparably fair"),
+i (the step counter threshold's growth schedule is relative to),
+sorted_vocab/dev_vocab/indices (the working structures mutated in place
+every step), lengths (per-language dev-vocab token-count estimate),
+merge_lines, and selected_indices (moving-window variant only).
 
-WHAT GETS PERSISTED, AND WHY EACH PIECE IS NEEDED (see _save_checkpoint):
-  - stats, big_stats: per-pair, per-language running frequency counts
-    (numpy arrays) -- the actual counting state a resume must continue from.
-  - threshold: current per-language pruning threshold -- resuming this
-    (rather than recomputing it fresh, which would use a wrong, chunk-local
-    step count) is exactly what makes this resume byte-identical rather
-    than merely "comparably fair" (see checkpointed_fit design discussion).
-  - i: the loop's own step counter, since threshold's own growth schedule
-    (see learn_bpe's "* i/(i+10000.0)") is relative to it.
-  - sorted_vocab, dev_vocab, indices: the working per-word/per-pair
-    structures replace_pair/update_pair_statistics/replace_pair_dict mutate
-    in place every step.
-  - lengths: current per-language dev-vocab token-count estimate (what
-    picks the "worst-compressed" language every step).
-  - merge_lines: every merge learned so far, in order.
-  - selected_indices (moving-window variant only): the recent-language-
-    selection history the window-exclusion rule depends on.
-
-Several of these (stats/big_stats/dev_vocab: lambda: numpy.zeros(N);
-indices: lambda: defaultdict(int)) are defaultdicts built by the VENDORED
-preprocess_input_data with a LAMBDA default_factory -- Python's pickle can't
-serialize a lambda directly. Rather than converting to a plain dict and
-back around every save/load (an EARLIER version of this file did exactly
-that, and it's a real, CONFIRMED memory problem at real corpus scale: a
-75-million-pair `indices` structure across 345 languages/515k sentences
-means `{pair: dict(inner) for pair, inner in indices.items()}` allocates a
-brand-new dict object for every single one of those pairs, at EVERY
-checkpoint interval, sitting in memory ALONGSIDE the original -- this is
-what caused a real OOM kill on an actual cluster run).
-
-Fixed by swapping each defaultdict's OWN `default_factory` ATTRIBUTE, once,
-right after preprocess_input_data returns, from the vendored lambda to a
-functools.partial/builtin equivalent that pickle CAN serialize directly
-(`functools.partial(numpy.zeros, width, dtype=int)` for
-stats/big_stats/dev_vocab; `functools.partial(defaultdict, int)` for
-indices' outer level -- its inner defaultdict(int) values are already
-picklable as-is, since `int` is a builtin, not a lambda). This is an O(1)
-attribute assignment, not a rebuild: existing key/value data is completely
-untouched, and every new key created afterward (including by the vendored
-sub-functions themselves, and through copy.deepcopy(big_stats) mid-loop --
-both confirmed to preserve a swapped factory correctly) uses the new,
-already-picklable factory. Checkpointing the live objects directly, with
-zero duplication, replaces the earlier plain-dict round trip entirely.
+PICKLING: stats/big_stats/dev_vocab/indices are defaultdicts built by the
+vendored preprocess_input_data with a LAMBDA default_factory, which pickle
+can't serialize. An earlier version converted to a plain dict and back
+around every save/load -- CONFIRMED a real OOM on a cluster run, since
+rebuilding a 75-million-pair `indices` structure (345 languages/515k
+sentences) allocates a brand-new dict for every pair at every checkpoint,
+sitting in memory alongside the original. Fixed by swapping each
+defaultdict's `default_factory` ATTRIBUTE once, right after
+preprocess_input_data returns, to a functools.partial/builtin equivalent
+pickle can serialize -- an O(1) assignment, not a rebuild; existing data is
+untouched and every new key (including via copy.deepcopy mid-loop,
+confirmed to preserve a swapped factory) uses the new factory.
 """
 
 import copy

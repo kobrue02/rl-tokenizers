@@ -35,23 +35,21 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     sets is expected, not exceptional.
 
     Also computes an ANCHOR-INVARIANT version of the disparity (token_parity_gm,
-    token_parity_spread) via common.eval.parity.anchor_invariant_parity: a single fixed
-    anchor assumes that language's cost is the "1.0" baseline, which inverts every
-    other ratio if a tokenizer happens to be unusually good/bad specifically at the
-    anchor (e.g. re-anchoring to Mandarin can flip a Chinese-optimized tokenizer
-    from best to worst with no actual change in per-language costs). token_parity_gm/
-    spread avoid this, at zero extra cost (derived from token_parity below).
+    token_parity_spread) via common.eval.parity.anchor_invariant_parity: a single
+    fixed anchor inverts every ratio if a tokenizer is unusually good/bad
+    specifically at the anchor (e.g. re-anchoring to Mandarin can flip a
+    Chinese-optimized tokenizer from best to worst with no real change in
+    per-language costs). token_parity_gm/spread avoid this at zero extra cost.
 
-    anchor_lang: also computes TOKEN PARITY against this language (default "eng") --
-    the token-count analog of compute_lang_parity_ratios's byte-length ratio,
-    computed here from each group's own already-tokenized spans (no re-tokenization).
-    ratio > 1 means this tokenizer produces more tokens for `lang` than for the
-    anchor to say the same thing -- a tokenizer-specific fairness cost distinct from
-    the byte-length disparity (a tokenizer can show ratio > 1 for a language whose
-    byte-length ratio is ~1.0, if its vocab/merges just serve it worse). anchor_lang's
-    key is resolved per-group via common.eval.parity._find_anchor_key (bare-code vs.
-    full-stem), so a group keyed "eng_Latn" still matches anchor_lang="eng". A
-    language never paired with the anchor in any group gets ratio 1.0.
+    anchor_lang: also computes TOKEN PARITY against this language (default
+    "eng") -- the token-count analog of compute_lang_parity_ratios's
+    byte-length ratio, from each group's own already-tokenized spans. ratio
+    > 1 means this tokenizer produces more tokens for `lang` than the
+    anchor for the same content -- distinct from byte-length disparity (a
+    tokenizer can show ratio > 1 for a language whose byte-length ratio is
+    ~1.0, if its vocab/merges just serve it worse). Resolved per-group via
+    common.eval.parity._find_anchor_key (so "eng_Latn" still matches
+    anchor_lang="eng"); a language never paired with the anchor gets ratio 1.0.
 
     Returns {"token_freq": {lang: Counter}, "renyi": {lang: float}, "gini": float,
     "per_lang_compression": {lang: float}, "avg_compression": float,
@@ -129,14 +127,14 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
 
 def evaluate_on_indigenous_panel(induce_spans_fn_by_lang, eval_groups):
     """Dedicated entry point for common.data.indigenous_panel's DELIBERATELY
-    mixed-anchor panel (English for crk-en/iu-en, Spanish for the nine AmericasNLP
-    pairs). Naively pooling every pair's groups into one evaluate_on_groups(...,
-    anchor_lang="eng") call would give every Spanish-anchored language an
-    uninformative token_parity=1.0 for 9 of 11 languages. Just as importantly,
-    naively MERGING ratios from two different anchors into one
-    anchor_invariant_parity call would reintroduce anchor bias: a tokenizer's cost
-    for "en" isn't guaranteed equal to its cost for "es", so ratio-vs-en and
-    ratio-vs-es aren't on a common scale even after per-subgroup GM-normalization.
+    mixed-anchor panel (English for crk-en/iu-en, Spanish for the AmericasNLP
+    pairs). Pooling every pair into one evaluate_on_groups(..., anchor_lang="eng")
+    call would give every Spanish-anchored language an uninformative
+    token_parity=1.0. Merging ratios from two different anchors into one
+    anchor_invariant_parity call would also reintroduce anchor bias: a
+    tokenizer's cost for "en" isn't guaranteed equal to its cost for "es",
+    so ratio-vs-en and ratio-vs-es aren't on a common scale even after
+    per-subgroup GM-normalization.
 
     eval_groups: list[dict[lang -> text]], the same flat shape every other
     evaluate_on_* consumer produces. Each group's anchor is inferred from its own

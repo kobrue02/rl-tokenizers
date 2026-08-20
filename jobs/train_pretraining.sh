@@ -11,81 +11,44 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# Pretraining -- see systems/pretraining/train.py's own module docstring for what's
-# actually verified: single-GPU and multi-GPU DistributedDataParallel (this
-# script launches via torchrun automatically whenever more than one GPU was
-# allocated -- see SLURM_GPUS_ON_NODE handling below). NOT yet built: FSDP/
-# model sharding -- the --model-size 7b preset needs more memory than plain
-# DDP's full-model-per-GPU replication can provide across any number of
-# A100s, so a real 7B run is out of reach until that follow-up work exists.
-# Every smaller preset (tiny/small/medium/large/xl) is fine under plain DDP.
+# Pretraining (systems/pretraining/train.py) -- single-GPU or multi-GPU DDP
+# (torchrun, auto-detected via SLURM_GPUS_ON_NODE). No FSDP yet, so --model-size
+# 7b isn't runnable; every smaller preset (tiny/small/medium/large/xl) is fine.
+# --gres=gpu:1 is a single-GPU DEFAULT -- override with e.g. --gres=gpu:4 for
+# multi-GPU on one node (multi-NODE isn't handled here).
 #
-# --gres=gpu:1 above is a single-GPU DEFAULT, not a hard limit: edit it to
-# e.g. --gres=gpu:4 for a multi-GPU run on one node -- this script detects
-# $SLURM_GPUS_ON_NODE and switches to torchrun automatically, no other
-# change needed. Multi-NODE (several machines' GPUs in one job) is not
-# handled here -- torchrun's own --nnodes/--rdzv-* flags would be the next
-# step if a single node's GPUs stop being enough (still short of true FSDP
-# sharding, just more DDP replicas).
-#
-# AUTO-RESUBMIT: a run whose token/step budget exceeds this job's own
-# --time limit (e.g. the "large" preset's ~10-day estimate against this
-# job's 24h default) will get SIGTERM/SIGKILL'd by SLURM mid-loop, well
-# before train.py's own final.pt save at the bottom of its training loop
-# (systems/pretraining/train.py) ever runs. Rather than requiring a human to notice
-# the timeout and manually resubmit with --resume-from every time, this
-# script checks for itself once training exits:
-#   - final.pt present in output_dir -> genuinely done, exit 0, no resubmit.
-#   - no final.pt, but a NEWER step_*.pt checkpoint exists than when this
-#     run started -> real progress was made this run (just not enough to
-#     finish); resubmit itself via sbatch with --resume-from that
-#     checkpoint, preserving this run's own --gres GPU count (which a bare
-#     `sbatch jobs/train_pretraining.sh ...` would NOT do on its own --
-#     it would silently fall back to this script's #SBATCH --gres=gpu:1
-#     default, quietly dropping a multi-GPU run back to 1 GPU on every
-#     resume).
-#   - no final.pt AND no checkpoint progress beyond this run's own starting
-#     point -> treated as a genuine failure (e.g. a persistent crash before
-#     the first save_steps checkpoint), NOT resubmitted, so a real bug
-#     can't spin into an infinite resubmission loop burning allocation.
-# This means squeue will show a NEW job id appear every ~24h for a
-# multi-day run until it finishes -- expected, not a bug -- and
-# --mail-type=ALL will send one completion/failure email per segment.
+# AUTO-RESUBMIT: a run whose budget exceeds this job's --time limit gets
+# killed mid-loop before final.pt is written. This script checks after exit:
+# final.pt present -> done, exit 0. No final.pt but a newer step_*.pt than
+# when this run started -> real progress, resubmit with --resume-from
+# (preserving this run's own --gres/--time, which a bare resubmit wouldn't).
+# No progress at all -> real failure, NOT resubmitted. Expect a new job id
+# in squeue roughly every 24h for a multi-day run -- that's normal.
 #
 # Usage:
 #   sbatch jobs/train_pretraining.sh --shard-dir pretrain_data/glot500_bpe \
 #       --model-size small --total-steps 50000 --seq-len 1024 --per-device-batch-size 16
 #   sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
-#
-# All flags forward directly to systems/pretraining/cli.py -- see
-# `python3 -m systems.pretraining.cli --help`.
 
-# 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
-# 2. Modules
 module load devel/cuda/12.8
 module load devel/python/3.13.3-llvm-19.1
 echo "CUDA: $CUDA_HOME"
-unset LD_LIBRARY_PATH  # see module docstring above -- avoids the module's
-# own (older) cuDNN shadowing PyTorch's bundled one.
+unset LD_LIBRARY_PATH  # avoids the cuda module's older cuDNN shadowing PyTorch's bundled one
 
-# 3. Environment
 export TORCH_EXTENSIONS_DIR=$PROJECT_ROOT/.cache/torch_extensions
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1
 mkdir -p "$TORCH_EXTENSIONS_DIR"
 
-# 4. Project
 source $PROJECT_ROOT/.venv/bin/activate
 cd $PROJECT_ROOT
 uv sync
 mkdir -p logs checkpoints/pretrain
 
-# 5. Resolve this run's output_dir/total_steps from the EXACT args this job
-# received (config file + any CLI overrides, e.g. a --resume-from appended
-# by a prior resubmit of this same script) -- reuses systems.pretraining.cli's own
-# parsing so this can never drift from what systems.pretraining.cli itself uses.
+# Resolve output_dir/total_steps from the exact args this job received --
+# reuses systems.pretraining.cli's own parsing so this can't drift from it.
 CFG_INFO=$(python3 -c "
 import sys
 from systems.pretraining.cli import build_arg_parser, _config_from_args
@@ -99,10 +62,6 @@ OUTPUT_DIR=$(echo "$CFG_INFO" | sed -n '1p')
 TOTAL_STEPS=$(echo "$CFG_INFO" | sed -n '2p')
 echo "Resolved output_dir=$OUTPUT_DIR total_steps=$TOTAL_STEPS"
 
-# Highest-step step_*.pt in a dir, empty string if none -- used both before
-# and after the run below purely to detect whether THIS run made progress,
-# not as the resume mechanism itself (train.py's own --resume-from/
-# load_checkpoint handles that).
 latest_checkpoint() {
     ls "$1"/step_*.pt 2>/dev/null | sed -E 's#.*/step_([0-9]+)\.pt#\1 &#' | sort -n | tail -1 | cut -d' ' -f2-
 }
@@ -114,7 +73,7 @@ else
     BEFORE_STEP=0
 fi
 
-# 6. Run -- single process for one GPU, torchrun for more than one.
+# Single process for one GPU, torchrun for more than one.
 NUM_GPUS="${SLURM_GPUS_ON_NODE:-1}"
 echo "Starting pretraining with $NUM_GPUS GPU(s), args: $@"
 if [ "$NUM_GPUS" -gt 1 ]; then
@@ -124,7 +83,7 @@ else
 fi
 TRAIN_EXIT=$?
 
-# 7. Done, or resubmit? See the AUTO-RESUBMIT comment at the top.
+# Done, or resubmit? See AUTO-RESUBMIT above.
 if [ -f "$OUTPUT_DIR/final.pt" ]; then
     echo "Training complete -- reached total_steps=$TOTAL_STEPS, final.pt written."
     exit 0
@@ -142,9 +101,6 @@ if [ "$AFTER_STEP" -le "$BEFORE_STEP" ]; then
     exit 1
 fi
 
-# This job's OWN actual --time limit (may have been overridden at
-# submission) -- a bare resubmit would otherwise silently fall back to this
-# script's #SBATCH --time=24:00:00 default, same reasoning as --gres above.
 TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
 
 echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."

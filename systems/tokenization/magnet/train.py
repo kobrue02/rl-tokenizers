@@ -119,8 +119,19 @@ class MagnetConfig(BaseTokenizerConfig):
     # 2-3 bytes/char vs. Latn's 1) may warrant a lower rate for comparable
     # character-level compression. Empty falls back to default_boundary_prior.
     lambda_boundary: float = 1.0  # weight of the boundary-rate loss vs. next-byte
-    # CE (both are per-position-normalized means, so 1.0 = equal weighting).
-    # Raise if boundary rate isn't tracking the prior; lower if it dominates.
+    # CE. NOT literally "both per-position-normalized means" -- lm_loss divides
+    # by n_valid (a true per-position mean), but boundary_loss is a per-example
+    # Binomial NLL (over each sequence's real, unpadded length) averaged across
+    # the batch, which doesn't scale with sequence length the same way a
+    # per-token quantity does. This matches the reference implementation's own
+    # padding-aware calc_loss_without_padding exactly (confirmed against
+    # github.com/orevaahia/magnet-tokenization/src/magnet.py) -- the reference
+    # repo's OTHER variant, calc_loss, does divide by preds.size(-1), but that
+    # one assumes no padding at all and isn't the relevant comparison here,
+    # since this project's own training loop (unlike that variant) explicitly
+    # handles variable-length padded batches. 1.0 is a starting point to tune
+    # empirically, not a derived "equal weighting" point. Raise if boundary
+    # rate isn't tracking the prior; lower if it dominates.
 
     # vocab_size (inherited, default 384): final vocab budget, applied once
     # after training by keeping the most frequent distinct byte spans

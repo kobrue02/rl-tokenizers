@@ -1,126 +1,72 @@
-"""Offline pipeline: stream a corpus from common.data.corpora's shared registry
-(the same one tokenizer training uses), tokenize every document with a
-systems/ checkpoint (via TokenizerAdapter), and pack the token ids into
-fixed-size binary shards on disk -- the standard nanoGPT/OLMo-style
-tokenize-once, train-many-times approach, reading flat memory-mapped files
-(see shard_dataset.py) instead of re-streaming/re-tokenizing every run
-(which would also be non-reproducible, since HF streaming order varies).
+"""Offline pipeline: stream a corpus from common.data.corpora's shared
+registry, tokenize every document with a systems/ checkpoint (via
+TokenizerAdapter), and pack the token ids into fixed-size binary shards on
+disk -- tokenize-once, train-many-times, reading flat memory-mapped files
+(see shard_dataset.py) instead of re-streaming/re-tokenizing every run.
 
-stream_groups yields {lang: text} dicts (multi-key for N-way parallel
-sources, 2-key for bitext, single-key for monolingual). This module
-flattens each group into (lang, text) documents and tokenizes each with its
-own language as encode()'s `lang` hint, which lets MAGNET's per-script
-boundary predictor resolve correctly per document instead of needing one
-global --lang for the whole run.
+Each (lang, text) document is tokenized with its own language as encode()'s
+`lang` hint (needed for MAGNET's per-script boundary predictor), then
+packed with the tokenizer's own eos_id as the only document-boundary
+marker. Shards are written as they fill (--shard-size tokens).
 
-Each document's tokens are followed by the tokenizer's own eos_id -- the
-only document-boundary marker; there's no separate index. Shards are
-written as they fill (--shard-size tokens), keeping memory roughly constant
-regardless of corpus size.
+LANGUAGE TRACKING (shards_meta.json's "lang_counts") is corpus-level only,
+not per training step -- ShardedTokenDataset's random windows can straddle
+documents of different languages. Tracks "bytes" alongside "tokens"/"docs"
+for a real compression_rate plus a Gini coefficient over per-language token share.
 
-LANGUAGE TRACKING is corpus-level only (shards_meta.json's "lang_counts",
-optionally logged to wandb), not per training step: the packed stream
-carries no per-token language tag, and ShardedTokenDataset samples random
-windows that can straddle documents of different languages, so "the
-language of this batch" isn't well-defined post-packing. lang_counts also
-tracks raw UTF-8 "bytes" alongside "tokens"/"docs", giving a real
-bytes-per-token compression_rate at corpus scale plus a Gini coefficient
-over per-language token share -- the same balance diagnostics systems/
-tokenizers report at their own (smaller) training scale.
+DEDUP (--dedup, on by default): common.data.dedup.Deduplicator drops exact
+and near-duplicate (MinHash+LSH) documents before tokenization.
 
-DEDUP (--dedup, on by default): each document is checked against every
-prior document in the same run via common.data.dedup.Deduplicator --
-exact-hash for all documents, MinHash+LSH near-dup for longer ones.
-Duplicates are dropped before tokenization (never encoded/packed);
-dropped counts are tracked per language.
+MAX_DOC_BYTES (--max-doc-bytes, default 4096): truncates each document
+before encode(). Guards a confirmed incident: an unusually long Glot500
+document reached a neural system's dense attention and OOM'd a cluster GPU.
 
-MAX_DOC_BYTES (--max-doc-bytes, default 4096): every document is truncated
-to this many UTF-8 bytes before encode(). Guards a confirmed incident: an
-unusually long Glot500 document reached a neural system's dense (B,H,T,T)
-attention during tokenization (FantaConfig.max_seq_length only guards
-TRAINING) and OOM'd a cluster GPU. truncate_to_max_bytes lives in
-common/bytes_utils.py and applies to every system (harmless no-op cost for
-bpe/superbpe). Truncated counts are tracked per language.
+PERFORMANCE (--encode-batch-size, default 32): documents batch through
+TokenizerAdapter.encode_batch -- confirmed fix: a cluster run measured
+~56.8k tok/s on FANTA (A100) vs bpe/superbpe's ~74-83k tok/s CPU, because
+manta.segment.induce_boundaries_batch paid full GPU kernel-launch overhead
+per document at batch size 1. Only manta/fanta get a real speedup from
+this; the rest fall back to a correct but unsped-up per-item loop.
+MEMORY CAVEAT: a batch pads to its longest member, so memory scales with
+(batch max length)^2 * batch_size -- tune --max-doc-bytes and
+--encode-batch-size together.
 
-PERFORMANCE / ENCODE_BATCH_SIZE (--encode-batch-size, default 32):
-documents are batched via TokenizerAdapter.encode_batch instead of one
-adapter.encode() call each -- a confirmed fix, not speculative: a cluster
-run measured ~56.8k tok/s on FANTA (A100) vs bpe/superbpe's ~74-83k tok/s
-on CPU, because manta.segment.induce_boundaries_batch was paying full GPU
-kernel-launch overhead per document at batch size 1. Only manta/fanta get
-a real batched speedup; bpe/superbpe/magnet/flexitokens/fairtok fall back
-to a correct but unsped-up per-item loop (see tokenizer_adapter.py's
-_build_induce_batch_fn).
+BUCKETING (--bucket-pool-multiplier, default 8): glot500 "all" round-robins
+~411 languages, so consecutive documents vary wildly in length and an
+unsorted batch pays the longest member's O(T^2) cost -- confirmed a real
+~1000x throughput collapse, not just a memory risk. Fix: accumulate a pool
+of encode_batch_size * bucket_pool_multiplier documents, sort by length,
+slice into encode_batch_size chunks. Reorders documents relative to the
+source stream (harmless for ShardedTokenDataset's random sampling);
+max_tokens/max_docs are checked at pool granularity. =1 disables bucketing.
 
-MEMORY CAVEAT: a batch pads every sequence to its own longest member, so
-memory scales with (batch max length)^2 * batch_size, not just length^2.
---max-doc-bytes bounds the per-document worst case, but a larger
---encode-batch-size still grows it -- tune the two together.
+PREFETCH (--prefetch, default off): confirmed live that pulling documents
+from glot500's ~411-config HF stream is NETWORK-bound, not CPU-bound (a
+real run took multiple days despite encode_batch() itself measuring fine).
+A background thread iterates the stream in the same order and pushes
+(lang, text, stream_docs_consumed) onto a bounded queue
+(--prefetch-queue-size, default 2 * pool_size) that the consumer reads
+instead of iterating directly -- changes only *when* documents arrive, not
+their order/content, so every RESUME/dedup/checkpoint invariant below is
+unaffected. Off by default: verify with a real timing comparison before
+relying on it, since the win depends on how much of the slowness is really
+network wait vs. e.g. HF `datasets`' own decode overhead. A producer-thread
+exception is re-raised in the main thread via a queue sentinel, not swallowed.
 
-BUCKETING (--bucket-pool-multiplier, default 8): naive stream-order
-batching mixes short/long documents -- glot500 "all" round-robins ~411
-language configs, so consecutive stream documents vary wildly in length --
-and the whole batch then pays the longest member's O(T^2) cost. This is a
-real throughput regression, not just a memory risk: a cluster run
-collapsed to ~1/1000th of its pre-batching rate, and a synthetic CPU
-microbenchmark showed ~2.75x slowdown from unsorted batches. Fix:
-documents accumulate into a pool of encode_batch_size *
-bucket_pool_multiplier, get sorted by byte length, then sliced into
-encode_batch_size chunks -- each chunk now has similarly-sized documents.
-This reorders documents relative to the source stream, which is harmless
-for ShardedTokenDataset's random-window sampling. max_tokens/max_docs are
-checked at pool granularity, so a capped run may overshoot slightly.
-bucket_pool_multiplier=1 disables bucketing.
+RESUME (--prep-checkpoint-path, default "<output-dir>/prep_checkpoint.json"):
+lets a run killed mid-way (e.g. a SLURM time limit) continue instead of
+restarting from token 0. Checkpointed once per pool that crosses a shard
+boundary, never mid-pool (bucketing sorts by length, so stream_docs_consumed
+is only a safe resume point once a whole pool finishes). Written atomically
+(temp + os.replace, buffer file first) so a crash never references buffer
+data that isn't on disk. Loaded automatically if present at startup (no
+separate --resume flag); deleted once shards_meta.json is written.
 
-PREFETCH (--prefetch, default off): --dataset glot500 --langs all round-robins
-across ~411 lazy HuggingFace streaming.IterableDatasets (common.data.corpora's
-stream_groups/_round_robin) -- confirmed live that pulling documents from this
-stream is NETWORK-bound (waiting on HTTP range/shard fetches against the HF
-Hub), not CPU-bound: encode_batch() itself already measures fine (~74-83k
-tok/s CPU for bpe/superbpe, ~56.8k tok/s GPU for fanta -- see PERFORMANCE
-section above), while a real glot500-scale run took multiple days. --prefetch
-overlaps that network wait with this loop's own dedup/truncate/bucket/
-encode/pack work: a single background thread iterates the stream in the
-EXACT SAME order this loop always has (_document_source), applying the same
-RESUME fast-forward skip, and pushes surviving (lang, text, stream_docs_consumed)
-tuples onto a bounded queue (--prefetch-queue-size, default 2 * pool_size)
-that the main thread consumes from instead of iterating the stream directly
-(_prefetch_source vs. _document_source share one interface, so the consumer
-loop below is written once regardless of --prefetch). This changes ONLY
-*when* documents arrive at the consumer, never their order or content, so
-every invariant below (RESUME fast-forwarding, per-document Deduplicator
-order, checkpoint-once-per-pool timing) is unaffected by turning it on.
-Off by default: this is a documented, carefully-tuned pipeline, and a wall-
-clock win from overlap depends on how much of the observed slowness really
-is network wait vs. e.g. HF `datasets`' own per-row decode overhead --
-verify with a real timing comparison before relying on this for a full-scale
-run. A producer-thread exception (e.g. a transient HF Hub error) is
-re-raised in the main thread via a queue sentinel, not swallowed silently.
-
-RESUME (--prep-checkpoint-path, default "<output-dir>/prep_checkpoint.json"
--- distinct from --checkpoint, the system's own tokenizer checkpoint): lets
-a run killed mid-way (e.g. a SLURM time limit at Glot500 scale) continue
-instead of restarting from token 0. Checkpointed once per pool that
-crosses a shard boundary, never mid-pool: bucketing processes a pool in
-length-sorted order, so stream_docs_consumed (how many (lang, text) pairs
-were pulled from the stream, regardless of keep/dedup/truncate) is only
-a safe resume point once a whole pool finishes. The checkpoint captures
-all counters plus any unflushed buffer contents (written to a sibling
-".buffer.bin" file); both files are written atomically (temp + os.replace,
-buffer first) so a crash never leaves a checkpoint referencing buffer data
-that isn't on disk. If prep_checkpoint_path exists at startup it's loaded
-automatically and the stream is fast-forwarded to stream_docs_consumed
-before normal processing resumes (no separate --resume flag; just rerun
-the same command). Deleted once shards_meta.json is written.
-
-Two accepted tradeoffs:
-  - The Deduplicator's state isn't persisted -- resume starts a fresh
-    deduplicator, so a duplicate straddling the resume boundary could
-    slip through.
-  - Fast-forwarding assumes stream_groups yields documents in the same
-    order across invocations (the same streaming-order caveat noted
-    above). Not a correctness hazard either way, since shard_dataset.py
-    samples random windows regardless of corpus order.
+Two accepted tradeoffs: the Deduplicator's state isn't persisted (a
+duplicate straddling the resume boundary could slip through), and
+fast-forwarding assumes stream_groups yields documents in the same order
+across invocations -- neither is a correctness hazard, since
+shard_dataset.py samples random windows regardless of corpus order.
 """
 
 import argparse

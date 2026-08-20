@@ -11,49 +11,23 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# FlexiTokens baseline tokenizer training -- see jobs/train.sh for the fairtok RL
-# policy this is a comparison baseline for. Its training is plain differentiable
-# backprop, not RL, so there's no reward/fairness-refresh machinery to configure --
-# but it DOES have the same --use-wandb/--wandb-project/--run-name flags fairtok's
-# job does (see flexitokens/train.py's FlexiTokensConfig).
-#
-# Usage:
-#   sbatch jobs/train_flexitokens.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
-#   sbatch jobs/train_flexitokens.sh --data-source oldi_seed --max-steps 2000   # quicker, single source
-#
-# All train.py flexitokens / flexitokens.cli flags are forwarded directly -- see
-# `python train.py flexitokens --help`.
-#
-# PREREQUISITE: flores_plus and bouquet are gated HF datasets (see common/data/oldi_data.py,
-# reused here for data loading). Same HF_TOKEN handling as jobs/train.sh -- see below.
+# FlexiTokens baseline -- plain differentiable backprop (no RL/reward machinery),
+# comparison baseline for jobs/train.sh's fairtok policy.
+# Usage: sbatch jobs/train_flexitokens.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
+# Requires HF_TOKEN (flores_plus/bouquet are gated).
 
-# 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
+WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers  # larger-quota scratch -- see jobs/prep_pretraining_data.sh
 
-# WORK_ROOT: larger-quota Lustre workspace for cache/derived data -- see
-# jobs/prep_pretraining_data.sh's own WORK_ROOT comment for why. Expires
-# unless renewed (`ws_extend rl-tokenizers <n>`) -- only cache/derived
-# data lives here, never code.
-WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers
-
-# 2. Modules
 module load devel/cuda/12.8
 module load devel/python/3.13.3-llvm-19.1
 echo "CUDA: $CUDA_HOME"
-# The cuda module above puts its OWN (older) cuDNN on LD_LIBRARY_PATH, which shadows
-# the newer cuDNN PyTorch already bundles for itself (the nvidia-cudnn-cu12 wheel in
-# .venv) -- if the two disagree, a cuDNN-using op fails with "PyTorch was compiled
-# against X but found runtime version Y" the moment it first runs on a CUDA tensor
-# (see jobs/train_manta.sh, which hits this via its block-level GRU). PyTorch
-# doesn't need the module's CUDA toolkit at RUNTIME (only nvcc, which nothing here
-# calls), so unset this and let PyTorch fall back to its own bundled libraries.
-unset LD_LIBRARY_PATH
+unset LD_LIBRARY_PATH  # avoids the cuda module's older cuDNN shadowing PyTorch's bundled one (crashes the GRU otherwise)
 
-# 3. Environment
 if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.cache/huggingface/token" ]; then
     export HF_TOKEN=$(cat "$HOME/.cache/huggingface/token")
 fi
-: "${HF_TOKEN:?No HF_TOKEN and no cached login at ~/.cache/huggingface/token -- run \`huggingface-cli login\` on this cluster (not just your laptop) or export HF_TOKEN before submitting}"
+: "${HF_TOKEN:?No HF_TOKEN -- run \`huggingface-cli login\` or export HF_TOKEN}"
 export CUDA_VISIBLE_DEVICES=0
 export TORCH_EXTENSIONS_DIR=$PROJECT_ROOT/.cache/torch_extensions
 export HF_HOME=$WORK_ROOT/.cache/huggingface
@@ -61,13 +35,11 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONUNBUFFERED=1
 mkdir -p "$TORCH_EXTENSIONS_DIR" "$HF_HOME"
 
-# 4. Project
 source $PROJECT_ROOT/.venv/bin/activate
 cd $PROJECT_ROOT
 uv sync
 mkdir -p logs checkpoints vocab_out
 
-# 5. Run -- job-id-tagged output paths, same convention as jobs/train.sh
 CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/flexitokens_${SLURM_JOB_ID}.pt"
 echo "Starting FlexiTokens training with args: $@"
 python3 train.py flexitokens \
@@ -81,15 +53,6 @@ python3 train.py flexitokens \
 
 if [ $? -eq 0 ]; then
     echo "Training complete."
-    # Held-out BOUQuET DEV was already scored periodically during training (see
-    # flexitokens/train.py's epoch-boundary eval); this final job scores the
-    # genuinely held-out TEST split exactly once, using the checkpoint training
-    # just wrote -- no --dependency needed since training already finished by
-    # the time this line runs. --output/--result-key included explicitly --
-    # confirmed live (see jobs/train_superbpe.sh's own history) that omitting
-    # them means the eval job only prints a report and writes NO mergeable
-    # JSON, silently losing the ability to fold a real completed run into
-    # results/all_tokenizers_comparison.json without a manual re-run.
     echo "Submitting final test-set evaluation job..."
     sbatch jobs/evaluate.sh flexitokens --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test \
         --output "results/flexitokens_comparison.json" --result-key flexitokens

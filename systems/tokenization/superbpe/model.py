@@ -144,13 +144,10 @@ def _fit_merges(
     is a non-issue here.
 
     RESUME (checkpoint_path, optional): if it exists at startup, `sequences`
-    (the caller's fresh word/sentence sequences) is REPLACED with the
-    checkpointed ones and merges-so-far are replayed into id_to_bytes before
-    the loop starts, so a resumed run is byte-for-byte identical to an
-    uninterrupted one -- same deterministic-fit guarantee either way. Written
-    every `checkpoint_every` merges (atomic, see _save_merge_checkpoint) and
-    removed once this stage finishes, so a stale checkpoint never survives
-    past the run it belongs to.
+    is REPLACED with the checkpointed ones and merges-so-far are replayed
+    into id_to_bytes first, so a resumed run is byte-for-byte identical to
+    an uninterrupted one. Written every `checkpoint_every` merges (atomic,
+    see _save_merge_checkpoint); removed once this stage finishes.
 
     Returns list[((int,int), int)] merges in learned order (== priority
     order at encode time -- see SuperBPEModel).
@@ -269,19 +266,12 @@ def fit_superbpe(
     merge-fitting loop itself, and its own result gets discarded in favor of the
     checkpointed `sequences` when a stage resumes anyway).
 
-    Once stage 1 finishes, _fit_merges deletes its OWN checkpoint (a finished
-    stage isn't resumable) -- but a crash during stage 2 still needs stage 1's
-    completed merges list to reconstruct id_to_bytes/stage1_merge_info on the
-    next call, and by then nothing durable says stage 1 is done. Confirmed
-    live: without persisting that separately, `fit_superbpe` had no way to tell
-    "stage 1 already finished" from "stage 1 never started", so a resume
-    landing in stage 2 silently REFIT ALL of stage 1 from scratch first --
-    deterministic, so not WRONG, but a real ~40k-merge run wasted on a resume
-    that should have skipped straight to stage 2. stage1_result.json persists
-    the completed list once, checked before stage 1 is attempted at all so a
-    later resume can skip it entirely; removed once the whole fit succeeds, so
-    a genuinely different experiment reusing this checkpoint_dir doesn't
-    silently inherit a stale stage 1.
+    stage1_result.json persists stage 1's completed merge list once it
+    finishes (separately from _fit_merges's own now-deleted checkpoint) --
+    CONFIRMED LIVE this matters: without it, a resume landing in stage 2 had
+    no way to tell "stage 1 already finished" from "never started" and
+    silently refit all of stage 1 from scratch (deterministic, not wrong,
+    but a wasted ~40k-merge run). Removed once the whole fit succeeds.
 
     Returns a SuperBPEModel.
     """

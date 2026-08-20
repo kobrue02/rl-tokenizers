@@ -317,6 +317,16 @@ class MantaModel(nn.Module):
         mu_exp = mu.unsqueeze(-1)  # (B, T, 1)
         sigma_exp = sigma.unsqueeze(-1)  # (B, T, 1)
         # Log-density up to the per-i normalizer, which softmax over b cancels.
+        # Denominator is 2*sigma^2 -- the correct Gaussian exponent for a
+        # kernel parameterized by mean and STANDARD DEVIATION (matching the
+        # paper's own Eq. 1 "truncated Gaussian kernel G with the same mean
+        # and variance"). Deliberately NOT literally identical to the
+        # official almanach/manta-lm-base checkpoint's modeling_manta.py,
+        # which divides by 2*sigma (not squared) in this same exponent while
+        # its own additive normalizer term (-log(sigma) - log(sqrt(2*pi)))
+        # assumes the squared-sigma form -- an internal inconsistency in that
+        # reference code (confirmed by reading it directly), not something
+        # this project's own derivation should reproduce.
         log_density = -((block_idx - mu_exp) ** 2) / (2 * sigma_exp**2)
         assignment = torch.softmax(
             log_density, dim=-1

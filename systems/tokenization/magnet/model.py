@@ -68,11 +68,6 @@ model trained on 10B+ bytes):
     (MagnetConfig.boundary_temperature) rather than annealed over training.
   - Attention: plain `nn.MultiheadAttention` with causal + padding masks, not
     a hand-rolled relative-attention kernel.
-
-(An earlier version cast segment ids to integers for scatter/gather, which
-severed the gradient path through routing; the direct reuse of
-downsample/upsample above fixes this -- gradient now flows through the
-pooling weights too.)
 """
 
 import torch

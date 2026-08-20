@@ -68,9 +68,7 @@ their assignment matrix directly from the continuous straight-through
 `boundaries` tensor (never detached to integer ids), the reconstruction
 loss's gradient flows through the pooling itself into the boundary
 predictor's weights, not just through boundary_hinge_loss's direct use of
-`boundaries`. (An earlier version hardened boundaries into integer
-scatter/gather indices, severing this channel and leaving the hinge loss as
-the only training signal.)
+`boundaries`.
 """
 
 import torch

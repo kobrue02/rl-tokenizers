@@ -91,25 +91,14 @@ def derive_alpha_beta(
     "reasonable" rate, so it gets a wider band.
 
     beta_floor (JUDGMENT CALL, not in the paper): without it, beta_L is only
-    clamped to >= 0, not >= some positive value. Confirmed live to matter --
-    on real BOUQuET training data, 258 of 259 languages' coefficient of
-    variation exceeds 1/margin_lambda, driving beta_L to EXACTLY 0 for
-    99.6% of languages. boundary_hinge_loss's lower-bound term
-    (max(beta - rate, 0)) is then permanently zero for those languages --
-    the paper's own anti-collapse safeguard against "compressing less than
-    beta_L" (see that function's docstring) silently never fires. A real
-    trained checkpoint collapsed to ~0.6% boundary rate (avg 164
-    bytes/token, vs. an intended ~4 bytes/token) as a direct result: with no
-    floor and CE loss providing little pressure toward frequent
-    segmentation on its own, only alpha_L's upper bound remained, and
-    nothing stopped the rate from drifting arbitrarily low. beta_floor
-    guarantees every language keeps SOME lower-bound pressure regardless of
-    how large its computed sigma_L is; 0.02 sits comfortably below
-    alpha_floor's own 0.05 (the smallest alpha_L can ever be), so a nonzero
-    band survives even for the tightest-alpha language. beta_L is clamped
-    to [beta_floor, alpha_L] (the upper clamp still wins if beta_floor would
-    otherwise exceed alpha_L, matching the original [0, alpha_L] clamp's own
-    intent).
+    clamped to >= 0. CONFIRMED LIVE this matters: on real BOUQuET data, 258
+    of 259 languages' coefficient of variation exceeds 1/margin_lambda,
+    driving beta_L to exactly 0 -- boundary_hinge_loss's lower-bound term
+    then permanently zero, and a real trained checkpoint collapsed to
+    ~0.6% boundary rate (avg 164 bytes/token vs. an intended ~4) as a
+    direct result. beta_floor=0.02 sits below alpha_floor's own 0.05 so a
+    nonzero band survives even for the tightest-alpha language; beta_L is
+    clamped to [beta_floor, alpha_L].
 
     Returns (alpha_by_lang, beta_by_lang, anchor_used -- may differ from
     `anchor_lang` if that language isn't present in the corpus).

@@ -263,62 +263,44 @@ def gen_spread_leaderboard_tex(
     row_height_cm=0.7,
     min_rows_for_two_columns=MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD,
 ):
-    """Two side-by-side panels (left = better half of the ranking, right = worse
-    half), not one long column -- past ~35-40 tokenizers a single-column bar chart
-    at a legible row height no longer fits one page. Splitting preserves the exact
-    same per-row height/font (nothing shrinks), so legibility never degrades as
-    more tokenizers get added; it only ever gains a second column.
+    """Two side-by-side panels (better half left, worse half right), not one
+    long column -- past ~35-40 tokenizers a single-column chart at a legible
+    row height no longer fits one page. Splitting keeps the exact per-row
+    height/font, so legibility never degrades as more tokenizers get added.
 
-    BELOW min_rows_for_two_columns rows (default 12, well under any real
-    multi-family comparison's row count -- this project's own scoped
-    leaderboards, e.g. scripts/generate_scoped_leaderboards.py's 5-model
-    "our work vs other approaches" figure, are the actual use case), renders
-    a SINGLE column instead: confirmed live that splitting a SMALL, WIDE-
-    RANGE row set into two columns gives each column its own independently
-    auto-scaled x-axis (pgfplots scales an axis to only the data actually
-    plotted on it) -- with just 5 rows spanning ~4 to ~23, the two columns'
-    x-axes ended up on visibly different scales, making one tokenizer's bar
-    look only slightly longer than another's when it was actually ~4-5x
-    longer. A single column shares ONE x-axis across every row, so this
-    can't happen regardless of how skewed the value range is.
+    BELOW min_rows_for_two_columns (default 12), renders a SINGLE column
+    instead: CONFIRMED LIVE that splitting a small, wide-range row set into
+    two columns gives each its own independently auto-scaled x-axis
+    (pgfplots scales to only the data plotted on it) -- 5 rows spanning
+    ~4-23 landed on visibly different per-column scales, making one bar look
+    only slightly longer than another's when it was actually ~4-5x longer.
+    A single column shares one x-axis, so this can't happen.
 
-    Both panels plot from the SAME per-family .dat files (unchanged, still keyed by
-    each row's global rank `idx`) -- pgfplots clips points outside an axis's own
-    ymin/ymax, so bounding each panel to its own half of the idx range is enough;
-    no separate per-half data files needed.
+    Both panels plot from the SAME per-family .dat files (pgfplots clips
+    points outside an axis's own ymin/ymax, so bounding each panel to its
+    half of the idx range is enough -- no separate per-half files needed).
 
-    NEITHER axis carries a pgfplots legend -- confirmed live (real tectonic
-    renders, not eyeballed) that attaching one to just the right panel misaligns
-    every row between the two panels, even with identical `height=`/`ymin`/`ymax`
-    and even with `scale only axis` added specifically to try to fix it: pgfplots
-    still shifts that ONE axis's own vertical position to make room for its
-    legend, in a way `scale only axis` doesn't neutralize. Removing the legend
-    from both axes entirely (confirmed live to restore exact row alignment) and
-    drawing it as plain TikZ swatches in a flowing paragraph AFTER both minipages
-    -- letting LaTeX's own line-breaking wrap entries, no manual row/column math
-    -- sidesteps pgfplots' legend machinery altogether.
+    NEITHER axis carries a pgfplots legend -- CONFIRMED LIVE (real tectonic
+    renders) that a legend on just the right panel misaligns every row
+    between panels, even with identical height/ymin/ymax and `scale only
+    axis`. Fix: no legend on either axis; drawn instead as plain TikZ
+    swatches in a flowing paragraph after both minipages (LaTeX's own
+    line-breaking wraps entries, no manual layout math).
 
-    `scale only axis` and `width=0.9\\linewidth` (not `\\linewidth`) are kept anyway:
-    the former makes the two panels' cm-per-row scale identical regardless of any
-    OTHER future asymmetry between them; the latter reserves room for the
-    rightmost x-tick label's overhang, which `scale only axis` stops pgfplots
-    auto-reserving -- confirmed live that omitting it clips the last tick (e.g.
-    "20") at the page margin.
+    `scale only axis` keeps both panels' cm-per-row scale identical;
+    `width=0.9\\linewidth` (not `\\linewidth`) reserves room for the
+    rightmost tick label's overhang, which `scale only axis` stops pgfplots
+    from auto-reserving -- confirmed live that omitting it clips the last tick.
 
-    A few more confirmed-live fixes once the above was otherwise working:
-    (1) a per-panel `xlabel` (both panels describe the same x-axis) ran the two
-    copies straight into each other at the seam between panels -- replaced with
-    ONE shared label centered under the whole two-column block.
-    (2) the two 0.48\\linewidth minipages need an outer `\\begingroup\\centering
-    ... \\endgroup` around the pair (plus the shared xlabel/legend below them) --
-    without it, plain paragraph flow is flush-left, so the ~4% leftover space
-    defaults entirely to one side instead of splitting evenly.
-    (3) the gap BETWEEN the two minipages must be a fixed `\\hspace`, not
-    `\\hfill`: `\\hfill` is stretchable glue of the SAME order `\\centering`'s own
-    before/after margins use, so the two compete for the same leftover space --
-    confirmed live that this made the whole block land off-center in an
-    unpredictable direction (which side depends on other content) rather than
-    `\\centering`'s margins reliably getting all of it."""
+    Three more confirmed-live layout fixes: (1) a per-panel `xlabel` ran the
+    two copies into each other at the seam -- replaced with one shared label
+    centered under the whole block. (2) the two 0.48\\linewidth minipages
+    need an outer `\\begingroup\\centering...\\endgroup` -- without it, plain
+    paragraph flow is flush-left, so leftover space defaults entirely to one
+    side. (3) the gap between minipages must be a fixed `\\hspace`, not
+    `\\hfill` -- `\\hfill` is the same order of stretchable glue as
+    `\\centering`'s own margins, so they compete for the same leftover space
+    and the block lands off-center unpredictably."""
     n = len(rows)
     single_column = n < min_rows_for_two_columns
     if single_column:

@@ -9,97 +9,44 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# Held-out BOUQuET evaluation for one or more ARBITRARY HuggingFace models'
-# own tokenizers -- see systems/tokenization/hf_frontier/evaluate.py's own module
-# docstring for the multi-repo/--output design and systems/tokenization/hf_frontier/
-# model.py for how tokenizer-only loading + byte-span reconstruction work.
-# No GPU requested: this only ever tokenizes text (no model inference at
-# all -- see model.py's own docstring confirming NO model weights are ever
-# downloaded), same cpu_il reasoning as jobs/evaluate.sh.
-#
-# --time=11:00:00: widened again now that configs/eval_hf_frontier.yml lists
-# 33 repos (a prior real run at 16 repos completed inside 8h; the 25-repo
-# widening to 10h was never itself tested against a real run) -- still not a
-# benchmarked number at this exact scale. The 7 new tiktoken: entries add
-# close to NO extra cost (no HF Hub download at all -- tiktoken.get_encoding()
-# loads its own small bundled encoding data), and meta-models/Muse-Glimmer-30B
-# is one more ordinary tokenizer-only load, same cost class as the existing
-# frontier repos. Unlike jobs/evaluate.sh's own from-scratch checkpoints, a
-# frontier tokenizer's encode() is plain BPE/SentencePiece/WordPiece merge
-# application with no neural net at all, so per-row tokenization cost over
-# BOUQuET test's ~272k rows should be genuinely fast; the real per-repo cost
-# is mostly download/load overhead, not compute that scales with row count
-# the way jobs/evaluate.sh's own neural forward-pass cost does. Widen this
-# further if you add even more repos, or narrow a run with --num-groups /
-# --eval-data-source bouquet (dev, not test) for a quicker exploratory pass.
-# One repo failing (see systems/tokenization/hf_frontier/evaluate.py's own per-repo error
-# isolation) doesn't abort the rest of the list, so a bad/gated-without-access
-# repo in the list costs time on just that one repo, not the whole job.
+# Held-out BOUQuET evaluation for arbitrary HF models' own tokenizers
+# (systems/tokenization/hf_frontier/evaluate.py) -- tokenizer-only, no model
+# weights downloaded, no GPU needed. One repo failing doesn't abort the rest.
+# --time=11:00:00: not benchmarked at the current 33-repo scale; widen if you add more repos.
 #
 # Usage:
 #   sbatch jobs/evaluate_hf_frontier.sh -c configs/eval_hf_frontier.yml
-#
 #   sbatch jobs/evaluate_hf_frontier.sh \
 #       --hf-repo-id deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct \
 #       --trust-remote-code --eval-data-source bouquet_test \
 #       --output results/hf_frontier_comparison.json --use-wandb --run-name frontier_v1
+# All flags forward directly -- see `python3 evaluate.py hf_frontier --help`.
 #
-# All flags forward directly to systems/tokenization/hf_frontier/evaluate.py -- see
-# `python3 evaluate.py hf_frontier --help`.
-#
-# PREREQUISITES:
-#   - BOUQuET is a gated HF dataset (same HF_TOKEN requirement as
-#     jobs/evaluate.sh -- run `huggingface-cli login` on this cluster, or
-#     export HF_TOKEN, before submitting).
-#   - --trust-remote-code executes that repo's OWN Python code (needed for
-#     e.g. moonshotai/Kimi-K3) -- only pass it if you've reviewed what
-#     that implies, see systems/tokenization/hf_frontier/model.py's own docstring.
-#   - Gated repos (need their license accepted on huggingface.co AND your
-#     HF_TOKEN to actually have that access granted -- a plain HF_TOKEN
-#     without accepted access fails to load just that one repo's tokenizer,
-#     even though BOUQuET's own access is fine, and now doesn't abort the
-#     rest of the list either): in configs/eval_hf_frontier.yml's current
-#     33-repo list, that's meta-llama/Llama-3.1-8B-Instruct, meta-llama/
-#     Llama-3.3-70B-Instruct, and google/gemma-7b -- nothing else (the 9
-#     encoder repos, meta-models/Muse-Glimmer-30B, and the 7 tiktoken:
-#     entries) is gated.
-#   - microsoft/deberta-v3-base's tokenizer needs the `sentencepiece`
-#     package (a real pyproject.toml dependency, installed via `uv sync`
-#     below -- not an extra manual step).
-#   - The 7 "tiktoken:{name}" entries (e.g. "tiktoken:cl100k_base") aren't
-#     HF Hub repos at all -- see systems/tokenization/hf_frontier/model.py's own module
-#     docstring, scheme 3 -- loaded directly via the `tiktoken` package
-#     (also a real pyproject.toml dependency), no HF_TOKEN/--trust-remote-code
-#     relevance for them.
+# PREREQUISITES: HF_TOKEN (BOUQuET is gated). --trust-remote-code executes
+# that repo's own Python code (needed for e.g. moonshotai/Kimi-K3) -- only
+# pass it if you've reviewed what that implies. Gated repos in the current
+# 33-repo list needing accepted access: meta-llama/Llama-3.1-8B-Instruct,
+# meta-llama/Llama-3.3-70B-Instruct, google/gemma-7b. The 7 "tiktoken:{name}"
+# entries aren't HF Hub repos -- loaded via the `tiktoken` package directly.
 
-# 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
+WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers  # larger-quota scratch -- see jobs/prep_pretraining_data.sh
 
-# WORK_ROOT: larger-quota Lustre workspace for cache/derived data -- see
-# jobs/prep_pretraining_data.sh's own WORK_ROOT comment for why. Expires
-# unless renewed (`ws_extend rl-tokenizers <n>`) -- only cache/derived
-# data lives here, never code.
-WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers
-
-# 2. Modules
 module load devel/python/3.13.3-llvm-19.1
 
-# 3. Environment
 if [ -z "$HF_TOKEN" ] && [ -f "$HOME/.cache/huggingface/token" ]; then
     export HF_TOKEN=$(cat "$HOME/.cache/huggingface/token")
 fi
-: "${HF_TOKEN:?No HF_TOKEN and no cached login at ~/.cache/huggingface/token -- run \`huggingface-cli login\` on this cluster (not just your laptop) or export HF_TOKEN before submitting}"
+: "${HF_TOKEN:?No HF_TOKEN -- run \`huggingface-cli login\` or export HF_TOKEN}"
 export HF_HOME=$WORK_ROOT/.cache/huggingface
 export PYTHONUNBUFFERED=1
 mkdir -p "$HF_HOME"
 
-# 4. Project
 source $PROJECT_ROOT/.venv/bin/activate
 cd $PROJECT_ROOT
 uv sync
 mkdir -p logs results
 
-# 5. Run
 echo "Starting hf_frontier evaluation with args: $@"
 python3 evaluate.py hf_frontier "$@"
 
