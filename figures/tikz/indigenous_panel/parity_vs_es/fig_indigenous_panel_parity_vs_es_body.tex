@@ -1,14 +1,14 @@
 \begin{tikzpicture}
 \begin{axis}[
-    ybar, width=13.0cm, height=6.5cm,
+    ybar, width=14.3cm, height=6.5cm,
     bar width=3pt,
-    symbolic x coords={aym,bzd,cni,gn,hch,nah,oto,quy,shp,tar},
+    symbolic x coords={arn,aym,bzd,cni,gn,hch,nah,oto,quy,shp,tar},
     xtick=data,
-    xticklabels={{Aymara}, {Bribri}, {Asháninka}, {Guarani}, {Huichol}, {Nahuatl languages}, {Otomian languages}, {Ayacucho Quechua}, {Shipibo-Conibo}, {Central Tarahumara}},
+    xticklabels={{Mapuche}, {Aymara}, {Bribri}, {Asháninka}, {Guarani}, {Huichol}, {Nahuatl languages}, {Otomian languages}, {Ayacucho Quechua}, {Shipibo-Conibo}, {Central Tarahumara}},
     x tick label style={rotate=40, anchor=east, font=\small},
     ylabel={mean token parity vs es},
     ymin=0,
-    enlarge x limits=0.050,
+    enlarge x limits=0.045,
     extra y ticks={1},
     extra y tick labels={},
     extra y tick style={grid=major, major grid style={dashed, gray, thick}},
@@ -23,6 +23,10 @@
 \addlegendentry{Meta/Llama}
 \addplot+[ybar, fill=encCol, draw=encCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Encoder-only.dat};
 \addlegendentry{Encoder-only}
+\addplot+[ybar, fill=anthropicCol, draw=anthropicCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Anthropic.dat};
+\addlegendentry{Anthropic}
+\addplot+[ybar, fill=oursCol, draw=oursCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_This_work.dat};
+\addlegendentry{This work}
 \addplot+[ybar, fill=otherCol, draw=otherCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_es/bar_indigenous_panel_parity_vs_es_Other.dat};
 \addlegendentry{Other}
 \end{axis}

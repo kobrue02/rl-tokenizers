@@ -1,0 +1,63 @@
+\begingroup\centering
+\begin{minipage}[t]{0.47\linewidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    xbar,
+    scale only axis,
+    width=0.9\linewidth, height=14.0cm,
+    x tick label style={font=\tiny},
+    xmin=0,
+    ytick={0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19},
+    yticklabels={{m2v-256-bge-reranker-v2-m3}, {m2v-256-multilingual-e5-small}, {fine-tuned-e5-small-drugproduct}, {token\_punct\_dilute}, {mbart50\_ko\_vi}, {mbart-large-51-myv-mul-v1}, {xlm-roberta-base}, {deberta-v3-base}, {gemma-7b}, {claude-opus-5}, {Muse-Glimmer-30B}, {Llama-2-7b-hf}, {bert-base-multilingual-cased}, {Qwen3-8B}, {Mistral-7B-v0.1}, {ModernBERT-base}, {Llama-3.1-8B-Instruct}, {Llama-3.3-70B-Instruct}, {tk:cl100k\_base}, {gpt-oss-120b}},
+    yticklabel style={font=\scriptsize},
+    y dir=reverse,
+    ymin=-0.7, ymax=19.3,
+    bar width=5pt,
+    axis y line*=left, axis x line*=bottom,
+]
+\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_OpenAI_tiktoken.dat};
+\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Chinese_labs.dat};
+\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Meta_Llama.dat};
+\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Encoder-only.dat};
+\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Anthropic.dat};
+\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Other.dat};
+\end{axis}
+\end{tikzpicture}
+\end{minipage}
+\hspace{0.02\linewidth}
+\begin{minipage}[t]{0.47\linewidth}
+\hspace{2.6cm}
+\begin{tikzpicture}
+\begin{axis}[
+    xbar,
+    scale only axis,
+    width=\linewidth-2.9cm, height=14.0cm,
+    x tick label style={font=\tiny},
+    xmin=0,
+    ytick={20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39},
+    yticklabels={{gpt-oss-20b}, {tk:o200k\_base}, {tk:o200k\_harmony}, {Kimi-K3}, {DeepSeek-R1}, {DeepSeek-V4-Pro}, {bloom}, {falcon-7b}, {opt-125m}, {deberta-base}, {gpt2}, {roberta-base}, {tk:gpt2}, {tk:r50k\_base}, {tk:p50k\_base}, {tk:p50k\_edit}, {Qwen3.8-2.4T-A95B}, {distilbert-base-uncased}, {electra-base-discriminator}, {bert-base-cased}},
+    yticklabel style={font=\scriptsize},
+    y dir=reverse,
+    ymin=19.3, ymax=39.3,
+    bar width=5pt,
+    axis y line*=left, axis x line*=bottom,
+]
+\addplot+[xbar, fill=openaiCol, draw=openaiCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_OpenAI_tiktoken.dat};
+\addplot+[xbar, fill=chinaCol, draw=chinaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Chinese_labs.dat};
+\addplot+[xbar, fill=metaCol, draw=metaCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Meta_Llama.dat};
+\addplot+[xbar, fill=encCol, draw=encCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Encoder-only.dat};
+\addplot+[xbar, fill=anthropicCol, draw=anthropicCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Anthropic.dat};
+\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_hf_frontier/bar_Other.dat};
+\end{axis}
+\end{tikzpicture}
+\end{minipage}
+\par\vspace{0.1cm}\scriptsize Token-parity spread (max/min across all languages, anchor-invariant)\par
+\vspace{0.2cm}\scriptsize
+\tikz{\fill[openaiCol] (0,0) rectangle (0.9em,0.6em);}~OpenAI/tiktoken\quad
+\tikz{\fill[chinaCol] (0,0) rectangle (0.9em,0.6em);}~Chinese labs\quad
+\tikz{\fill[metaCol] (0,0) rectangle (0.9em,0.6em);}~Meta/Llama\quad
+\tikz{\fill[encCol] (0,0) rectangle (0.9em,0.6em);}~Encoder-only\quad
+\tikz{\fill[anthropicCol] (0,0) rectangle (0.9em,0.6em);}~Anthropic\quad
+\tikz{\fill[otherCol] (0,0) rectangle (0.9em,0.6em);}~Other\quad
+\par\endgroup

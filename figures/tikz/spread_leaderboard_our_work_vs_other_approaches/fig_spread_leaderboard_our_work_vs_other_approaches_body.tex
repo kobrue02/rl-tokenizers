@@ -1,0 +1,25 @@
+\begingroup\centering
+\begin{tikzpicture}
+\begin{axis}[
+    xbar,
+    scale only axis,
+    width=0.85\linewidth, height=8.0cm,
+    x tick label style={font=\tiny},
+    xmin=0,
+    ytick={0,1,2,3,4},
+    yticklabels={{magnet}, {manta}, {parity\_bpe}, {fanta}, {flexitokens}},
+    yticklabel style={font=\scriptsize},
+    y dir=reverse,
+    ymin=-0.7, ymax=4.3,
+    bar width=8pt,
+    axis y line*=left, axis x line*=bottom,
+]
+\addplot+[xbar, fill=oursCol, draw=oursCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_our_work_vs_other_approaches/bar_This_work.dat};
+\addplot+[xbar, fill=otherCol, draw=otherCol, bar shift=0pt] table [x=spread, y=idx] {figures/tikz/spread_leaderboard_our_work_vs_other_approaches/bar_Other_approaches.dat};
+\end{axis}
+\end{tikzpicture}
+\par\vspace{0.1cm}\scriptsize Token-parity spread (max/min across all languages, anchor-invariant)\par
+\vspace{0.2cm}\scriptsize
+\tikz{\fill[oursCol] (0,0) rectangle (0.9em,0.6em);}~This work\quad
+\tikz{\fill[otherCol] (0,0) rectangle (0.9em,0.6em);}~Other approaches\quad
+\par\endgroup

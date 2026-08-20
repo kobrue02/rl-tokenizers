@@ -67,6 +67,16 @@ _FAMILY_COLORS = {
     "Anthropic": "anthropicCol",
     "This work": "oursCol",
     "Other": "otherCol",
+    # Used ONLY by the standalone "our work vs other approaches" leaderboard
+    # (scripts/generate_our_work_vs_other_approaches.py, not the main
+    # multi-family comparison) -- a manual row-level family override there
+    # reclassifies manta/magnet/parity_bpe/flexitokens under this key so they
+    # render visually distinct from fanta's own "This work" green, despite
+    # family_of() itself still (correctly, for every OTHER figure) bucketing
+    # all of this project's own tokenizers as "This work". Reuses "Other"'s
+    # own purple -- the two families never co-occur in the same figure, so
+    # sharing one TikZ color macro is harmless.
+    "Other approaches": "otherCol",
 }
 _FAMILY_RGB = {
     "OpenAI/tiktoken": (16, 110, 118),
@@ -76,11 +86,17 @@ _FAMILY_RGB = {
     "Anthropic": (180, 60, 60),
     "This work": (34, 139, 74),  # distinct green so our own 7 tokenizers stand out from "Other"
     "Other": (163, 79, 168),
+    "Other approaches": (163, 79, 168),
 }
 # Exact system_label strings evaluate.py's TOKENIZERS dict uses for this repo's
 # 7 trained tokenizers (scripts/combine_eval_results.py keys entries by --result-key,
 # which defaults to this) -- exact-match, not the prefix heuristic below.
 _REPO_TOKENIZER_NAMES = {"fairtok", "magnet", "flexitokens", "manta", "fanta", "superbpe", "bpe", "parity_bpe"}
+# Single source of truth for gen_spread_leaderboard_tex's own default -- also
+# referenced by scripts/generate_scoped_leaderboards.py to know, without
+# duplicating the number, whether a given row count will render as one
+# column or two.
+MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD = 12
 _ENCODER_ONLY_NAMES = {
     "bert-base-cased", "bert-base-multilingual-cased", "distilbert-base-uncased",
     "roberta-base", "xlm-roberta-base", "microsoft/deberta-base",
@@ -245,12 +261,26 @@ def gen_spread_leaderboard_tex(
     xlabel="Token-parity spread (max/min across all languages, anchor-invariant)",
     fig_name="spread_leaderboard",
     row_height_cm=0.7,
+    min_rows_for_two_columns=MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD,
 ):
     """Two side-by-side panels (left = better half of the ranking, right = worse
     half), not one long column -- past ~35-40 tokenizers a single-column bar chart
     at a legible row height no longer fits one page. Splitting preserves the exact
     same per-row height/font (nothing shrinks), so legibility never degrades as
     more tokenizers get added; it only ever gains a second column.
+
+    BELOW min_rows_for_two_columns rows (default 12, well under any real
+    multi-family comparison's row count -- this project's own scoped
+    leaderboards, e.g. scripts/generate_scoped_leaderboards.py's 5-model
+    "our work vs other approaches" figure, are the actual use case), renders
+    a SINGLE column instead: confirmed live that splitting a SMALL, WIDE-
+    RANGE row set into two columns gives each column its own independently
+    auto-scaled x-axis (pgfplots scales an axis to only the data actually
+    plotted on it) -- with just 5 rows spanning ~4 to ~23, the two columns'
+    x-axes ended up on visibly different scales, making one tokenizer's bar
+    look only slightly longer than another's when it was actually ~4-5x
+    longer. A single column shares ONE x-axis across every row, so this
+    can't happen regardless of how skewed the value range is.
 
     Both panels plot from the SAME per-family .dat files (unchanged, still keyed by
     each row's global rank `idx`) -- pgfplots clips points outside an axis's own
@@ -290,14 +320,65 @@ def gen_spread_leaderboard_tex(
     unpredictable direction (which side depends on other content) rather than
     `\\centering`'s margins reliably getting all of it."""
     n = len(rows)
-    half = math.ceil(n / 2)
-    columns = [rows[:half], rows[half:]]
-    col_height = max(8.0, half * row_height_cm)
+    single_column = n < min_rows_for_two_columns
+    if single_column:
+        columns = [rows]
+    else:
+        half = math.ceil(n / 2)
+        columns = [rows[:half], rows[half:]]
+    col_height = max(8.0, len(columns[0]) * row_height_cm) if columns else 8.0
 
     preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
     for fam in families:
         r_, g_, b_ = _FAMILY_RGB[fam]
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS[fam], r_, g_, b_))
+
+    if single_column:
+        # No minipage/split machinery at all below min_rows_for_two_columns --
+        # a single axis means every row shares ONE x-axis, so pgfplots can't
+        # independently auto-scale two panels to visibly different ranges
+        # the way splitting a small, wide-value-range row set into two
+        # columns did (see this function's own docstring for the confirmed
+        # live example: 5 rows spanning ~4-23 landed on two different
+        # per-column x-axis scales, making bar-length comparisons across the
+        # split misleading).
+        col_rows = columns[0]
+        idx_min = min(r["idx"] for r in col_rows)
+        idx_max = max(r["idx"] for r in col_rows)
+        yticklabels = ", ".join(f"{{{esc(r['short'])}}}" for r in col_rows)
+        body = [
+            r"\begingroup\centering",
+            r"\begin{tikzpicture}",
+            r"\begin{axis}[",
+            r"    xbar,",
+            r"    scale only axis,",
+            r"    width=0.85\linewidth, height=%.1fcm," % col_height,
+            r"    x tick label style={font=\tiny},",
+            r"    xmin=0,",
+            r"    ytick={%s}," % ",".join(str(r["idx"]) for r in col_rows),
+            r"    yticklabels={%s}," % yticklabels,
+            r"    yticklabel style={font=\scriptsize},",
+            r"    y dir=reverse,",
+            r"    ymin=%g, ymax=%g," % (idx_min - 0.7, idx_max + 0.3),
+            r"    bar width=8pt,",
+            r"    axis y line*=left, axis x line*=bottom,",
+            r"]",
+        ]
+        for fam in families:
+            col = _FAMILY_COLORS[fam]
+            body.append(
+                r"\addplot+[xbar, fill=%s, draw=%s, bar shift=0pt] table [x=spread, y=idx] {%sbar_%s.dat};"
+                % (col, col, data_prefix, fam_key(fam))
+            )
+        body += [r"\end{axis}", r"\end{tikzpicture}"]
+        body.append(r"\par\vspace{0.1cm}\scriptsize %s\par" % esc(xlabel))
+        body.append(r"\vspace{0.2cm}\scriptsize")
+        for fam in families:
+            col = _FAMILY_COLORS[fam]
+            body.append(r"\tikz{\fill[%s] (0,0) rectangle (0.9em,0.6em);}~%s\quad" % (col, esc(fam)))
+        body.append(r"\par\endgroup")
+        full_tex, _ = _write_standalone_and_body(fig_name, preamble, body, out_dir)
+        return full_tex
 
     # Outer centering, not just the per-panel \\centering below: the two 0.48\\linewidth
     # minipages + \\hfill only total ~0.96\\linewidth, and without a wrapping group that

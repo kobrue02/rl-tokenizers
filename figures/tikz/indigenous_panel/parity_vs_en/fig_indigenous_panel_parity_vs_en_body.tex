@@ -2,13 +2,13 @@
 \begin{axis}[
     ybar, width=10.0cm, height=6.5cm,
     bar width=3pt,
-    symbolic x coords={crk,iu},
+    symbolic x coords={chr,crk,iu,mi},
     xtick=data,
-    xticklabels={{Plains Cree}, {Inuktitut}},
+    xticklabels={{Cherokee}, {Plains Cree}, {Inuktitut}, {Māori}},
     x tick label style={rotate=40, anchor=east, font=\small},
     ylabel={mean token parity vs en},
     ymin=0,
-    enlarge x limits=0.250,
+    enlarge x limits=0.125,
     extra y ticks={1},
     extra y tick labels={},
     extra y tick style={grid=major, major grid style={dashed, gray, thick}},
@@ -23,6 +23,10 @@
 \addlegendentry{Meta/Llama}
 \addplot+[ybar, fill=encCol, draw=encCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_Encoder-only.dat};
 \addlegendentry{Encoder-only}
+\addplot+[ybar, fill=anthropicCol, draw=anthropicCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_Anthropic.dat};
+\addlegendentry{Anthropic}
+\addplot+[ybar, fill=oursCol, draw=oursCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_This_work.dat};
+\addlegendentry{This work}
 \addplot+[ybar, fill=otherCol, draw=otherCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_Other.dat};
 \addlegendentry{Other}
 \end{axis}
