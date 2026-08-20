@@ -16,6 +16,7 @@ style warmup+decay every systems/ tokenizer trainer uses) rather than a
 second scheduler implementation.
 """
 
+import contextlib
 import dataclasses
 import os
 import time
@@ -58,6 +59,20 @@ class TrainConfig:
     # "linear", HF Trainer's/tokenizer trainers' default) -- cosine's
     # slower-then-faster decay is established practice for long runs
     log_steps: int = 10
+    val_fraction: float = 0.05  # fraction of shard_dir's own shards reserved
+    # for held-out validation loss (never sampled for training) -- 0
+    # disables validation entirely. See _split_train_val_shard_files's own
+    # docstring for why this is a fixed STRIDE across every shard rather
+    # than just the last few: glot500-scale corpora have per-language sizes
+    # spanning orders of magnitude, and _round_robin drops each language
+    # once its own data is exhausted, so later shards in a long run skew
+    # toward whichever languages had the most data -- a stride sampled
+    # across the whole sequence avoids that skew.
+    eval_interval: int = 1000  # run validation every this many steps (0 disables)
+    eval_iters: int = 50  # validation batches averaged per validation pass --
+    # a FIXED validation set (same eval_iters batches every single call, not
+    # freshly reshuffled), so consecutive validation passes measure actual
+    # model improvement rather than evaluation-sampling noise.
     save_steps: int = 1000
     keep_last_n_checkpoints: int = 3  # rotating step_{step}.pt checkpoints
     # beyond this many most-recent ones are deleted. Real incident: a
@@ -91,6 +106,90 @@ def setup_distributed():
     dist.init_process_group(backend="nccl")
     torch.cuda.set_device(local_rank)
     return rank, local_rank, world_size, torch.device(f"cuda:{local_rank}")
+
+
+def _existing_checkpoints(output_dir):
+    """Every step_{N}.pt already in output_dir (e.g. left over from an
+    earlier --resume-from segment of the same multi-day run), sorted
+    oldest-first by step number -- excludes final.pt (never rotated, see
+    keep_last_n_checkpoints's own docstring), and anything that doesn't
+    parse as step_{int}.pt.
+
+    Used to SEED checkpoint rotation's bookkeeping at startup rather than
+    starting it empty every process restart: rotation that resets on every
+    resume can only ever delete checkpoints saved within ITS OWN lifetime,
+    letting every PRIOR segment's checkpoints accumulate on disk forever
+    across a long multi-resubmit run (jobs/train_pretraining.sh's own
+    auto-resubmit convention means a real "large"-preset run spans roughly
+    10 such segments) -- the exact same failure mode that already caused a
+    real disk-quota crash once (see keep_last_n_checkpoints's own comment),
+    just not yet triggered a second time because it needs several resume
+    cycles to compound."""
+    if not os.path.isdir(output_dir):
+        return []
+    found = []
+    for name in os.listdir(output_dir):
+        if name.startswith("step_") and name.endswith(".pt"):
+            try:
+                step_num = int(name[len("step_") : -len(".pt")])
+            except ValueError:
+                continue
+            found.append((step_num, os.path.join(output_dir, name)))
+    return [path for _, path in sorted(found)]
+
+
+def _split_train_val_shard_files(shard_files, val_fraction):
+    """Reserves roughly val_fraction of shard_files for held-out validation,
+    spread across the WHOLE corpus via a fixed stride rather than just the
+    tail (see TrainConfig.val_fraction's own docstring for why: glot500's
+    per-language corpus sizes span orders of magnitude -- confirmed live,
+    from a few hundred to hundreds of thousands of documents -- and
+    common.data.corpora._round_robin drops each language once its own data
+    is exhausted, so shards written later in a long run skew toward
+    whichever languages had the most data; a stride sampled across the
+    whole shard sequence avoids that skew).
+
+    Returns (train_files, val_files). Validation is disabled (val_files
+    empty, every shard goes to train_files) if val_fraction <= 0 or there
+    are too few shards to spare any without leaving training with none --
+    a real edge case for a tiny/smoke-test prep run, not just a defensive
+    formality. stride is bounded below at 2, so index 1 always survives
+    into train_files for any len(shard_files) >= 2 -- train_files can
+    never come back empty here."""
+    if val_fraction <= 0 or len(shard_files) < 2:
+        return list(shard_files), []
+    stride = max(round(1 / val_fraction), 2)
+    val_files = shard_files[::stride]
+    train_files = [f for i, f in enumerate(shard_files) if i % stride != 0]
+    return train_files, val_files
+
+
+@torch.no_grad()
+def validate(model, val_loader, device, amp_dtype):
+    """Averages cross-entropy loss over val_loader's own fixed set of
+    batches (see TrainConfig.eval_iters's own docstring for why this is a
+    FIXED set, re-iterated identically on every call, not freshly
+    reshuffled). Restores the model's prior train()/eval() mode before
+    returning, so this is safe to call mid-training-loop without disturbing
+    dropout/etc. state for the next training step (irrelevant at this
+    project's own dropout=0.0 default, but not assumed here)."""
+    was_training = model.training
+    model.eval()
+    total_loss = 0.0
+    num_batches = 0
+    for x, y in val_loader:
+        x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+        with torch.autocast(
+            device_type=device.type if device.type != "cpu" else "cpu",
+            dtype=amp_dtype,
+            enabled=amp_dtype != torch.float32,
+        ):
+            _, loss = model(x, labels=y)
+        total_loss += loss.item()
+        num_batches += 1
+    if was_training:
+        model.train()
+    return total_loss / num_batches if num_batches else float("nan")
 
 
 def save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size):
@@ -182,6 +281,22 @@ def train(cfg: TrainConfig):
         if is_main:
             print(f"resumed from {cfg.resume_from} at step {start_step}")
 
+    # Split BEFORE building either dataset: train_shard_files/val_shard_files
+    # partition shard_dir's own shard list disjointly (see
+    # _split_train_val_shard_files's own docstring) -- val shards are never
+    # sampled for training.
+    train_shard_files, val_shard_files = _split_train_val_shard_files(
+        meta["shard_files"], cfg.val_fraction
+    )
+    if is_main:
+        if val_shard_files:
+            print(
+                f"validation: {len(val_shard_files)}/{len(meta['shard_files'])} shards reserved, "
+                f"evaluating {cfg.eval_iters} batches every {cfg.eval_interval} steps"
+            )
+        else:
+            print("validation: disabled (val_fraction<=0 or too few shards to spare any)")
+
     samples_per_step = cfg.grad_accum_steps * cfg.per_device_batch_size
     total_samples = cfg.total_steps * samples_per_step
     samples_already_consumed = start_step * samples_per_step
@@ -191,6 +306,7 @@ def train(cfg: TrainConfig):
         num_samples=total_samples - samples_already_consumed,
         seed=cfg.seed + rank,
         index_offset=samples_already_consumed,
+        shard_files=train_shard_files,
     )
     loader = DataLoader(
         dataset,
@@ -198,6 +314,27 @@ def train(cfg: TrainConfig):
         num_workers=cfg.num_workers,
         pin_memory=device.type == "cuda",
     )
+
+    # Validation only ever runs on is_main (see the main loop below) -- one
+    # small, fixed-size dataset/loader built once here, not per-rank and not
+    # resumed/offset like the training set (a fixed seed with no
+    # rank/start_step dependence means every validation pass across the
+    # whole run, and across any --resume-from restart, evaluates the exact
+    # same samples, so the val-loss curve is directly comparable over time).
+    val_loader = None
+    if val_shard_files:
+        val_dataset = ShardedTokenDataset(
+            cfg.shard_dir,
+            cfg.seq_len,
+            num_samples=cfg.eval_iters * cfg.per_device_batch_size,
+            seed=cfg.seed + 999_983,  # arbitrary constant, deliberately NOT
+            # rank- or start_step-dependent -- see the paragraph above
+            shard_files=val_shard_files,
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=cfg.per_device_batch_size, num_workers=0,
+            pin_memory=device.type == "cuda",
+        )
 
     run = None
     if cfg.use_wandb and is_main:
@@ -229,24 +366,44 @@ def train(cfg: TrainConfig):
     step = start_step
     t_last_log = time.time()
     tokens_since_log = 0
-    saved_checkpoint_paths = []  # step_{step}.pt paths saved by this process,
-    # oldest first -- rotated per keep_last_n_checkpoints below. Not
-    # pre-populated from pre-existing files on a --resume-from run, so
-    # resuming never deletes a checkpoint from before the resume.
+    # step_{step}.pt paths tracked for rotation, oldest first -- seeded from
+    # whatever's ALREADY in output_dir (e.g. from an earlier --resume-from
+    # segment), not started empty, so keep_last_n_checkpoints correctly
+    # rotates across process restarts too, not just within this one's own
+    # lifetime (see _existing_checkpoints's own docstring for why this
+    # matters concretely for this project's multi-resubmit training runs).
+    saved_checkpoint_paths = _existing_checkpoints(cfg.output_dir) if is_main else []
 
     while step < cfg.total_steps:
         optimizer.zero_grad(set_to_none=True)
         loss_accum = 0.0
-        for _ in range(cfg.grad_accum_steps):
+        for micro_step in range(cfg.grad_accum_steps):
             x, y = next(data_iter)
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-            with torch.autocast(
-                device_type=device.type if device.type != "cpu" else "cpu",
-                dtype=amp_dtype,
-                enabled=amp_dtype != torch.float32,
-            ):
-                _, loss = model(x, labels=y)
-            (loss / cfg.grad_accum_steps).backward()
+            is_last_micro_step = micro_step == cfg.grad_accum_steps - 1
+            # Under DDP, backward() all-reduces gradients EVERY call by
+            # default -- wasteful when grad_accum_steps > 1, since only the
+            # LAST micro-step's accumulated gradient actually needs to be
+            # synced before optimizer.step(). model.no_sync() (only
+            # meaningful on a DistributedDataParallel-wrapped model) skips
+            # that all-reduce on every micro-step except the last one --
+            # matches lit-llama's own fabric.no_backward_sync(model,
+            # enabled=is_accumulating) convention. A no-op contextlib.nullcontext()
+            # on the last micro-step or when not distributed (single-GPU
+            # has no gradient sync to skip in the first place).
+            sync_ctx = (
+                model.no_sync()
+                if distributed and not is_last_micro_step
+                else contextlib.nullcontext()
+            )
+            with sync_ctx:
+                with torch.autocast(
+                    device_type=device.type if device.type != "cpu" else "cpu",
+                    dtype=amp_dtype,
+                    enabled=amp_dtype != torch.float32,
+                ):
+                    _, loss = model(x, labels=y)
+                (loss / cfg.grad_accum_steps).backward()
             loss_accum += loss.item() / cfg.grad_accum_steps
             tokens_since_log += x.numel() * world_size
 
@@ -275,6 +432,22 @@ def train(cfg: TrainConfig):
                 )
             t_last_log = time.time()
             tokens_since_log = 0
+
+        # Gated the same way on EVERY rank (not just is_main), even though
+        # only is_main actually runs validate()/logs -- the dist.barrier()
+        # below must be reached by every rank in lockstep, or ranks that
+        # never call it would wait forever for one that does.
+        if val_loader is not None and cfg.eval_interval and step % cfg.eval_interval == 0:
+            if is_main:
+                val_loss = validate(model, val_loader, device, amp_dtype)
+                print(f"[step {step:6d}/{cfg.total_steps}] val_loss={val_loss:.4f}")
+                if run is not None:
+                    run.log({"val/loss": val_loss}, step=step)
+            if distributed:
+                dist.barrier()  # other ranks wait for is_main's validation
+                # pass to finish, rather than racing ahead into the next
+                # step's own backward() -- explicit here rather than relying
+                # on that next collective to implicitly serve as the wait.
 
         if is_main and cfg.save_steps and step % cfg.save_steps == 0:
             path = os.path.join(cfg.output_dir, f"step_{step}.pt")

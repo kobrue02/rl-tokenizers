@@ -32,21 +32,26 @@ class ShardedTokenDataset(Dataset):
     workers. Deriving randomness purely from (seed, idx) gives the same
     sample for a given idx regardless of which worker serves it."""
 
-    def __init__(self, shard_dir, seq_len, num_samples, seed=0, index_offset=0):
+    def __init__(self, shard_dir, seq_len, num_samples, seed=0, index_offset=0, shard_files=None):
         """index_offset: shifts __getitem__(idx) to draw (seed, idx +
         index_offset) so train.py's --resume-from can continue the same
         deterministic sequence from where a previous run left off, instead
         of a fresh dataset restarting at idx=0 and replaying already-trained
-        samples."""
+        samples. shard_files: explicit subset of shard_dir's own filenames
+        to read from, instead of every file shards_meta.json lists -- lets
+        a caller (e.g. train.py's train/val split) build two datasets over
+        disjoint shards sharing one shard_dir; None (default) uses every
+        shard, matching this class's original behavior exactly."""
         self.meta = load_shard_meta(shard_dir)
         self.seq_len = seq_len
         self.num_samples = num_samples
         self.seed = seed
         self.index_offset = index_offset
         dtype = np.uint16 if self.meta["dtype"] == "uint16" else np.uint32
+        names = shard_files if shard_files is not None else self.meta["shard_files"]
         shards = [
             np.memmap(os.path.join(shard_dir, name), dtype=dtype, mode="r")
-            for name in self.meta["shard_files"]
+            for name in names
         ]
         # A shard shorter than seq_len+1 tokens can never serve a full
         # window -- skip it rather than let the offset sampler below divide

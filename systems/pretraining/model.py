@@ -166,6 +166,22 @@ class TransformerBlock(nn.Module):
         return x
 
 
+def _padded_vocab_size(vocab_size, multiple_of=64):
+    """Rounds vocab_size up to a multiple of `multiple_of` for the
+    embedding/lm_head matmul shapes -- a real tensor-core throughput win
+    (matches lit-llama's identical find_multiple(vocab_size, 64)
+    convention), not cosmetic: none of this project's own tokenizer vocab
+    sizes are naturally multiples of 64. The extra rows/columns are never
+    indexed by a real token id (ids are always < the TRUE vocab_size,
+    tracked separately as TransformerLM.vocab_size) and never appear in a
+    training label, so the loss naturally drives their logits toward
+    -inf over training; TransformerLM.generate() explicitly masks them out
+    before sampling so an under-trained model can never sample one."""
+    if vocab_size % multiple_of == 0:
+        return vocab_size
+    return vocab_size + multiple_of - (vocab_size % multiple_of)
+
+
 class TransformerLM(nn.Module):
     """Full decoder-only LM: token embedding -> N TransformerBlocks -> final
     RMSNorm -> output projection to vocab logits. vocab_size is passed
@@ -175,11 +191,12 @@ class TransformerLM(nn.Module):
     def __init__(self, cfg, vocab_size):
         super().__init__()
         self.cfg = cfg
-        self.vocab_size = vocab_size
-        self.embed = nn.Embedding(vocab_size, cfg.hidden_size)
+        self.vocab_size = vocab_size  # the TRUE vocab size -- see _padded_vocab_size
+        padded_vocab_size = _padded_vocab_size(vocab_size)
+        self.embed = nn.Embedding(padded_vocab_size, cfg.hidden_size)
         self.blocks = nn.ModuleList(TransformerBlock(cfg) for _ in range(cfg.num_layers))
         self.norm = RMSNorm(cfg.hidden_size, cfg.norm_eps)
-        self.lm_head = nn.Linear(cfg.hidden_size, vocab_size, bias=False)
+        self.lm_head = nn.Linear(cfg.hidden_size, padded_vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.embed.weight
         self.apply(self._init_weights)
@@ -246,6 +263,12 @@ class TransformerLM(nn.Module):
             context = input_ids[:, -self.cfg.max_seq_len :]
             logits, _ = self.forward(context)
             next_logits = logits[:, -1, :] / max(temperature, 1e-6)
+            if next_logits.size(-1) > self.vocab_size:
+                # Padding slots (see _padded_vocab_size) never appear in
+                # training labels, but an under-trained model could still
+                # assign them nonzero probability -- mask them out so
+                # sampling can never return an invalid (>= true vocab_size) id.
+                next_logits[:, self.vocab_size :] = float("-inf")
             if top_k is not None:
                 v, _ = torch.topk(next_logits, min(top_k, next_logits.size(-1)))
                 next_logits[next_logits < v[:, [-1]]] = float("-inf")
