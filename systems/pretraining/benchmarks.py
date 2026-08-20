@@ -1,8 +1,8 @@
-"""Downstream evaluation benchmark registry: XNLI, XCOPA, FLORES (MT) -- the
-three in scope for evaluating a pretrained model (systems.pretraining.train), as
-opposed to a tokenizer's own intrinsic quality (common.eval.cross_tokenizer)
-or fitting one (systems/, data_prep.py). Schemas confirmed against each
-source directly:
+"""Downstream evaluation benchmark registry: XNLI, XCOPA, FLORES (MT), BLiMP,
+CoLA, SQuAD -- the benchmarks in scope for evaluating a pretrained model
+(systems.pretraining.train), as opposed to a tokenizer's own intrinsic
+quality (common.eval.cross_tokenizer) or fitting one (systems/, data_prep.py).
+Schemas confirmed against each source directly:
 
   - XNLI: facebook/xnli. 15 per-language configs (ar/bg/de/el/en/es/fr/hi/
     ru/sw/th/tr/ur/vi/zh), loaded individually rather than the differently-
@@ -21,6 +21,24 @@ source directly:
     seed/smol/BOUQuET tooling), auto-resolved. split="devtest" is the
     standard held-out MT split, disjoint from "dev" (what tokenizer
     training draws on).
+  - BLiMP: nyu-mll/blimp. 67 per-paradigm configs (linguistic phenomena,
+    e.g. "adjunct_island") -- only ships a "train" split (a real quirk of
+    the HF packaging: this is pure eval data, there's nothing to actually
+    train on). Row: {sentence_good, sentence_bad, ...}. Scored as a
+    2-choice MultipleChoiceExample with EMPTY shared context (see
+    load_blimp) -- a minimal pair has no natural context/continuation
+    split, so this compares each sentence's own full log-likelihood
+    directly, the standard "simple LM method" BLiMP's own paper describes.
+  - CoLA: nyu-mll/glue, config "cola". Row: {sentence, label}, label via
+    ClassLabel(['unacceptable', 'acceptable']) (0/1). CONFIRMED LIVE:
+    "test"'s labels are all -1 (GLUE's standard hidden-label leaderboard
+    split) -- "validation" (1043 rows) is the real scored split, "train"
+    (8551 rows) is used only for threshold calibration (see
+    eval_harness.evaluate_cola).
+  - SQuAD (v1.1): rajpurkar/squad. Row: {id, title, context, question,
+    answers: {text: [...], answer_start: [...]}} -- multiple acceptable
+    reference answer strings per question; official scoring (see
+    eval_harness.evaluate_qa) takes the best match over all of them.
 
 PROMPTING: XNLI/XCOPA's natural zero-shot templates use English scaffolding
 words ("because", "Question:", "True, False, or Neither?"). Properly
@@ -28,7 +46,9 @@ localizing that per language would need verified translations this project
 doesn't have. PROMPT_OVERRIDES lets a caller supply a per-language
 template; languages without one fall back to the English template applied
 to that language's own text -- linguistically imperfect but an honest
-default, not a claim of faithful multilingual prompting.
+default, not a claim of faithful multilingual prompting. BLiMP/CoLA/SQuAD
+are English-only benchmarks (general LM-quality checks, not part of this
+project's own cross-lingual fairness comparison), so this doesn't apply to them.
 
 CONTAMINATION: checked via systems.pretraining.cli_contamination -- an n-gram
 overlap scan between any common.data.corpora source and these benchmarks'
@@ -50,6 +70,38 @@ XCOPA_LANGS = ["et", "ht", "id", "it", "qu", "sw", "ta", "th", "tr", "vi", "zh"]
 
 XNLI_LABEL_NAMES = ["entailment", "neutral", "contradiction"]  # ClassLabel
 # order per facebook/xnli's declared features -- do not reorder.
+
+# nyu-mll/blimp's 67 config names (linguistic paradigms), fetched live once
+# and hardcoded here -- same convention as XNLI_LANGS/XCOPA_LANGS above,
+# not re-discovered via HfApi on every call.
+BLIMP_PARADIGMS = [
+    "adjunct_island", "anaphor_gender_agreement", "anaphor_number_agreement",
+    "animate_subject_passive", "animate_subject_trans", "causative",
+    "complex_NP_island", "coordinate_structure_constraint_complex_left_branch",
+    "coordinate_structure_constraint_object_extraction", "determiner_noun_agreement_1",
+    "determiner_noun_agreement_2", "determiner_noun_agreement_irregular_1",
+    "determiner_noun_agreement_irregular_2", "determiner_noun_agreement_with_adj_2",
+    "determiner_noun_agreement_with_adj_irregular_1", "determiner_noun_agreement_with_adj_irregular_2",
+    "determiner_noun_agreement_with_adjective_1", "distractor_agreement_relational_noun",
+    "distractor_agreement_relative_clause", "drop_argument", "ellipsis_n_bar_1",
+    "ellipsis_n_bar_2", "existential_there_object_raising", "existential_there_quantifiers_1",
+    "existential_there_quantifiers_2", "existential_there_subject_raising",
+    "expletive_it_object_raising", "inchoative", "intransitive",
+    "irregular_past_participle_adjectives", "irregular_past_participle_verbs",
+    "irregular_plural_subject_verb_agreement_1", "irregular_plural_subject_verb_agreement_2",
+    "left_branch_island_echo_question", "left_branch_island_simple_question",
+    "matrix_question_npi_licensor_present", "npi_present_1", "npi_present_2",
+    "only_npi_licensor_present", "only_npi_scope", "passive_1", "passive_2",
+    "principle_A_c_command", "principle_A_case_1", "principle_A_case_2",
+    "principle_A_domain_1", "principle_A_domain_2", "principle_A_domain_3",
+    "principle_A_reconstruction", "regular_plural_subject_verb_agreement_1",
+    "regular_plural_subject_verb_agreement_2", "sentential_negation_npi_licensor_present",
+    "sentential_negation_npi_scope", "sentential_subject_island", "superlative_quantifiers_1",
+    "superlative_quantifiers_2", "tough_vs_raising_1", "tough_vs_raising_2", "transitive",
+    "wh_island", "wh_questions_object_gap", "wh_questions_subject_gap",
+    "wh_questions_subject_gap_long_distance", "wh_vs_that_no_gap",
+    "wh_vs_that_no_gap_long_distance", "wh_vs_that_with_gap", "wh_vs_that_with_gap_long_distance",
+]
 
 
 @dataclasses.dataclass
@@ -74,6 +126,29 @@ class TranslationExample:
     target_lang: str
     source_text: str
     reference_text: str
+
+
+@dataclasses.dataclass
+class CoLAExample:
+    """One linguistic-acceptability item: score `sentence`'s own unconditional
+    log-likelihood (see eval_harness.evaluate_cola), compare to `label`
+    (1=acceptable, 0=unacceptable, matching glue/cola's own ClassLabel order)."""
+
+    lang: str
+    sentence: str
+    label: int
+
+
+@dataclasses.dataclass
+class QAExample:
+    """One extractive-QA item: generate an answer to `question` given
+    `context` (see eval_harness.evaluate_qa) and score against `answers`,
+    every acceptable reference string for this question."""
+
+    lang: str
+    context: str
+    question: str
+    answers: list
 
 
 # {lang: (xnli_template, xcopa_cause_template, xcopa_effect_template)} --
@@ -196,8 +271,64 @@ def load_flores_mt(lang_pairs, split="devtest"):
     yield from _round_robin(_one_pair(src, tgt) for src, tgt in resolved_pairs)
 
 
+def load_blimp(langs=None, split="train"):
+    """langs: list of BLIMP_PARADIGMS names, defaults to all 67 (named `langs`,
+    not `paradigms`, so this loader matches the same `langs=` kwarg every other
+    _MULTIPLE_CHOICE_BENCHMARKS loader takes -- cli_eval's generic dispatch
+    builds `kwargs = {"langs": ...}` for all of them). Yields
+    MultipleChoiceExample with EMPTY context (a minimal pair has no natural
+    shared context/continuation split -- this scores each of the two full
+    sentences' own log-likelihood directly) and `.lang` repurposed as the
+    PARADIGM name, not a real language code: BLiMP is English-only, but this
+    lets evaluate_multiple_choice's existing per_language breakdown double
+    as a per-paradigm accuracy breakdown for free, which is what BLiMP's own
+    literature actually cares about (accuracy pooled across all 67 very
+    different phenomena is a much less useful number). `label=0` always,
+    since sentence_good is always the first choice."""
+
+    def _one_paradigm(paradigm):
+        ds = hf_datasets.load_dataset("nyu-mll/blimp", name=paradigm, split=split, streaming=True)
+        for row in ds:
+            yield MultipleChoiceExample(
+                lang=paradigm,
+                context="",
+                choices=[row["sentence_good"], row["sentence_bad"]],
+                label=0,
+            )
+
+    yield from _round_robin(_one_paradigm(p) for p in (langs or BLIMP_PARADIGMS))
+
+
+def load_cola(split="validation"):
+    """split: "validation" (default, 1043 rows) is the real scored split --
+    glue/cola's own "test" split has every label set to -1 (GLUE's standard
+    hidden-label leaderboard convention, confirmed live), so scoring against
+    it would silently compare against a constant placeholder. "train" (8551
+    rows) is used separately, for eval_harness.evaluate_cola's own threshold
+    calibration, not for the reported number. Yields CoLAExample."""
+    ds = hf_datasets.load_dataset("nyu-mll/glue", "cola", split=split, streaming=True)
+    for row in ds:
+        yield CoLAExample(lang="en", sentence=row["sentence"], label=row["label"])
+
+
+def load_squad(split="validation"):
+    """split: "validation" (the genuinely held-out split; SQuAD v1.1 has no
+    "test" split with public labels at all). Yields QAExample, one per
+    question -- rajpurkar/squad's own "answers" field already lists every
+    acceptable reference answer string per question."""
+    ds = hf_datasets.load_dataset("rajpurkar/squad", split=split, streaming=True)
+    for row in ds:
+        yield QAExample(
+            lang="en", context=row["context"], question=row["question"],
+            answers=list(row["answers"]["text"]),
+        )
+
+
 BENCHMARKS = {
     "xnli": load_xnli,
     "xcopa": load_xcopa,
     "flores_mt": load_flores_mt,
+    "blimp": load_blimp,
+    "cola": load_cola,
+    "squad": load_squad,
 }

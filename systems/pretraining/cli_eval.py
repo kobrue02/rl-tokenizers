@@ -29,6 +29,9 @@ Usage:
         # (e.g. xcopa has no English config) are dropped with a warning,
         # not a crash (see _resolve_multiple_choice_langs); sw/tr/zh above
         # are valid for both xnli and xcopa, so nothing gets dropped here.
+        # blimp is also multiple-choice (--langs there means paradigm names,
+        # see benchmarks.load_blimp); cola/squad ignore --langs/--lang-pairs
+        # entirely and use --max-new-tokens/--temperature like flores_mt does.
 
 Infrastructure only -- verified via run_smoke_test below against a tiny
 freshly-initialized model, not a real pretrained checkpoint.
@@ -43,14 +46,22 @@ import torch
 from common.config_file import parse_args_with_config
 
 from . import benchmarks
-from .eval_harness import evaluate_multiple_choice, evaluate_translation
+from .eval_harness import evaluate_cola, evaluate_multiple_choice, evaluate_qa, evaluate_translation
 from .model import TransformerLM
 from .model_configs import get_preset
 from .tokenizer_adapter import ALL_SYSTEMS, TokenizerAdapter
 from .train import TrainConfig
 
-_MULTIPLE_CHOICE_BENCHMARKS = {"xnli", "xcopa"}
-_MULTIPLE_CHOICE_LANGS = {"xnli": benchmarks.XNLI_LANGS, "xcopa": benchmarks.XCOPA_LANGS}
+_MULTIPLE_CHOICE_BENCHMARKS = {"xnli", "xcopa", "blimp"}
+_MULTIPLE_CHOICE_LANGS = {
+    "xnli": benchmarks.XNLI_LANGS,
+    "xcopa": benchmarks.XCOPA_LANGS,
+    # "langs" means PARADIGMS for blimp (see benchmarks.load_blimp) -- reuses
+    # _resolve_multiple_choice_langs's filter/warn/raise logic unchanged.
+    "blimp": benchmarks.BLIMP_PARADIGMS,
+}
+_ACCEPTABILITY_BENCHMARKS = {"cola"}
+_QA_BENCHMARKS = {"squad"}
 
 
 def _resolve_multiple_choice_langs(benchmark, langs):
@@ -102,13 +113,14 @@ def load_pretrained_model(checkpoint_path, device="cpu"):
 def _wandb_log_dict(results, wandb):
     """Flattens run_evaluation's {benchmark_name: results} into a single
     dict wandb.log can take -- scalar metrics per benchmark (top-level +
-    per-language for xnli/xcopa, top-level + per-pair for flores_mt), plus
-    a wandb.Table of raw generated samples per flores_mt pair (already
-    capped at max_samples_per_pair by evaluate_translation) so generated
-    text is browsable in the wandb UI, not just a chrF number."""
+    per-language for xnli/xcopa/blimp, top-level + per-pair for flores_mt,
+    mcc/threshold for cola, exact_match/f1 for squad), plus a wandb.Table of
+    raw generated/scored samples for flores_mt/squad (already capped by
+    evaluate_translation/evaluate_qa) so generated text is browsable in the
+    wandb UI, not just an aggregate number."""
     log_dict = {}
     for name, result in results.items():
-        if "accuracy" in result:  # xnli/xcopa shape
+        if "accuracy" in result and "per_language" in result:  # xnli/xcopa/blimp shape
             log_dict[f"{name}/accuracy"] = result["accuracy"]
             log_dict[f"{name}/n"] = result["n"]
             for lang, stats in result["per_language"].items():
@@ -129,8 +141,29 @@ def _wandb_log_dict(results, wandb):
                 log_dict[f"{name}/samples"] = wandb.Table(
                     columns=["pair", "source", "hypothesis", "reference"], data=sample_rows
                 )
+        elif "mcc" in result:  # cola shape
+            log_dict[f"{name}/mcc"] = result["mcc"]
+            log_dict[f"{name}/accuracy"] = result["accuracy"]
+            log_dict[f"{name}/threshold"] = result["threshold"]
+            log_dict[f"{name}/n"] = result["n"]
+            log_dict[f"{name}/n_calibration"] = result["n_calibration"]
+        elif "exact_match" in result:  # squad shape
+            log_dict[f"{name}/exact_match"] = result["exact_match"]
+            log_dict[f"{name}/f1"] = result["f1"]
+            log_dict[f"{name}/n"] = result["n"]
+            log_dict[f"{name}/n_skipped_too_long"] = result["n_skipped_too_long"]
+            sample_rows = [
+                [s["question"], s["prediction"], ", ".join(s["references"])] for s in result["samples"]
+            ]
+            if sample_rows:
+                log_dict[f"{name}/samples"] = wandb.Table(
+                    columns=["question", "prediction", "references"], data=sample_rows
+                )
         else:
-            raise AssertionError(f"benchmark {name!r}'s results have neither 'accuracy' nor 'bleu' -- unknown shape")
+            raise AssertionError(
+                f"benchmark {name!r}'s results match no known shape "
+                "(accuracy/per_language, bleu, mcc, exact_match)"
+            )
     return log_dict
 
 
@@ -181,6 +214,27 @@ def _run_single_benchmark(
             model, adapter, examples, device=device, max_new_tokens=max_new_tokens, temperature=temperature
         )
 
+    if benchmark in _ACCEPTABILITY_BENCHMARKS:
+        examples = benchmarks.load_cola(split=split or "validation")
+        if max_examples is not None:
+            examples = itertools.islice(examples, max_examples)
+        # Calibration always uses the FULL train split, uncapped by
+        # --max-examples -- a noisy/truncated threshold would undermine the
+        # whole point of calibrating it, and it's cheap (8551 rows).
+        calibration_examples = benchmarks.load_cola(split="train")
+        return evaluate_cola(model, adapter, examples, calibration_examples, device=device)
+
+    if benchmark in _QA_BENCHMARKS:
+        kwargs = {}
+        if split is not None:
+            kwargs["split"] = split
+        examples = benchmarks.load_squad(**kwargs)
+        if max_examples is not None:
+            examples = itertools.islice(examples, max_examples)
+        return evaluate_qa(
+            model, adapter, examples, device=device, max_new_tokens=max_new_tokens, temperature=temperature
+        )
+
     raise AssertionError(f"benchmark {benchmark!r} in BENCHMARKS but not in either evaluator set")
 
 
@@ -199,9 +253,9 @@ def run_evaluation(
 ):
     """benchmark: a single name (str) or a list of names. Every requested
     benchmark is scored against the same model/adapter/max_examples/etc
-    (langs feeds xnli/xcopa, lang_pairs feeds flores_mt; each benchmark
-    ignores the flag it has no use for, so passing both for a mixed list
-    is normal).
+    (langs feeds xnli/xcopa/blimp, lang_pairs feeds flores_mt, max_new_tokens/
+    temperature feed flores_mt/squad; each benchmark ignores the flags it has
+    no use for, so passing all of them for a mixed list is normal).
 
     Returns {benchmark_name: <results dict>} always in this shape, even
     for a single benchmark, so callers never branch on single-vs-list input.
@@ -242,7 +296,10 @@ def build_arg_parser():
         "--benchmark", type=str, required=True,
         help=f"comma-separated list of benchmarks to run in one job (choices: {sorted(benchmarks.BENCHMARKS)})",
     )
-    parser.add_argument("--langs", type=str, default=None, help="comma-separated, for xnli/xcopa")
+    parser.add_argument(
+        "--langs", type=str, default=None,
+        help="comma-separated, for xnli/xcopa (language codes) or blimp (paradigm names)",
+    )
     parser.add_argument(
         "--lang-pairs", type=str, default=None,
         help="comma-separated src:tgt pairs (e.g. eng:spa,deu_Latn:fra_Latn), for flores_mt -- "
@@ -251,9 +308,12 @@ def build_arg_parser():
     )
     parser.add_argument("--split", type=str, default=None, help="dataset split override (loader-specific default otherwise)")
     parser.add_argument("--max-examples", type=int, default=None, help="cap examples scored (None = full split)")
-    parser.add_argument("--length-normalize", action="store_true", help="xnli/xcopa only -- see evaluate_multiple_choice")
-    parser.add_argument("--max-new-tokens", type=int, default=128, help="flores_mt only")
-    parser.add_argument("--temperature", type=float, default=1.0, help="flores_mt only")
+    parser.add_argument(
+        "--length-normalize", action="store_true",
+        help="xnli/xcopa/blimp only -- see evaluate_multiple_choice",
+    )
+    parser.add_argument("--max-new-tokens", type=int, default=128, help="flores_mt/squad only")
+    parser.add_argument("--temperature", type=float, default=1.0, help="flores_mt/squad only")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--output", type=str, default=None, help="write JSON results here (default: print to stdout)")
     parser.add_argument("--use-wandb", action="store_true")
@@ -333,7 +393,7 @@ def run_smoke_test():
     exercises the actual encode()/decode() path, not a simplified stand-in."""
     from systems.tokenization.bpe.model import fit_bpe
     from systems.tokenization.bpe.train import _SMOKE_TEST_GROUPS
-    from .benchmarks import MultipleChoiceExample, TranslationExample
+    from .benchmarks import CoLAExample, MultipleChoiceExample, QAExample, TranslationExample
     from .model_configs import get_preset
 
     sentences = [text for group in _SMOKE_TEST_GROUPS for text in group.values()]
@@ -363,6 +423,27 @@ def run_smoke_test():
     assert "en->de" in mt_results["per_pair"]
     assert len(mt_results["per_pair"]["en->de"]["samples"]) == 1
 
+    cola_examples = [
+        CoLAExample(lang="en", sentence="The cat sat on the mat.", label=1),
+        CoLAExample(lang="en", sentence="Cat mat the sat on.", label=0),
+    ]
+    cola_calibration = [
+        CoLAExample(lang="en", sentence="She walked to the store.", label=1),
+        CoLAExample(lang="en", sentence="Store the walked to she.", label=0),
+    ]
+    cola_results = evaluate_cola(model, adapter, cola_examples, cola_calibration, device="cpu")
+    assert -1.0 <= cola_results["mcc"] <= 1.0
+    assert cola_results["n"] == len(cola_examples)
+    assert cola_results["n_calibration"] == len(cola_calibration)
+
+    qa_examples = [
+        QAExample(lang="en", context="The cat sat on the mat.", question="Where did the cat sit?", answers=["the mat", "mat"]),
+    ]
+    qa_results = evaluate_qa(model, adapter, qa_examples, device="cpu", max_new_tokens=8)
+    assert qa_results["n"] + qa_results["n_skipped_too_long"] == len(qa_examples)
+    assert 0.0 <= qa_results["exact_match"] <= 1.0
+    assert 0.0 <= qa_results["f1"] <= 1.0
+
     # run_evaluation's multi-benchmark dispatch, exercised against fake
     # loaders (testing fan-out/return-shape logic, not real network calls)
     # via monkeypatching, restored in a finally so it doesn't leak.
@@ -370,24 +451,28 @@ def run_smoke_test():
     try:
         benchmarks.BENCHMARKS["xnli"] = lambda langs=None, split="test": iter(mc_examples)
         benchmarks.BENCHMARKS["xcopa"] = lambda langs=None, split="test": iter(mc_examples)
-        multi_results = run_evaluation(model, adapter, ["xnli", "xcopa"], device="cpu")
-        assert set(multi_results) == {"xnli", "xcopa"}
+        benchmarks.BENCHMARKS["blimp"] = lambda langs=None, split="train": iter(mc_examples)
+        multi_results = run_evaluation(model, adapter, ["xnli", "xcopa", "blimp"], device="cpu")
+        assert set(multi_results) == {"xnli", "xcopa", "blimp"}
         assert multi_results["xnli"]["n"] == len(mc_examples)
         assert multi_results["xcopa"]["n"] == len(mc_examples)
+        assert multi_results["blimp"]["n"] == len(mc_examples)
         json.dumps(multi_results, default=str)  # confirms the combined dict is actually JSON-serializable
 
         single_result = run_evaluation(model, adapter, "xnli", device="cpu")
         assert set(single_result) == {"xnli"}  # single-name input still comes back wrapped by benchmark name
 
-        # _wandb_log_dict against both result shapes -- uses the real wandb
-        # module for real Table construction but never wandb.init's/logs.
+        # _wandb_log_dict against all four result shapes -- uses the real
+        # wandb module for real Table construction but never wandb.init's/logs.
         import wandb
 
-        combined = {**multi_results, "flores_mt": mt_results}
+        combined = {**multi_results, "flores_mt": mt_results, "cola": cola_results, "squad": qa_results}
         log_dict = _wandb_log_dict(combined, wandb)
         assert log_dict["xnli/accuracy"] == multi_results["xnli"]["accuracy"]
         assert log_dict["flores_mt/bleu"] == mt_results["bleu"]
         assert isinstance(log_dict["flores_mt/samples"], wandb.Table)
+        assert log_dict["cola/mcc"] == cola_results["mcc"]
+        assert log_dict["squad/exact_match"] == qa_results["exact_match"]
     finally:
         benchmarks.BENCHMARKS.clear()
         benchmarks.BENCHMARKS.update(original_benchmarks)
@@ -395,6 +480,8 @@ def run_smoke_test():
     print("systems.pretraining.cli_eval smoke test passed:")
     print(f"  multiple-choice: accuracy={mc_results['accuracy']:.3f} n={mc_results['n']}")
     print(f"  translation: bleu={mt_results['bleu']:.3f} chrf={mt_results['chrf']:.3f} n={mt_results['n']}")
+    print(f"  cola: mcc={cola_results['mcc']:.3f} accuracy={cola_results['accuracy']:.3f} n={cola_results['n']}")
+    print(f"  squad: exact_match={qa_results['exact_match']:.3f} f1={qa_results['f1']:.3f} n={qa_results['n']}")
     print(f"  multi-benchmark dispatch: {sorted(multi_results)}")
 
 
