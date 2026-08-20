@@ -259,7 +259,17 @@ def train(cfg: TrainConfig):
             f"estimated_flops={estimated_flops:.3e} (~6*N*D)"
         )
     if distributed:
-        model = DistributedDataParallel(model, device_ids=[local_rank])
+        # broadcast_buffers=False: TransformerLM's only buffers are Attention's
+        # precomputed rope_cos/rope_sin (model.py) -- identical across ranks
+        # by construction (same ModelConfig everywhere) and never mutated, so
+        # there's nothing to sync. Also sidesteps a real deadlock: DDP's
+        # default broadcast_buffers=True fires an unrequested buffer-broadcast
+        # collective on the first forward after ANY grad-enabled step (its
+        # require_forward_param_sync flag stays stale-True into the next
+        # forward regardless of torch.no_grad()) -- which is exactly
+        # validate()'s is_main-only forward below, colliding with the other
+        # ranks' dist.barrier() a few lines down.
+        model = DistributedDataParallel(model, device_ids=[local_rank], broadcast_buffers=False)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -439,7 +449,15 @@ def train(cfg: TrainConfig):
         # never call it would wait forever for one that does.
         if val_loader is not None and cfg.eval_interval and step % cfg.eval_interval == 0:
             if is_main:
-                val_loss = validate(model, val_loader, device, amp_dtype)
+                # Unwrapped (see save_checkpoint/load_checkpoint's own
+                # raw_model pattern): validate() is a read-only forward pass
+                # with no gradient sync to participate in, and running it
+                # through the DDP wrapper would invoke DDP's own forward
+                # hooks (see broadcast_buffers=False's comment above) for no
+                # benefit -- belt-and-suspenders against that same collective-
+                # mismatch risk, not just relying on broadcast_buffers=False.
+                raw_model_for_eval = model.module if isinstance(model, DistributedDataParallel) else model
+                val_loss = validate(raw_model_for_eval, val_loader, device, amp_dtype)
                 print(f"[step {step:6d}/{cfg.total_steps}] val_loss={val_loss:.4f}")
                 if run is not None:
                     run.log({"val/loss": val_loss}, step=step)
