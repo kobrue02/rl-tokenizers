@@ -1,6 +1,13 @@
 # systems/pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data_gpu.sh -c configs/prep_fanta_50k.yml
 dataset: glot500
 langs: all
+# glot500 now reads from a one-time local disk cache (common/data/prepare_glot500.py
+# -- run jobs/prepare_glot500.sh once first) instead of live HF streaming;
+# dataset_config overrides the default GLOT500_LOCAL_DIR ("data/glot500")
+# to point at the real WORK_ROOT cache -- see common/data/corpora.py's
+# stream_groups docstring. This run itself already completed via the old
+# live-streaming path; this only matters if it's ever rerun.
+dataset_config: /pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers/data/glot500
 system: fanta
 # The fanta tokenizer used here was trained BEFORE the -c/--config system
 # existed, via a manual sbatch invocation that named outputs after the

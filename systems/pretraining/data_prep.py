@@ -72,6 +72,31 @@ for ShardedTokenDataset's random-window sampling. max_tokens/max_docs are
 checked at pool granularity, so a capped run may overshoot slightly.
 bucket_pool_multiplier=1 disables bucketing.
 
+PREFETCH (--prefetch, default off): --dataset glot500 --langs all round-robins
+across ~411 lazy HuggingFace streaming.IterableDatasets (common.data.corpora's
+stream_groups/_round_robin) -- confirmed live that pulling documents from this
+stream is NETWORK-bound (waiting on HTTP range/shard fetches against the HF
+Hub), not CPU-bound: encode_batch() itself already measures fine (~74-83k
+tok/s CPU for bpe/superbpe, ~56.8k tok/s GPU for fanta -- see PERFORMANCE
+section above), while a real glot500-scale run took multiple days. --prefetch
+overlaps that network wait with this loop's own dedup/truncate/bucket/
+encode/pack work: a single background thread iterates the stream in the
+EXACT SAME order this loop always has (_document_source), applying the same
+RESUME fast-forward skip, and pushes surviving (lang, text, stream_docs_consumed)
+tuples onto a bounded queue (--prefetch-queue-size, default 2 * pool_size)
+that the main thread consumes from instead of iterating the stream directly
+(_prefetch_source vs. _document_source share one interface, so the consumer
+loop below is written once regardless of --prefetch). This changes ONLY
+*when* documents arrive at the consumer, never their order or content, so
+every invariant below (RESUME fast-forwarding, per-document Deduplicator
+order, checkpoint-once-per-pool timing) is unaffected by turning it on.
+Off by default: this is a documented, carefully-tuned pipeline, and a wall-
+clock win from overlap depends on how much of the observed slowness really
+is network wait vs. e.g. HF `datasets`' own per-row decode overhead --
+verify with a real timing comparison before relying on this for a full-scale
+run. A producer-thread exception (e.g. a transient HF Hub error) is
+re-raised in the main thread via a queue sentinel, not swallowed silently.
+
 RESUME (--prep-checkpoint-path, default "<output-dir>/prep_checkpoint.json"
 -- distinct from --checkpoint, the system's own tokenizer checkpoint): lets
 a run killed mid-way (e.g. a SLURM time limit at Glot500 scale) continue
@@ -101,6 +126,8 @@ Two accepted tradeoffs:
 import argparse
 import json
 import os
+import queue
+import threading
 from collections import defaultdict
 
 import numpy as np
@@ -142,6 +169,100 @@ def _dtype_for_vocab(vocab_size):
     return "uint16" if vocab_size <= 65536 else "uint32"
 
 
+class _ProducerError:
+    """Wraps an exception raised on _produce_stream's background thread so
+    it can travel through a queue.Queue and be re-raised on the consuming
+    (main) thread -- see PREFETCH docstring section. A bare background
+    thread's exception would otherwise vanish silently."""
+
+    def __init__(self, exc):
+        self.exc = exc
+
+
+_DONE = object()  # sentinel: the producer thread exhausted the stream normally
+
+
+def _document_source(stream, skip_target):
+    """Single-threaded generator yielding (lang, text, stream_docs_consumed)
+    for every document in `stream`, in stream order -- this is exactly
+    prep_dataset's own pre-prefetch iteration (see RESUME docstring
+    section), just factored out so _prefetch_source below can expose the
+    same interface. Applies the RESUME fast-forward skip: documents at or
+    below skip_target are counted (stream_docs_consumed still advances,
+    matching the checkpoint's own semantics) but never yielded."""
+    stream_docs_consumed = 0
+    for group in stream:
+        for lang, text in group.items():
+            if stream_docs_consumed < skip_target:
+                stream_docs_consumed += 1
+                continue
+            stream_docs_consumed += 1
+            yield lang, text, stream_docs_consumed
+
+
+def _produce_stream(stream, skip_target, q, stop_event, put_timeout=0.5):
+    """Runs _document_source on a background thread, pushing each item onto
+    `q` instead of returning it directly (see PREFETCH docstring section).
+    q.put() loops on a timeout rather than blocking indefinitely, so a full
+    queue can't deadlock this thread after the consumer has already decided
+    to stop (stop_event set, e.g. because max_tokens/max_docs was reached)
+    while this thread is blocked trying to enqueue. Always pushes exactly
+    one terminal item (_DONE, or a _ProducerError wrapping any exception) so
+    the consumer's q.get() can never block forever if this thread dies or
+    is asked to stop early."""
+
+    def put(item):
+        while not stop_event.is_set():
+            try:
+                q.put(item, timeout=put_timeout)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    try:
+        for doc in _document_source(stream, skip_target):
+            if not put(doc):
+                return  # stop_event fired while blocked on a full queue
+            if stop_event.is_set():
+                return
+    except Exception as e:
+        put(_ProducerError(e))
+        return
+    put(_DONE)
+
+
+def _prefetch_source(stream, skip_target, queue_size):
+    """Wraps _produce_stream's background thread + bounded queue behind the
+    SAME plain-generator interface _document_source exposes, so
+    prep_dataset's consumer loop is written once regardless of --prefetch.
+    Raises in the CONSUMING thread if the producer thread itself raised.
+    Closing this generator early (e.g. the consumer `break`s out of its
+    loop, or an exception propagates through it) signals stop_event and
+    joins the producer thread before returning -- callers that iterate this
+    with a `for ... in` loop and then `break` should call .close() (or rely
+    on Python's own GeneratorExit-on-garbage-collection) before doing
+    anything that assumes the producer has stopped, e.g. the final
+    process_pending(final=True)/flush() in prep_dataset."""
+    q = queue.Queue(maxsize=queue_size)
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_produce_stream, args=(stream, skip_target, q, stop_event), daemon=True,
+    )
+    thread.start()
+    try:
+        while True:
+            item = q.get()
+            if item is _DONE:
+                return
+            if isinstance(item, _ProducerError):
+                raise item.exc
+            yield item
+    finally:
+        stop_event.set()
+        thread.join()
+
+
 def prep_dataset(
     dataset_name,
     langs=None,
@@ -163,6 +284,8 @@ def prep_dataset(
     encode_batch_size=ENCODE_BATCH_SIZE,
     bucket_pool_multiplier=BUCKET_POOL_MULTIPLIER,
     prep_checkpoint_path=None,
+    prefetch=False,
+    prefetch_queue_size=None,
 ):
     """dataset_name: one of common.data.corpora.ALL_SOURCES. langs: codes for
     the language-selectable sources (synthetic/oldi_seed/flores_dev/glot500
@@ -178,6 +301,8 @@ def prep_dataset(
     (every encode_batch_size * bucket_pool_multiplier documents), so a
     capped run may overshoot by up to one pool's worth. prep_checkpoint_path:
     see RESUME section; defaults to "<output_dir>/prep_checkpoint.json".
+    prefetch/prefetch_queue_size: see PREFETCH section; prefetch_queue_size
+    defaults to 2 * pool_size (encode_batch_size * bucket_pool_multiplier).
 
     Returns the shards_meta.json dict this also writes to output_dir.
     """
@@ -192,7 +317,12 @@ def prep_dataset(
     if dataset_name in ("fineweb_edu", "olmo_mix") or dataset_name in BITEXT_SOURCES:
         stream = stream_groups(dataset_name, config=dataset_config)
     else:
-        stream = stream_groups(dataset_name, langs=langs)
+        # `config` is also passed here (not just langs) even though most
+        # sources in this branch ignore it -- glot500 and bible_nlp both
+        # use it as a local disk cache directory override (see
+        # common.data.corpora.stream_groups's own docstring); omitting it
+        # made that override unreachable from this CLI entirely.
+        stream = stream_groups(dataset_name, langs=langs, config=dataset_config)
 
     resume = os.path.exists(prep_checkpoint_path)
     if resume:
@@ -369,16 +499,14 @@ def prep_dataset(
         desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True,
         initial=total_tokens if resume else 0,
     )
-    done = False
-    for group in stream:
-        for lang, text in group.items():
-            if stream_docs_consumed < skip_target:
-                # Fast-forwarding past a prior run's already-shipped
-                # documents (see RESUME docstring section) -- not deduped,
-                # encoded, or counted (already reflected in the checkpoint).
-                stream_docs_consumed += 1
-                continue
-            stream_docs_consumed += 1
+    if prefetch:
+        resolved_queue_size = prefetch_queue_size if prefetch_queue_size else 2 * pool_size
+        document_source = _prefetch_source(stream, skip_target, resolved_queue_size)
+    else:
+        document_source = _document_source(stream, skip_target)
+
+    try:
+        for lang, text, stream_docs_consumed in document_source:
             if not text:
                 continue
             if deduper is not None and deduper.is_duplicate(text):
@@ -407,10 +535,13 @@ def prep_dataset(
             process_pending()  # no-op unless the pool has reached pool_size
 
             if (max_tokens and total_tokens >= max_tokens) or (max_docs and num_docs >= max_docs):
-                done = True
                 break
-        if done:
-            break
+    finally:
+        # For --prefetch, this signals the producer thread to stop and
+        # joins it (see _prefetch_source's own docstring) -- must happen
+        # BEFORE the final process_pending/flush below, not concurrently
+        # with them. A no-op for the plain _document_source generator.
+        document_source.close()
     process_pending(final=True)  # flush any partial pool smaller than pool_size
     flush()
     pbar.close()
@@ -514,7 +645,10 @@ def build_arg_parser():
         f"olmo_mix (choices: {OLMO_MIX_CONFIGS}); a native pair name or 'all' for ccmatrix/"
         f"un_pc/europarl (see common.data.corpora.list_bitext_configs); a '{{split}}/{{pair-or-"
         f"all}}' string (e.g. 'test/deu-eng') or bare 'all' for tatoeba_mt (see "
-        f"common.data.corpora.list_tatoeba_mt_pairs)",
+        f"common.data.corpora.list_tatoeba_mt_pairs); for --dataset glot500/bible_nlp, an "
+        f"OVERRIDE for their local disk cache directory (default GLOT500_LOCAL_DIR/"
+        f"BIBLE_NLP_LOCAL_DIR -- see common.data.prepare_glot500/prepare_bible_nlp, which must "
+        f"be run once first)",
     )
     parser.add_argument("--system", choices=ALL_SYSTEMS, required=True)
     parser.add_argument("--checkpoint", type=str, required=True)
@@ -560,6 +694,19 @@ def build_arg_parser():
         help="defaults to '<output-dir>/prep_checkpoint.json'. Rerunning the same command against "
         "the same --output-dir after a mid-run interruption resumes automatically",
     )
+    parser.add_argument(
+        "--prefetch", action=argparse.BooleanOptionalAction, default=False,
+        help="overlap network-bound stream pulling (confirmed the real bottleneck for --dataset "
+        "glot500 --langs all) with this loop's own dedup/encode/pack work via a background "
+        "producer thread -- see PREFETCH docstring section. Off by default: verify with a real "
+        "timing comparison before relying on this for a full-scale run",
+    )
+    parser.add_argument(
+        "--prefetch-queue-size", type=int, default=None,
+        help="bounded queue size between the producer thread and this loop when --prefetch is "
+        "set; defaults to 2 * (--encode-batch-size * --bucket-pool-multiplier), i.e. roughly two "
+        "pools of overlap headroom. Ignored without --prefetch",
+    )
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -601,6 +748,8 @@ def main(argv=None):
         encode_batch_size=args.encode_batch_size,
         bucket_pool_multiplier=args.bucket_pool_multiplier,
         prep_checkpoint_path=args.prep_checkpoint_path,
+        prefetch=args.prefetch,
+        prefetch_queue_size=args.prefetch_queue_size,
     )
 
     if args.use_wandb:
@@ -627,6 +776,8 @@ def main(argv=None):
                 "max_doc_bytes": args.max_doc_bytes,
                 "encode_batch_size": args.encode_batch_size,
                 "bucket_pool_multiplier": args.bucket_pool_multiplier,
+                "prefetch": args.prefetch,
+                "prefetch_queue_size": args.prefetch_queue_size,
             },
         )
         lang_rows = [

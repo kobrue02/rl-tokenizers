@@ -39,6 +39,7 @@
 #
 # Usage:
 #   sbatch jobs/prep_pretraining_data_gpu.sh --dataset glot500 --langs all \
+#       --dataset-config "$WORK_ROOT/data/glot500" \
 #       --system fanta --checkpoint checkpoints/fanta_50k.pt \
 #       --vocab-json vocab_out/fanta_50k_vocab.json \
 #       --output-dir pretrain_data/glot500_fanta --max-tokens 5000000000
@@ -50,6 +51,17 @@
 # `python3 -m systems.pretraining.data_prep --help`.
 #
 # PREREQUISITE: same HF_TOKEN handling as jobs/prep_pretraining_data.sh.
+#
+# PREREQUISITE for --dataset glot500 specifically: it now reads from a
+# one-time local disk cache (common/data/prepare_glot500.py -- run
+# jobs/prepare_glot500.sh to completion first), not live HF streaming --
+# confirmed live that re-streaming its ~308GB/~411-config corpus from the
+# HF Hub on every prep run (and on every RESUME's fast-forward) was the
+# actual bottleneck of a real glot500-scale prep. Pass --dataset-config (or
+# a config file's dataset_config field) pointing at wherever that cache
+# actually landed if it isn't at the default GLOT500_LOCAL_DIR
+# ("data/glot500") -- see common/data/corpora.py's stream_groups docstring,
+# and configs/prep_bpe_large.yml/prep_fanta_large.yml for an example.
 
 # 1. Project root -- UPDATE THIS to wherever this repo actually lives on the cluster
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers

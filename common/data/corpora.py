@@ -16,10 +16,17 @@ Source categories:
     oldi_data.LANGS (a fixed 9-code list, still used elsewhere) remains
     available as an explicit override.
   - MONOLINGUAL_SOURCES = {glot500, fineweb_edu, olmo_mix}: no cross-lingual
-    alignment, one key per group. Lazily streamed from the HF Hub; multiple
-    languages/configs are INTERLEAVED round-robin (not concatenated) so a
-    --num-groups cap smaller than the per-language cap still sees a
-    balanced mix rather than all of language A before language B.
+    alignment, one key per group. fineweb_edu/olmo_mix are lazily streamed
+    from the HF Hub; multiple languages/configs are INTERLEAVED round-robin
+    (not concatenated) so a --num-groups cap smaller than the per-language
+    cap still sees a balanced mix rather than all of language A before
+    language B. glot500 is the one exception: like bible_nlp/
+    indigenous_panel below, it reads from a one-time LOCAL disk cache
+    (common.data.prepare_glot500) instead of live streaming -- confirmed
+    live that re-streaming its ~308GB/~411-config corpus from the HF Hub on
+    every prep run (and on every RESUME's fast-forward) was the actual
+    bottleneck of a real glot500-scale pretraining data prep. fineweb_edu/
+    olmo_mix stay live-streamed (far larger, out of scope for that fix).
   - BITEXT_SOURCES = {smol, ccmatrix, un_pc, europarl, tatoeba_mt}: parallel
     like PARALLEL_SOURCES, but each group has exactly TWO keys (one
     language pair), lazily streamed like MONOLINGUAL_SOURCES -- `config`
@@ -343,6 +350,52 @@ def _stream_bible_nlp(langs, output_dir=None):
     yield from _load_bible_nlp_local(output_dir or BIBLE_NLP_LOCAL_DIR, langs)
 
 
+GLOT500_LOCAL_DIR = "data/glot500"  # default local disk cache -- see
+# common.data.prepare_glot500, which must be run once before this source is
+# usable. No live fallback (see _stream_glot500_local_single): the live
+# streaming path (list_glot500_configs/_stream_monolingual_single, still
+# used below by fineweb_edu/olmo_mix and by prepare_glot500.py itself) was
+# confirmed live to be the actual bottleneck of a real glot500-scale
+# pretraining data prep -- ~308GB across ~411 lazy HF Hub streaming configs,
+# re-fetched over the network from scratch on every prep run AND on every
+# RESUME's fast-forward. A one-time local cache amortizes that cost across
+# every future prep run instead of paying it every time.
+
+
+def list_glot500_local_langs(output_dir=None):
+    """Every language code that ACTUALLY has a locally prepared glot500
+    file right now -- mirrors list_indigenous_panel_pairs: reads the
+    directory listing, not list_glot500_configs()'s full ~411-language
+    manifest, since prepare_glot500 may have been run with --langs/--limit
+    for only some of them, or may still be mid-run (see that module's own
+    resumability docstring)."""
+    output_dir = output_dir or GLOT500_LOCAL_DIR
+    if not os.path.isdir(output_dir):
+        return []
+    return sorted(
+        fname[: -len(".jsonl")] for fname in os.listdir(output_dir) if fname.endswith(".jsonl")
+    )
+
+
+def _stream_glot500_local_single(lang, output_dir=None):
+    """Reads one language's already-{lang: text}-shaped JSONL file directly
+    -- unlike bible_nlp, no cross-language join is needed (glot500 groups
+    are single-key, one language per row)."""
+    output_dir = output_dir or GLOT500_LOCAL_DIR
+    path = os.path.join(output_dir, f"{lang}.jsonl")
+    if not os.path.exists(path):
+        raise ValueError(
+            f"glot500 needs a one-time local prep step before it can be used -- {path!r} "
+            f"doesn't exist. Run: python -m common.data.prepare_glot500 --output-dir {output_dir}"
+        )
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            yield json.loads(line)
+
+
 INDIGENOUS_PANEL_LOCAL_DIR = "data/indigenous_panel"  # default local disk
 # cache -- see common.data.prepare_indigenous_panel, which must be run once
 # before this source is usable. No live fallback: every pair here has its
@@ -405,8 +458,12 @@ def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=
     defaults to "all" for oldi_seed/flores_dev/glot500 when omitted;
     synthetic defaults to its own fake profile set. Also an arbitrary
     (small) language subset for bible_nlp (no "all" default -- see
-    _stream_bible_nlp); `config` optionally overrides bible_nlp's local
-    disk cache directory (default BIBLE_NLP_LOCAL_DIR). Ignored for
+    _stream_bible_nlp); `config` optionally overrides bible_nlp's OR
+    glot500's local disk cache directory (default BIBLE_NLP_LOCAL_DIR /
+    GLOT500_LOCAL_DIR respectively -- see _stream_glot500_local_single).
+    Like bible_nlp, glot500 reads from a local disk cache (built by
+    common.data.prepare_glot500) rather than live HF streaming -- no live
+    fallback; see that module's own docstring for why. Ignored for
     fineweb_edu/olmo_mix and BITEXT_SOURCES, which select what they load
     via `config` instead: an HF config name for fineweb_edu/olmo_mix, a
     native pair name or "all"/omitted for smol/ccmatrix/un_pc/europarl, a
@@ -453,12 +510,12 @@ def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=
         yield from _round_robin(iter(_stream_smol_single(pair)) for pair in pairs)
         return
     if source == "glot500":
-        lang_list = list_glot500_configs() if langs in (None, "all") else list(langs)
+        lang_list = list_glot500_local_langs(output_dir=config) if langs in (None, "all") else list(langs)
         if len(lang_list) == 1:
-            yield from _stream_monolingual_single("glot500", lang_list[0])
+            yield from _stream_glot500_local_single(lang_list[0], output_dir=config)
             return
         yield from _round_robin(
-            iter(_stream_monolingual_single("glot500", lang)) for lang in lang_list
+            iter(_stream_glot500_local_single(lang, output_dir=config)) for lang in lang_list
         )
         return
     if source in ("fineweb_edu", "olmo_mix"):

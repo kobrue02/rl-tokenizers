@@ -45,8 +45,19 @@
 #     first checkpoint), NOT resubmitted, so a real bug can't spin into an
 #     infinite resubmission loop burning allocation.
 #
+# PREREQUISITE for --dataset glot500 specifically: it now reads from a
+# one-time local disk cache (common/data/prepare_glot500.py -- run
+# jobs/prepare_glot500.sh to completion first), not live HF streaming --
+# confirmed live that re-streaming its ~308GB/~411-config corpus from the
+# HF Hub on every prep run (and on every RESUME's fast-forward) was the
+# actual bottleneck of a real glot500-scale prep. Pass --dataset-config
+# pointing at wherever that cache actually landed (e.g.
+# "$WORK_ROOT/data/glot500") if it isn't at the default GLOT500_LOCAL_DIR
+# ("data/glot500") -- see common/data/corpora.py's stream_groups docstring.
+#
 # Usage:
 #   sbatch jobs/prep_pretraining_data.sh --dataset glot500 --langs all \
+#       --dataset-config "$WORK_ROOT/data/glot500" \
 #       --system bpe --checkpoint checkpoints/bpe_12345.json \
 #       --output-dir pretrain_data/glot500_bpe --max-tokens 5000000000
 #
