@@ -1,0 +1,9 @@
+{
+  "num_examples": 1043,
+  "num_contaminated": 0,
+  "contamination_rate": 0.0,
+  "corpus_docs_scanned": 2000,
+  "contaminated_examples": [],
+  "benchmark": "cola",
+  "corpus_dataset": "fineweb_edu"
+}

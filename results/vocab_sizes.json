@@ -1,0 +1,190 @@
+{
+  "Jarbas/m2v-256-bge-reranker-v2-m3": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 249999
+  },
+  "Jarbas/m2v-256-multilingual-e5-small": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 249999
+  },
+  "NousResearch/Llama-2-7b-hf": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 32000
+  },
+  "Qwen/Qwen3-8B": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 151643
+  },
+  "Qwen/Qwen3.8-2.4T-A95B": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 248044
+  },
+  "Yoonyoul/fine-tuned-e5-small-drugproduct": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 250002
+  },
+  "answerdotai/ModernBERT-base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50280
+  },
+  "antebe/token_punct_dilute": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 250054
+  },
+  "bert-base-cased": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 28996
+  },
+  "bert-base-multilingual-cased": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 119547
+  },
+  "bigscience/bloom": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 250680
+  },
+  "bluexmas/mbart50_ko_vi": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 250054
+  },
+  "bpe": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "claude-opus-5": {
+    "source": "Anthropic does not publish a tokenizer or vocab size",
+    "vocab_size": null
+  },
+  "deepseek-ai/DeepSeek-R1": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 128000
+  },
+  "deepseek-ai/DeepSeek-V4-Pro": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 128000
+  },
+  "distilbert-base-uncased": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 30522
+  },
+  "facebook/opt-125m": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50265
+  },
+  "fanta": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "flexitokens": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "google/electra-base-discriminator": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 30522
+  },
+  "google/gemma-7b": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 256000
+  },
+  "magnet": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "manta": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "meta-llama/Llama-3.1-8B-Instruct": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 128000
+  },
+  "meta-llama/Llama-3.3-70B-Instruct": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 128000
+  },
+  "meta-models/Muse-Glimmer-30B": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 200000
+  },
+  "microsoft/deberta-base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50265
+  },
+  "microsoft/deberta-v3-base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 128000
+  },
+  "mistralai/Mistral-7B-v0.1": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 32000
+  },
+  "moonshotai/Kimi-K3": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 163840
+  },
+  "openai-community/gpt2": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50257
+  },
+  "openai/gpt-oss-120b": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 199998
+  },
+  "openai/gpt-oss-20b": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 199998
+  },
+  "parity_bpe": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "roberta-base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50265
+  },
+  "slone/mbart-large-51-myv-mul-v1": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 269545
+  },
+  "superbpe": {
+    "source": "declared training target (--vocab-size 50000, see jobs/train_*.sh usage examples) -- not verified against a live checkpoint, none present locally",
+    "vocab_size": 50000
+  },
+  "tiiuae/falcon-7b": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 65024
+  },
+  "tiktoken:cl100k_base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 100277
+  },
+  "tiktoken:gpt2": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50257
+  },
+  "tiktoken:o200k_base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 200019
+  },
+  "tiktoken:o200k_harmony": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 201088
+  },
+  "tiktoken:p50k_base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50281
+  },
+  "tiktoken:p50k_edit": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50284
+  },
+  "tiktoken:r50k_base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 50257
+  },
+  "xlm-roberta-base": {
+    "source": "live HFFrontierTokenizer.load()",
+    "vocab_size": 250002
+  }
+}

@@ -40,12 +40,23 @@ from .contamination import build_benchmark_shingle_index, scan_texts_for_contami
 
 _MULTIPLE_CHOICE_TEXT_FIELDS = lambda ex: [ex.context] + list(ex.choices)
 _TRANSLATION_TEXT_FIELDS = lambda ex: [ex.source_text, ex.reference_text]
+_COLA_TEXT_FIELDS = lambda ex: [ex.sentence]
+_QA_TEXT_FIELDS = lambda ex: [ex.context, ex.question] + list(ex.answers)
 
 _BENCHMARK_TEXT_FIELDS = {
     "xnli": _MULTIPLE_CHOICE_TEXT_FIELDS,
     "xcopa": _MULTIPLE_CHOICE_TEXT_FIELDS,
+    # blimp's examples are ALSO MultipleChoiceExample (context="", choices=
+    # [sentence_good, sentence_bad], see benchmarks.load_blimp) -- the empty
+    # context is silently skipped by build_benchmark_shingle_index's own
+    # `if not field_text: continue` guard, so this reuses the same lambda
+    # unchanged rather than needing a blimp-specific one.
+    "blimp": _MULTIPLE_CHOICE_TEXT_FIELDS,
     "flores_mt": _TRANSLATION_TEXT_FIELDS,
+    "cola": _COLA_TEXT_FIELDS,
+    "squad": _QA_TEXT_FIELDS,
 }
+_MULTIPLE_CHOICE_BENCHMARKS = {"xnli", "xcopa", "blimp"}
 
 
 def _corpus_text_iter(corpus_dataset, corpus_langs, corpus_dataset_config, max_corpus_docs):
@@ -143,14 +154,16 @@ def main(argv=None):
     if args.corpus_langs is not None:
         corpus_langs = "all" if args.corpus_langs == "all" else args.corpus_langs.split(",")
 
-    if args.benchmark in ("xnli", "xcopa"):
+    if args.benchmark in _MULTIPLE_CHOICE_BENCHMARKS:
         benchmark_langs = args.benchmark_langs.split(",") if args.benchmark_langs else None
-        loader = benchmarks.load_xnli if args.benchmark == "xnli" else benchmarks.load_xcopa
+        loader = {
+            "xnli": benchmarks.load_xnli, "xcopa": benchmarks.load_xcopa, "blimp": benchmarks.load_blimp,
+        }[args.benchmark]
         kwargs = {"langs": benchmark_langs}
         if args.benchmark_split:
             kwargs["split"] = args.benchmark_split
         examples = list(loader(**kwargs))
-    else:
+    elif args.benchmark == "flores_mt":
         if not args.benchmark_lang_pairs:
             raise ValueError("--benchmark flores_mt needs --benchmark-lang-pairs (e.g. eng:spa)")
         pairs = [tuple(p.split(":")) for p in args.benchmark_lang_pairs.split(",")]
@@ -158,6 +171,13 @@ def main(argv=None):
         if args.benchmark_split:
             kwargs["split"] = args.benchmark_split
         examples = list(benchmarks.load_flores_mt(**kwargs))
+    else:
+        # cola/squad: English-only, no --benchmark-langs/--benchmark-lang-pairs relevance.
+        loader = benchmarks.load_cola if args.benchmark == "cola" else benchmarks.load_squad
+        kwargs = {}
+        if args.benchmark_split:
+            kwargs["split"] = args.benchmark_split
+        examples = list(loader(**kwargs))
 
     result = run_contamination_check(
         examples,

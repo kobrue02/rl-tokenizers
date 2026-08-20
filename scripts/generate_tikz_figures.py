@@ -189,10 +189,22 @@ def lang_display_name(code, _cache={}):
     return name
 
 
-def load_rows(results_path):
+def load_rows(results_path, exclude=None):
+    """exclude: optional iterable of tokenizer names to drop entirely (from
+    both the returned `rows` AND `models`, so nothing downstream can still
+    see them via a stray models.values() iteration) -- e.g. Ch.~tokentax's
+    pooled figures must exclude "fanta" since it hasn't been introduced yet
+    in the thesis narrative at that point (see ch:fantaeval for where it
+    IS shown). Default None keeps every caller that doesn't pass this
+    (e.g. generate_scoped_leaderboards.py's own our_work_vs_other_approaches
+    leaderboard, which explicitly WANTS fanta included) unaffected."""
+    exclude = set(exclude) if exclude else set()
     with open(results_path, encoding="utf-8") as f:
         data = json.load(f)
-    models = {k: v for k, v in data.items() if k != "_failed" and isinstance(v, dict)}
+    models = {
+        k: v for k, v in data.items()
+        if k != "_failed" and isinstance(v, dict) and k not in exclude
+    }
     missing_spread = [k for k, m in models.items() if "token_parity_spread" not in m]
     if missing_spread:
         plural = len(missing_spread) != 1
@@ -1109,13 +1121,17 @@ _FIGURE_SUBDIRS = {
 }
 
 
-def generate(results_path, out_dir, data_prefix=None):
+def generate(results_path, out_dir, data_prefix=None, exclude=None):
     """Each figure gets its own subdirectory under out_dir (figures/tikz/spread_leaderboard/,
     etc.) rather than 50+ files flattened together. data_prefix is the base path baked into
     every `table {...}` reference -- needed because \\includestandalone (without shell-escape)
     runs pgfplots from the HOST document's directory, not out_dir, so a bare "bar_X.dat"
     fails once the figure is \\input from elsewhere. Defaults to out_dir itself; override
-    if your thesis's include path differs."""
+    if your thesis's include path differs.
+
+    exclude: see load_rows's own docstring -- e.g. exclude={"fanta"} for
+    Ch.~tokentax's pooled figures, which must not show fanta before it's
+    introduced later in the thesis (Ch.~fantaeval)."""
     os.makedirs(out_dir, exist_ok=True)
     base_prefix = out_dir.replace(os.sep, "/") if data_prefix is None else data_prefix
     if base_prefix and not base_prefix.endswith("/"):
@@ -1132,7 +1148,7 @@ def generate(results_path, out_dir, data_prefix=None):
     resource_level_dir, resource_level_prefix = subdir("resource_level")
     api_cost_dir, _api_cost_prefix = subdir("api_cost")  # no external .dat files -- prefix unused
 
-    rows, models = load_rows(results_path)
+    rows, models = load_rows(results_path, exclude=exclude)
     families = compute_families(rows)
 
     write_bar_data(rows, families, leaderboard_dir)
@@ -1184,6 +1200,14 @@ def build_arg_parser():
         "main 5-figure BOUQuET-based pipeline -- --input must then be a "
         "--eval-data-source indigenous_panel results JSON, not a BOUQuET one",
     )
+    parser.add_argument(
+        "--exclude", type=str, default=None,
+        help="comma-separated tokenizer name(s) to drop from the main 5-figure pipeline "
+        "(ignored with --indigenous-panel) -- e.g. --exclude fanta for Ch.~tokentax's "
+        "pooled figures, which must not show fanta before it's introduced later in the "
+        "thesis (see scripts/generate_scoped_leaderboards.py and scripts/"
+        "generate_fanta_eval_figures.py for where fanta belongs instead)",
+    )
     return parser
 
 
@@ -1192,7 +1216,8 @@ def main(argv=None):
     if args.indigenous_panel:
         generate_indigenous_panel_figures(args.input, args.output_dir, data_prefix=args.data_prefix)
     else:
-        generate(args.input, args.output_dir, data_prefix=args.data_prefix)
+        exclude = [n.strip() for n in args.exclude.split(",")] if args.exclude else None
+        generate(args.input, args.output_dir, data_prefix=args.data_prefix, exclude=exclude)
 
 
 if __name__ == "__main__":
