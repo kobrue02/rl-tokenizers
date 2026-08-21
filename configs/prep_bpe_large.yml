@@ -1,4 +1,12 @@
-# systems/pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data_gpu.sh -c configs/prep_bpe_large.yml
+# systems/pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data.sh -c configs/prep_bpe_large.yml
+# NOT the _gpu variant -- bpe's induce_spans is plain CPU BPE, no torch
+# forward pass (see jobs/prep_pretraining_data_gpu.sh's own header: "bpe/
+# superbpe have no use for a GPU here"). This file previously said
+# prep_pretraining_data_gpu.sh (copy-pasted from configs/prep_fanta_large.yml's
+# template and never corrected) -- confirmed live: that wastes an entire
+# A100 doing nothing for bpe's whole run, and co-locates it on the same
+# node as a job that DOES need the GPU (fanta), contending for that node's
+# shared CPU/memory/disk bandwidth for no benefit.
 dataset: glot500
 langs: all
 # glot500 now reads from a one-time local disk cache (common/data/prepare_glot500.py
