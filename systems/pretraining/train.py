@@ -1,15 +1,35 @@
 """Pretraining loop for systems.pretraining.model.TransformerLM over packed token
 shards (systems.pretraining.data_prep/shard_dataset).
 
-Single-GPU and multi-GPU (via `torchrun --nproc_per_node=N`, plain
-DistributedDataParallel) both work; this detects which via the RANK/
-WORLD_SIZE/LOCAL_RANK env vars torchrun sets. Not yet built: FSDP/model
-sharding. The "7b" preset needs roughly 24-28GB just for fp32 optimizer
-state plus bf16 weights/gradients -- more than one A100 (80GB) can hold
-alongside activations at a useful batch size, so a real 7B run needs
-sharding across GPUs that plain DDP (which replicates the full model per
-rank) can't provide. A deliberate, documented gap: DDP now, FSDP as
-follow-up work.
+Single-GPU and multi-GPU (via `torchrun --nproc_per_node=N`) both work.
+Multi-GPU offers two strategies (TrainConfig.sharding), detected alongside
+distributedness via the RANK/WORLD_SIZE/LOCAL_RANK env vars torchrun sets:
+
+  - "ddp" (default): plain DistributedDataParallel, replicates the FULL
+    model on every rank. Simple, well-tested, but bounded by a SINGLE
+    GPU's memory -- the "7b" preset (~6.08B params) needs roughly 73GB
+    just for bf16 weights/gradients + fp32 AdamW state, leaving too little
+    for activations on an 80GB card (more comfortable on a 96GB one, but
+    still not the point of this section).
+  - "fsdp": torch.distributed.fsdp.fully_shard (FSDP2), shards parameters/
+    gradients/optimizer state ACROSS ranks instead of replicating -- each
+    rank only ever materializes one block's full parameters at a time
+    (all-gathered just before that block's forward/backward, freed right
+    after), so the effective per-GPU memory ceiling is roughly
+    total_params / world_size, not total_params. This is what actually
+    makes a "7b"+ run possible; plain DDP structurally cannot do this
+    (the whole reason this section exists).
+
+    FSDP correctness note that does NOT carry over from the DDP fix below:
+    FSDP's forward pass is ALWAYS a collective all-gather, whether or not
+    gradients are enabled -- unlike DDP's buffer-broadcast quirk (only
+    triggered under specific stale-flag conditions, see broadcast_buffers
+    below), there's no way to run an FSDP-wrapped model's forward on one
+    rank only. validate() is therefore called on EVERY rank when
+    sharding="fsdp" (all ranks already share the same val_loader via a
+    rank-independent fixed seed, so this doesn't cost extra correctness
+    machinery, just redundant-but-harmless compute on non-main ranks) --
+    see the eval_interval block in train() for the actual branch.
 
 Reuses common.training.lr_schedule.build_lr_scheduler (the same HF-Trainer-
 style warmup+decay every systems/ tokenizer trainer uses) rather than a
@@ -91,21 +111,64 @@ class TrainConfig:
     use_wandb: bool = False
     wandb_project: str = "pretraining"
     run_name: str = ""
+    sharding: str = "ddp"  # "ddp" or "fsdp" -- see module docstring. Ignored
+    # (no wrapping at all) when not actually distributed.
 
 
 def is_distributed():
     return "WORLD_SIZE" in os.environ and int(os.environ["WORLD_SIZE"]) > 1
 
 
-def setup_distributed():
+def setup_distributed(backend="nccl"):
     """Call once, before any CUDA tensor allocation. Returns (rank,
-    local_rank, world_size, device)."""
+    local_rank, world_size, device). backend overridable (gloo, for a
+    CPU-only regression test -- see tests/test_train_fsdp.py) -- "nccl" is
+    the real production default, unconditionally overridden to "cpu" for
+    the device when the caller isn't actually running on CUDA."""
     rank = int(os.environ["RANK"])
     local_rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
-    dist.init_process_group(backend="nccl")
-    torch.cuda.set_device(local_rank)
-    return rank, local_rank, world_size, torch.device(f"cuda:{local_rank}")
+    dist.init_process_group(backend=backend)
+    if backend == "nccl":
+        torch.cuda.set_device(local_rank)
+        return rank, local_rank, world_size, torch.device(f"cuda:{local_rank}")
+    return rank, local_rank, world_size, torch.device("cpu")
+
+
+def wrap_fsdp(model, param_dtype, device):
+    """Shards `model` across the current process group via FSDP2
+    (torch.distributed.fsdp.fully_shard), called bottom-up as fully_shard's
+    own docs require: each TransformerBlock first (its own all-gather/
+    reduce-scatter group, so at most one block's full parameters are ever
+    materialized at once -- the actual memory-saving mechanism), then the
+    top-level model (picks up embed/norm/lm_head, plus tied-weight handling
+    for embed/lm_head sharing one Parameter when cfg.tie_embeddings, which
+    FSDP2 supports correctly as long as both live in the SAME fully_shard
+    group -- true here since neither is wrapped individually).
+
+    param_dtype: MixedPrecisionPolicy's own compute dtype (reduce_dtype
+    always float32, standard practice for gradient-reduction numerical
+    stability regardless of compute precision) -- this REPLACES the
+    training loop's torch.autocast for this model, not stacks with it (see
+    train()'s own use_fsdp_mp branch) to avoid two independent casting
+    policies fighting each other.
+
+    Builds its own DeviceMesh explicitly from the current process group
+    rather than letting fully_shard's mesh=None auto-detect one --
+    confirmed live that auto-detection (torch.distributed.fsdp._fsdp_init.
+    _init_default_mesh) breaks on at least one real platform (macOS/MPS:
+    device_mesh.py checks torch.mps.is_initialized(), which doesn't exist
+    in this torch build), and an explicit mesh sidesteps that regardless of
+    platform rather than special-casing around it."""
+    from torch.distributed.device_mesh import init_device_mesh
+    from torch.distributed.fsdp import MixedPrecisionPolicy, fully_shard
+
+    mesh = init_device_mesh(device.type, (dist.get_world_size(),))
+    mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32)
+    for block in model.blocks:
+        fully_shard(block, mesh=mesh, mp_policy=mp_policy)
+    fully_shard(model, mesh=mesh, mp_policy=mp_policy)
+    return model
 
 
 def _existing_checkpoints(output_dir):
@@ -164,26 +227,41 @@ def _split_train_val_shard_files(shard_files, val_fraction):
     return train_files, val_files
 
 
+def _autocast_ctx(device, amp_dtype, use_fsdp_mp):
+    """use_fsdp_mp=True skips torch.autocast entirely -- FSDP's own
+    MixedPrecisionPolicy (see wrap_fsdp) already casts compute to
+    amp_dtype; stacking autocast on top would apply a second, independent
+    casting policy on the same ops for no benefit and a real risk of the
+    two disagreeing on some op's dtype."""
+    if use_fsdp_mp:
+        return contextlib.nullcontext()
+    return torch.autocast(
+        device_type=device.type if device.type != "cpu" else "cpu",
+        dtype=amp_dtype,
+        enabled=amp_dtype != torch.float32,
+    )
+
+
 @torch.no_grad()
-def validate(model, val_loader, device, amp_dtype):
+def validate(model, val_loader, device, amp_dtype, use_fsdp_mp=False):
     """Averages cross-entropy loss over val_loader's own fixed set of
     batches (see TrainConfig.eval_iters's own docstring for why this is a
     FIXED set, re-iterated identically on every call, not freshly
     reshuffled). Restores the model's prior train()/eval() mode before
     returning, so this is safe to call mid-training-loop without disturbing
     dropout/etc. state for the next training step (irrelevant at this
-    project's own dropout=0.0 default, but not assumed here)."""
+    project's own dropout=0.0 default, but not assumed here).
+
+    use_fsdp_mp: see _autocast_ctx -- pass True when `model` is FSDP-wrapped
+    (train() does; every rank calls this together in that case, see its own
+    eval_interval block for why DDP's is_main-only pattern doesn't carry over)."""
     was_training = model.training
     model.eval()
     total_loss = 0.0
     num_batches = 0
     for x, y in val_loader:
         x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
-        with torch.autocast(
-            device_type=device.type if device.type != "cpu" else "cpu",
-            dtype=amp_dtype,
-            enabled=amp_dtype != torch.float32,
-        ):
+        with _autocast_ctx(device, amp_dtype, use_fsdp_mp):
             _, loss = model(x, labels=y)
         total_loss += loss.item()
         num_batches += 1
@@ -192,13 +270,34 @@ def validate(model, val_loader, device, amp_dtype):
     return total_loss / num_batches if num_batches else float("nan")
 
 
-def save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size):
-    raw_model = model.module if isinstance(model, DistributedDataParallel) else model
+def save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size, is_main=True):
+    """is_main: for cfg.sharding=="fsdp" ONLY, must still be called on
+    EVERY rank (the state-dict gather below is a collective all-gather --
+    a rank that skips it would hang the others), even though only is_main
+    actually writes the file. For "ddp"/plain, this has always been called
+    is_main-only by train() itself (raw_model.state_dict() needs no
+    collective there, every rank already holds the full model), unchanged."""
+    if cfg.sharding == "fsdp":
+        from torch.distributed.checkpoint.state_dict import (
+            StateDictOptions,
+            get_model_state_dict,
+            get_optimizer_state_dict,
+        )
+
+        options = StateDictOptions(full_state_dict=True, cpu_offload=True)
+        model_state_dict = get_model_state_dict(model, options=options)
+        optim_state_dict = get_optimizer_state_dict(model, optimizer, options=options)
+        if not is_main:
+            return
+    else:
+        raw_model = model.module if isinstance(model, DistributedDataParallel) else model
+        model_state_dict = raw_model.state_dict()
+        optim_state_dict = optimizer.state_dict()
     torch.save(
         {
             "step": step,
-            "model_state_dict": raw_model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
+            "model_state_dict": model_state_dict,
+            "optimizer_state_dict": optim_state_dict,
             "scheduler_state_dict": scheduler.state_dict(),
             "config": dataclasses.asdict(cfg),
             "vocab_size": vocab_size,
@@ -207,7 +306,37 @@ def save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size):
     )
 
 
-def load_checkpoint(path, model, optimizer, scheduler, device):
+def load_checkpoint(path, model, optimizer, scheduler, device, cfg, is_main=True):
+    """is_main: for cfg.sharding=="fsdp", train() calls this on EVERY rank
+    (set_model_state_dict/set_optimizer_state_dict's broadcast_from_rank0
+    below is itself collective) -- only is_main actually reads the file
+    from disk; every other rank receives its own shard via broadcast
+    instead of independently reading the whole checkpoint (avoiding the
+    same every-rank-reads-the-full-file RAM multiplication plain DDP/none
+    still has below, deliberately left as-is there -- see this function's
+    "ddp"/plain branch, unchanged from before FSDP support existed).
+    step/scheduler_state_dict aren't covered by that broadcast (they're
+    plain Python objects, not model/optimizer tensors) -- broadcast via
+    dist.broadcast_object_list instead."""
+    if cfg.sharding == "fsdp":
+        from torch.distributed.checkpoint.state_dict import (
+            StateDictOptions,
+            set_model_state_dict,
+            set_optimizer_state_dict,
+        )
+
+        ckpt = torch.load(path, map_location="cpu", weights_only=False) if is_main else None
+        options = StateDictOptions(full_state_dict=True, broadcast_from_rank0=True, cpu_offload=True)
+        set_model_state_dict(model, ckpt["model_state_dict"] if is_main else {}, options=options)
+        set_optimizer_state_dict(
+            model, optimizer, ckpt["optimizer_state_dict"] if is_main else {}, options=options
+        )
+        payload = [ckpt["step"], ckpt["scheduler_state_dict"]] if is_main else [None, None]
+        dist.broadcast_object_list(payload, src=0)
+        step, scheduler_state = payload
+        scheduler.load_state_dict(scheduler_state)
+        return step
+
     ckpt = torch.load(path, map_location=device, weights_only=False)
     raw_model = model.module if isinstance(model, DistributedDataParallel) else model
     raw_model.load_state_dict(ckpt["model_state_dict"])
@@ -217,6 +346,9 @@ def load_checkpoint(path, model, optimizer, scheduler, device):
 
 
 def train(cfg: TrainConfig):
+    if cfg.sharding not in ("ddp", "fsdp"):
+        raise ValueError(f"cfg.sharding must be 'ddp' or 'fsdp', got {cfg.sharding!r}")
+
     distributed = is_distributed()
     if distributed:
         rank, local_rank, world_size, device = setup_distributed()
@@ -258,7 +390,15 @@ def train(cfg: TrainConfig):
             f"tokens_per_param={tokens_per_param:.1f} (Chinchilla-optimal ~20) "
             f"estimated_flops={estimated_flops:.3e} (~6*N*D)"
         )
-    if distributed:
+    amp_dtype = torch.bfloat16 if cfg.dtype == "bfloat16" else torch.float32
+    if distributed and cfg.sharding == "fsdp":
+        # See module docstring's "fsdp" section -- shards params/gradients/
+        # optimizer state across ranks instead of replicating, which is
+        # what actually lets a preset like "7b" run at all. mp_policy's
+        # param_dtype REPLACES the loop's torch.autocast for this model
+        # (_autocast_ctx's use_fsdp_mp branch), not stacks with it.
+        model = wrap_fsdp(model, amp_dtype, device)
+    elif distributed:
         # broadcast_buffers=False: TransformerLM's only buffers are Attention's
         # precomputed rope_cos/rope_sin (model.py) -- identical across ranks
         # by construction (same ModelConfig everywhere) and never mutated, so
@@ -287,7 +427,7 @@ def train(cfg: TrainConfig):
     # replaying already-trained samples (see ShardedTokenDataset.__init__).
     start_step = 0
     if cfg.resume_from:
-        start_step = load_checkpoint(cfg.resume_from, model, optimizer, scheduler, device)
+        start_step = load_checkpoint(cfg.resume_from, model, optimizer, scheduler, device, cfg, is_main=is_main)
         if is_main:
             print(f"resumed from {cfg.resume_from} at step {start_step}")
 
@@ -367,7 +507,6 @@ def train(cfg: TrainConfig):
             },
         )
 
-    amp_dtype = torch.bfloat16 if cfg.dtype == "bfloat16" else torch.float32
     if is_main:
         os.makedirs(cfg.output_dir, exist_ok=True)
 
@@ -401,17 +540,19 @@ def train(cfg: TrainConfig):
             # enabled=is_accumulating) convention. A no-op contextlib.nullcontext()
             # on the last micro-step or when not distributed (single-GPU
             # has no gradient sync to skip in the first place).
-            sync_ctx = (
-                model.no_sync()
-                if distributed and not is_last_micro_step
-                else contextlib.nullcontext()
-            )
+            #
+            # FSDP2 has no no_sync() context manager -- set_requires_gradient_sync
+            # is its own equivalent, a stateful toggle (not a `with` block) that
+            # applies to every backward() call until set again.
+            if distributed and cfg.sharding == "fsdp":
+                model.set_requires_gradient_sync(is_last_micro_step)
+                sync_ctx = contextlib.nullcontext()
+            elif distributed and not is_last_micro_step:
+                sync_ctx = model.no_sync()
+            else:
+                sync_ctx = contextlib.nullcontext()
             with sync_ctx:
-                with torch.autocast(
-                    device_type=device.type if device.type != "cpu" else "cpu",
-                    dtype=amp_dtype,
-                    enabled=amp_dtype != torch.float32,
-                ):
+                with _autocast_ctx(device, amp_dtype, use_fsdp_mp=cfg.sharding == "fsdp"):
                     _, loss = model(x, labels=y)
                 (loss / cfg.grad_accum_steps).backward()
             loss_accum += loss.item() / cfg.grad_accum_steps
@@ -443,47 +584,68 @@ def train(cfg: TrainConfig):
             t_last_log = time.time()
             tokens_since_log = 0
 
-        # Gated the same way on EVERY rank (not just is_main), even though
-        # only is_main actually runs validate()/logs -- the dist.barrier()
-        # below must be reached by every rank in lockstep, or ranks that
-        # never call it would wait forever for one that does.
         if val_loader is not None and cfg.eval_interval and step % cfg.eval_interval == 0:
-            if is_main:
-                # Unwrapped (see save_checkpoint/load_checkpoint's own
-                # raw_model pattern): validate() is a read-only forward pass
-                # with no gradient sync to participate in, and running it
-                # through the DDP wrapper would invoke DDP's own forward
-                # hooks (see broadcast_buffers=False's comment above) for no
-                # benefit -- belt-and-suspenders against that same collective-
-                # mismatch risk, not just relying on broadcast_buffers=False.
-                raw_model_for_eval = model.module if isinstance(model, DistributedDataParallel) else model
-                val_loss = validate(raw_model_for_eval, val_loader, device, amp_dtype)
-                print(f"[step {step:6d}/{cfg.total_steps}] val_loss={val_loss:.4f}")
-                if run is not None:
-                    run.log({"val/loss": val_loss}, step=step)
-            if distributed:
-                dist.barrier()  # other ranks wait for is_main's validation
-                # pass to finish, rather than racing ahead into the next
-                # step's own backward() -- explicit here rather than relying
-                # on that next collective to implicitly serve as the wait.
+            if cfg.sharding == "fsdp":
+                # See module docstring's FSDP section: an FSDP-wrapped
+                # model's forward is ALWAYS a collective all-gather, so
+                # EVERY rank must call validate() together -- there's no
+                # is_main-only option the way DDP has. val_loader is
+                # already identical across ranks (fixed, rank-independent
+                # seed above), so every rank computes the same val_loss;
+                # only is_main prints/logs it.
+                val_loss = validate(model, val_loader, device, amp_dtype, use_fsdp_mp=True)
+                if is_main:
+                    print(f"[step {step:6d}/{cfg.total_steps}] val_loss={val_loss:.4f}")
+                    if run is not None:
+                        run.log({"val/loss": val_loss}, step=step)
+            else:
+                # Gated the same way on EVERY rank (not just is_main), even
+                # though only is_main actually runs validate()/logs -- the
+                # dist.barrier() below must be reached by every rank in
+                # lockstep, or ranks that never call it would wait forever
+                # for one that does.
+                if is_main:
+                    # Unwrapped (see save_checkpoint/load_checkpoint's own
+                    # raw_model pattern): validate() is a read-only forward pass
+                    # with no gradient sync to participate in, and running it
+                    # through the DDP wrapper would invoke DDP's own forward
+                    # hooks (see broadcast_buffers=False's comment above) for no
+                    # benefit -- belt-and-suspenders against that same collective-
+                    # mismatch risk, not just relying on broadcast_buffers=False.
+                    raw_model_for_eval = model.module if isinstance(model, DistributedDataParallel) else model
+                    val_loss = validate(raw_model_for_eval, val_loader, device, amp_dtype)
+                    print(f"[step {step:6d}/{cfg.total_steps}] val_loss={val_loss:.4f}")
+                    if run is not None:
+                        run.log({"val/loss": val_loss}, step=step)
+                if distributed:
+                    dist.barrier()  # other ranks wait for is_main's validation
+                    # pass to finish, rather than racing ahead into the next
+                    # step's own backward() -- explicit here rather than relying
+                    # on that next collective to implicitly serve as the wait.
 
-        if is_main and cfg.save_steps and step % cfg.save_steps == 0:
+        # save_checkpoint's own state-dict gather is collective under FSDP
+        # (every rank must call it, even though only is_main writes the
+        # file) -- gated on sharding=="fsdp" too, not just is_main, for
+        # exactly that reason. See save_checkpoint's own docstring.
+        if cfg.save_steps and step % cfg.save_steps == 0 and (is_main or cfg.sharding == "fsdp"):
             path = os.path.join(cfg.output_dir, f"step_{step}.pt")
-            save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size)
-            print(f"saved checkpoint to {path}")
-            saved_checkpoint_paths.append(path)
-            if cfg.keep_last_n_checkpoints > 0:
-                while len(saved_checkpoint_paths) > cfg.keep_last_n_checkpoints:
-                    stale_path = saved_checkpoint_paths.pop(0)
-                    os.remove(stale_path)
-                    print(f"removed older checkpoint {stale_path} (keeping last {cfg.keep_last_n_checkpoints})")
+            save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size, is_main=is_main)
+            if is_main:
+                print(f"saved checkpoint to {path}")
+                saved_checkpoint_paths.append(path)
+                if cfg.keep_last_n_checkpoints > 0:
+                    while len(saved_checkpoint_paths) > cfg.keep_last_n_checkpoints:
+                        stale_path = saved_checkpoint_paths.pop(0)
+                        os.remove(stale_path)
+                        print(f"removed older checkpoint {stale_path} (keeping last {cfg.keep_last_n_checkpoints})")
 
-    if is_main:
+    if is_main or cfg.sharding == "fsdp":
         final_path = os.path.join(cfg.output_dir, "final.pt")
-        save_checkpoint(final_path, model, optimizer, scheduler, step, cfg, vocab_size)
-        print(f"training complete, saved final checkpoint to {final_path}")
-        if run is not None:
-            run.finish()
+        save_checkpoint(final_path, model, optimizer, scheduler, step, cfg, vocab_size, is_main=is_main)
+        if is_main:
+            print(f"training complete, saved final checkpoint to {final_path}")
+            if run is not None:
+                run.finish()
 
     if distributed:
         dist.barrier()
