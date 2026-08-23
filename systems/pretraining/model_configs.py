@@ -63,7 +63,17 @@ PRESETS = {
     "tiny": _preset(128, 4, 4),  # ~2-3M body params -- smoke testing only
     "small": _preset(768, 12, 12),  # ~85M body params -- GPT-2-small scale
     "medium": _preset(1024, 24, 16),  # ~300M body params
-    "large": _preset(1536, 24, 16, grad_checkpointing=True),  # ~700M body params
+    "large": _preset(1536, 24, 16),  # ~700M body params. grad_checkpointing
+    # deliberately OFF here (unlike xl/7b below): confirmed live on a real
+    # 4xA100 run that "large"'s weights+optimizer+activations use only
+    # ~27.7GB/80GB (34%) per GPU even without it -- checkpointing's whole
+    # point (trading compute for memory) buys nothing at this size, while
+    # its real cost (recomputing the forward pass during backward, ~6N ->
+    # ~8N FLOPs/token) was actively capping this preset's own achieved MFU
+    # (~25-34% of A100 peak on that same run, despite GPUs reading 100%
+    # "busy" the whole time -- utilization != efficiency, see train.py's
+    # own tokens_per_param/estimated_flops logging for how to recompute this
+    # for a real run).
     "xl": _preset(
         2560, 32, 32, tie_embeddings=False, grad_checkpointing=True
     ),  # ~2.7B body params
@@ -81,8 +91,10 @@ PRESETS = {
     # num_heads/intermediate_size (4096/32/32/11008) but lands below its
     # ~6.7B because of the GQA choice above (smaller k_proj/v_proj), which
     # is the intended effect, not a discrepancy. Needs multiple GPUs'
-    # combined memory (no FSDP/sharding yet, see train.py) and hasn't been
-    # run end-to-end, unlike every smaller preset.
+    # combined memory -- plain DDP (which replicates the full model per
+    # rank) can't provide that, but train.py's TrainConfig.sharding="fsdp"
+    # now can (see train.py's own module docstring); hasn't been run
+    # end-to-end yet either way, unlike every smaller preset.
 }
 
 

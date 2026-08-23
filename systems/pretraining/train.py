@@ -113,6 +113,13 @@ class TrainConfig:
     run_name: str = ""
     sharding: str = "ddp"  # "ddp" or "fsdp" -- see module docstring. Ignored
     # (no wrapping at all) when not actually distributed.
+    compile: bool = False  # torch.compile(model) -- off by default (opt in
+    # explicitly; graph breaks/recompilation storms are a real risk worth
+    # confirming on a real run before making it the default). Applied AFTER
+    # DDP/FSDP wrapping either way, not before -- see train()'s own comment
+    # at the call site for why that ordering, confirmed via a CPU/gloo
+    # correctness check in tests/test_train_compile.py (real speedup only
+    # shows up on real tensor-core hardware, not verifiable there).
 
 
 def is_distributed():
@@ -410,6 +417,24 @@ def train(cfg: TrainConfig):
         # validate()'s is_main-only forward below, colliding with the other
         # ranks' dist.barrier() a few lines down.
         model = DistributedDataParallel(model, device_ids=[local_rank], broadcast_buffers=False)
+
+    if cfg.compile:
+        # model.compile() (in-place, mutates __call__/forward), NOT
+        # `model = torch.compile(model)` -- the latter returns a NEW
+        # OptimizedModule wrapper object, which would silently break every
+        # `isinstance(model, DistributedDataParallel)` unwrap check
+        # elsewhere in this file (validate()'s call site, save_checkpoint,
+        # load_checkpoint) -- those would then skip unwrapping, call
+        # .state_dict()/forward on the still-DDP-wrapped module, and
+        # reintroduce exactly the collective-mismatch risk the earlier
+        # broadcast_buffers=False fix closed. In-place compile keeps
+        # `model` the same DDP/FSDP object (just with a compiled forward
+        # internally), so every isinstance check downstream keeps working
+        # unchanged. Applied AFTER DDP/FSDP wrapping, not before: this lets
+        # Dynamo trace through DDP's/FSDP's own forward hooks as part of
+        # one graph, rather than compiling a module that then gets wrapped
+        # in eager-mode collective-communication hooks Dynamo never sees.
+        model.compile()
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
