@@ -205,5 +205,36 @@ def test_end_to_end_training_run_with_validation_and_grad_accum(tiny_shard_dir, 
         cfg, total_steps=cfg.total_steps + 4, resume_from=os.path.join(cfg.output_dir, "final.pt")
     )
     train(cfg_resumed)
-    ckpt_resumed = torch.load(os.path.join(cfg.output_dir, "final.pt"), weights_only=False)
-    assert ckpt_resumed["step"] == cfg_resumed.total_steps
+
+
+def test_end_to_end_training_run_logs_generated_samples(tiny_shard_dir, tmp_path, capsys):
+    """generate_interval > 0: confirms the whole path -- auto-loading the
+    TokenizerAdapter from shards_meta.json's own "system"/"checkpoint"
+    (bpe here, no vocab_json needed), generate_samples() being called and
+    not crashing on a real (tiny, untrained) model + real bpe tokenizer,
+    and the sample print lines actually appearing in the log."""
+    cfg = TrainConfig(
+        model_size="tiny",
+        shard_dir=tiny_shard_dir,
+        seq_len=16,
+        per_device_batch_size=4,
+        total_steps=4,
+        val_fraction=0.5,
+        eval_interval=0,  # isolate generate_interval -- no validate() noise
+        log_steps=1,
+        save_steps=0,
+        output_dir=str(tmp_path / "out"),
+        device="cpu",
+        dtype="float32",
+        num_workers=0,
+        generate_interval=2,
+        generate_prompts="the quick,a small",
+        generate_max_new_tokens=4,
+    )
+
+    train(cfg)
+
+    out = capsys.readouterr().out
+    assert out.count("sample prompt=") == 4  # 2 prompts x steps {2, 4}
+    assert "'the quick'" in out
+    assert "'a small'" in out

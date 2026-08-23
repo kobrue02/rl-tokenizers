@@ -261,7 +261,20 @@ class TransformerLM(nn.Module):
         self.eval()
         for _ in range(max_new_tokens):
             context = input_ids[:, -self.cfg.max_seq_len :]
-            logits, _ = self.forward(context)
+            # self(context), NOT self.forward(context): the latter calls
+            # forward() directly, bypassing nn.Module.__call__ entirely --
+            # harmless for every CURRENT caller (a plain, unwrapped model
+            # has no hooks registered either way), but FSDP2's own
+            # unshard/reshard mechanism for this model's TOP-LEVEL
+            # parameters (embed/norm/lm_head, see train.wrap_fsdp) is
+            # implemented as exactly such a hook. Calling generate() on an
+            # FSDP-wrapped model via self.forward() would silently run
+            # with unsharded/incomplete top-level parameters -- confirmed
+            # this is the only broken piece: forward()'s own submodule
+            # calls (block(x), not block.forward(x)) already go through
+            # __call__ correctly, so per-block FSDP hooks were never the
+            # problem.
+            logits, _ = self(context)
             next_logits = logits[:, -1, :] / max(temperature, 1e-6)
             if next_logits.size(-1) > self.vocab_size:
                 # Padding slots (see _padded_vocab_size) never appear in

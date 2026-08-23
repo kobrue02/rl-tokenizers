@@ -51,6 +51,7 @@ from common.training.lr_schedule import build_lr_scheduler
 from .model import TransformerLM
 from .model_configs import get_preset
 from .shard_dataset import ShardedTokenDataset, load_shard_meta
+from .tokenizer_adapter import TokenizerAdapter
 
 
 @dataclasses.dataclass
@@ -120,6 +121,22 @@ class TrainConfig:
     # at the call site for why that ordering, confirmed via a CPU/gloo
     # correctness check in tests/test_train_compile.py (real speedup only
     # shows up on real tensor-core hardware, not verifiable there).
+    generate_interval: int = 0  # log qualitative text samples every this many
+    # steps (0 disables, matching eval_interval's own convention) -- a
+    # wandb.Table of {step, prompt, generated}, so you can watch what the
+    # model actually produces evolve alongside the loss curve, not just
+    # trust the scalar metrics. Real overhead (generate() is unbatched, no
+    # KV cache -- see model.py's own docstring), so keep this much less
+    # frequent than eval_interval, not the same cadence.
+    generate_prompts: str = "The quick brown fox"  # comma-separated; avoid
+    # literal commas inside a prompt (same convention as --langs elsewhere
+    # in this project's CLIs)
+    generate_max_new_tokens: int = 50  # short and cheap on purpose -- this
+    # is a qualitative spot-check, not a real eval (see cli_generate.py/
+    # eval_harness.py for that)
+    vocab_json: str = ""  # only needed if shards_meta.json's own "system"
+    # is one of the span-family tokenizers (magnet/flexitokens/manta/fanta/
+    # fairtok) -- see TokenizerAdapter.load. "" is fine for bpe/superbpe.
 
 
 def is_distributed():
@@ -277,6 +294,38 @@ def validate(model, val_loader, device, amp_dtype, use_fsdp_mp=False):
     return total_loss / num_batches if num_batches else float("nan")
 
 
+def generate_samples(raw_model, adapter, prompts, device, max_new_tokens):
+    """raw_model: the UNWRAPPED TransformerLM (generate() is a custom method,
+    not part of the standard forward()/__call__ chain DistributedDataParallel
+    proxies -- callers must unwrap for DDP; FSDP2 needs no unwrap since it
+    modifies the module in place rather than returning a new wrapper object,
+    see train.py's own DDP-vs-FSDP unwrap asymmetry elsewhere).
+
+    Restores train()/eval() mode before returning, matching validate()'s own
+    discipline -- generate() (model.py) calls self.eval() internally but
+    doesn't restore it, since every other existing caller (cli_generate.py,
+    eval_harness.evaluate_translation) runs it as the last thing in a
+    standalone script, not mid-training-loop.
+
+    Returns [(prompt, generated_continuation), ...], continuation only (not
+    prompt+continuation), decoded via errors="replace" for the same reason
+    eval_harness.evaluate_translation does -- an early-training model can
+    emit byte sequences that aren't valid UTF-8 at all."""
+    was_training = raw_model.training
+    raw_model.eval()
+    results = []
+    for prompt in prompts:
+        ids = adapter.encode(prompt)
+        ids_tensor = torch.tensor([ids], dtype=torch.long, device=device)
+        generated = raw_model.generate(ids_tensor, max_new_tokens=max_new_tokens)
+        new_ids = generated[0, len(ids):].tolist()
+        text = adapter.decode(new_ids).decode("utf-8", errors="replace")
+        results.append((prompt, text))
+    if was_training:
+        raw_model.train()
+    return results
+
+
 def save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size, is_main=True):
     """is_main: for cfg.sharding=="fsdp" ONLY, must still be called on
     EVERY rank (the state-dict gather below is a collective all-gather --
@@ -373,6 +422,22 @@ def train(cfg: TrainConfig):
 
     meta = load_shard_meta(cfg.shard_dir)
     vocab_size = meta["vocab_size"]
+
+    # Built on every rank (cheap, deterministic -- same pattern as the
+    # val_dataset below), not just is_main, since generate_samples() itself
+    # runs on every rank under sharding="fsdp" (see the eval_interval block
+    # further down). meta["system"]/["checkpoint"] come from data_prep.py's
+    # own shards_meta.json -- whichever tokenizer actually built shard_dir,
+    # so this can't silently drift from it the way a separately-specified
+    # --system/--tokenizer-checkpoint pair could.
+    generate_prompts = []
+    adapter = None
+    if cfg.generate_interval > 0:
+        generate_prompts = [p for p in cfg.generate_prompts.split(",") if p]
+        adapter = TokenizerAdapter.load(
+            meta["system"], meta["checkpoint"], vocab_json_path=cfg.vocab_json or None, device=device,
+        )
+
     model_cfg = get_preset(cfg.model_size)
     model_cfg.max_seq_len = max(model_cfg.max_seq_len, cfg.seq_len)
     model = TransformerLM(model_cfg, vocab_size).to(device)
@@ -647,6 +712,34 @@ def train(cfg: TrainConfig):
                     # pass to finish, rather than racing ahead into the next
                     # step's own backward() -- explicit here rather than relying
                     # on that next collective to implicitly serve as the wait.
+
+        if generate_prompts and cfg.generate_interval and step % cfg.generate_interval == 0:
+            if cfg.sharding == "fsdp":
+                # Same reasoning as validate() above: generate() calls
+                # self(context) internally (model.py), a collective
+                # all-gather under FSDP regardless of grad/eval state --
+                # every rank must call generate_samples() together, even
+                # though only is_main prints/logs the result.
+                samples = generate_samples(model, adapter, generate_prompts, device, cfg.generate_max_new_tokens)
+                if is_main:
+                    for prompt, text in samples:
+                        print(f"[step {step:6d}/{cfg.total_steps}] sample prompt={prompt!r} -> {text!r}")
+                    if run is not None:
+                        table = wandb.Table(columns=["prompt", "generated"], data=[[p, g] for p, g in samples])
+                        run.log({"samples": table}, step=step)
+            else:
+                if is_main:
+                    raw_model_for_generate = model.module if isinstance(model, DistributedDataParallel) else model
+                    samples = generate_samples(
+                        raw_model_for_generate, adapter, generate_prompts, device, cfg.generate_max_new_tokens
+                    )
+                    for prompt, text in samples:
+                        print(f"[step {step:6d}/{cfg.total_steps}] sample prompt={prompt!r} -> {text!r}")
+                    if run is not None:
+                        table = wandb.Table(columns=["prompt", "generated"], data=[[p, g] for p, g in samples])
+                        run.log({"samples": table}, step=step)
+                if distributed:
+                    dist.barrier()  # same reasoning as validate()'s own barrier above
 
         # save_checkpoint's own state-dict gather is collective under FSDP
         # (every rank must call it, even though only is_main writes the
