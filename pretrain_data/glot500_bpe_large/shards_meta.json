@@ -1,0 +1,3978 @@
+{
+  "dataset": "glot500",
+  "langs": "all",
+  "dataset_config": "/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers/data/glot500",
+  "system": "bpe",
+  "checkpoint": "checkpoints/bpe_50k.json",
+  "vocab_size": 50001,
+  "eos_id": 50000,
+  "dtype": "uint16",
+  "total_tokens": 30000009128,
+  "num_docs": 522940160,
+  "shard_files": [
+    "shard_00000.bin",
+    "shard_00001.bin",
+    "shard_00002.bin",
+    "shard_00003.bin",
+    "shard_00004.bin",
+    "shard_00005.bin",
+    "shard_00006.bin",
+    "shard_00007.bin",
+    "shard_00008.bin",
+    "shard_00009.bin",
+    "shard_00010.bin",
+    "shard_00011.bin",
+    "shard_00012.bin",
+    "shard_00013.bin",
+    "shard_00014.bin",
+    "shard_00015.bin",
+    "shard_00016.bin",
+    "shard_00017.bin",
+    "shard_00018.bin",
+    "shard_00019.bin",
+    "shard_00020.bin",
+    "shard_00021.bin",
+    "shard_00022.bin",
+    "shard_00023.bin",
+    "shard_00024.bin",
+    "shard_00025.bin",
+    "shard_00026.bin",
+    "shard_00027.bin",
+    "shard_00028.bin",
+    "shard_00029.bin",
+    "shard_00030.bin",
+    "shard_00031.bin",
+    "shard_00032.bin",
+    "shard_00033.bin",
+    "shard_00034.bin",
+    "shard_00035.bin",
+    "shard_00036.bin",
+    "shard_00037.bin",
+    "shard_00038.bin",
+    "shard_00039.bin",
+    "shard_00040.bin",
+    "shard_00041.bin",
+    "shard_00042.bin",
+    "shard_00043.bin",
+    "shard_00044.bin",
+    "shard_00045.bin",
+    "shard_00046.bin",
+    "shard_00047.bin",
+    "shard_00048.bin",
+    "shard_00049.bin",
+    "shard_00050.bin",
+    "shard_00051.bin",
+    "shard_00052.bin",
+    "shard_00053.bin",
+    "shard_00054.bin",
+    "shard_00055.bin",
+    "shard_00056.bin",
+    "shard_00057.bin",
+    "shard_00058.bin",
+    "shard_00059.bin",
+    "shard_00060.bin",
+    "shard_00061.bin",
+    "shard_00062.bin",
+    "shard_00063.bin",
+    "shard_00064.bin",
+    "shard_00065.bin",
+    "shard_00066.bin",
+    "shard_00067.bin",
+    "shard_00068.bin",
+    "shard_00069.bin",
+    "shard_00070.bin",
+    "shard_00071.bin",
+    "shard_00072.bin",
+    "shard_00073.bin",
+    "shard_00074.bin",
+    "shard_00075.bin",
+    "shard_00076.bin",
+    "shard_00077.bin",
+    "shard_00078.bin",
+    "shard_00079.bin",
+    "shard_00080.bin",
+    "shard_00081.bin",
+    "shard_00082.bin",
+    "shard_00083.bin",
+    "shard_00084.bin",
+    "shard_00085.bin",
+    "shard_00086.bin",
+    "shard_00087.bin",
+    "shard_00088.bin",
+    "shard_00089.bin",
+    "shard_00090.bin",
+    "shard_00091.bin",
+    "shard_00092.bin",
+    "shard_00093.bin",
+    "shard_00094.bin",
+    "shard_00095.bin",
+    "shard_00096.bin",
+    "shard_00097.bin",
+    "shard_00098.bin",
+    "shard_00099.bin",
+    "shard_00100.bin",
+    "shard_00101.bin",
+    "shard_00102.bin",
+    "shard_00103.bin",
+    "shard_00104.bin",
+    "shard_00105.bin",
+    "shard_00106.bin",
+    "shard_00107.bin",
+    "shard_00108.bin",
+    "shard_00109.bin",
+    "shard_00110.bin",
+    "shard_00111.bin",
+    "shard_00112.bin",
+    "shard_00113.bin",
+    "shard_00114.bin",
+    "shard_00115.bin",
+    "shard_00116.bin",
+    "shard_00117.bin",
+    "shard_00118.bin",
+    "shard_00119.bin",
+    "shard_00120.bin",
+    "shard_00121.bin",
+    "shard_00122.bin",
+    "shard_00123.bin",
+    "shard_00124.bin",
+    "shard_00125.bin",
+    "shard_00126.bin",
+    "shard_00127.bin",
+    "shard_00128.bin",
+    "shard_00129.bin",
+    "shard_00130.bin",
+    "shard_00131.bin",
+    "shard_00132.bin",
+    "shard_00133.bin",
+    "shard_00134.bin",
+    "shard_00135.bin",
+    "shard_00136.bin",
+    "shard_00137.bin",
+    "shard_00138.bin",
+    "shard_00139.bin",
+    "shard_00140.bin",
+    "shard_00141.bin",
+    "shard_00142.bin",
+    "shard_00143.bin",
+    "shard_00144.bin",
+    "shard_00145.bin",
+    "shard_00146.bin",
+    "shard_00147.bin",
+    "shard_00148.bin",
+    "shard_00149.bin",
+    "shard_00150.bin",
+    "shard_00151.bin",
+    "shard_00152.bin",
+    "shard_00153.bin",
+    "shard_00154.bin",
+    "shard_00155.bin",
+    "shard_00156.bin",
+    "shard_00157.bin",
+    "shard_00158.bin",
+    "shard_00159.bin",
+    "shard_00160.bin",
+    "shard_00161.bin",
+    "shard_00162.bin",
+    "shard_00163.bin",
+    "shard_00164.bin",
+    "shard_00165.bin",
+    "shard_00166.bin",
+    "shard_00167.bin",
+    "shard_00168.bin",
+    "shard_00169.bin",
+    "shard_00170.bin",
+    "shard_00171.bin",
+    "shard_00172.bin",
+    "shard_00173.bin",
+    "shard_00174.bin",
+    "shard_00175.bin",
+    "shard_00176.bin",
+    "shard_00177.bin",
+    "shard_00178.bin",
+    "shard_00179.bin",
+    "shard_00180.bin",
+    "shard_00181.bin",
+    "shard_00182.bin",
+    "shard_00183.bin",
+    "shard_00184.bin",
+    "shard_00185.bin",
+    "shard_00186.bin",
+    "shard_00187.bin",
+    "shard_00188.bin",
+    "shard_00189.bin",
+    "shard_00190.bin",
+    "shard_00191.bin",
+    "shard_00192.bin",
+    "shard_00193.bin",
+    "shard_00194.bin",
+    "shard_00195.bin",
+    "shard_00196.bin",
+    "shard_00197.bin",
+    "shard_00198.bin",
+    "shard_00199.bin",
+    "shard_00200.bin",
+    "shard_00201.bin",
+    "shard_00202.bin",
+    "shard_00203.bin",
+    "shard_00204.bin",
+    "shard_00205.bin",
+    "shard_00206.bin",
+    "shard_00207.bin",
+    "shard_00208.bin",
+    "shard_00209.bin",
+    "shard_00210.bin",
+    "shard_00211.bin",
+    "shard_00212.bin",
+    "shard_00213.bin",
+    "shard_00214.bin",
+    "shard_00215.bin",
+    "shard_00216.bin",
+    "shard_00217.bin",
+    "shard_00218.bin",
+    "shard_00219.bin",
+    "shard_00220.bin",
+    "shard_00221.bin",
+    "shard_00222.bin",
+    "shard_00223.bin",
+    "shard_00224.bin",
+    "shard_00225.bin",
+    "shard_00226.bin",
+    "shard_00227.bin",
+    "shard_00228.bin",
+    "shard_00229.bin",
+    "shard_00230.bin",
+    "shard_00231.bin",
+    "shard_00232.bin",
+    "shard_00233.bin",
+    "shard_00234.bin",
+    "shard_00235.bin",
+    "shard_00236.bin",
+    "shard_00237.bin",
+    "shard_00238.bin",
+    "shard_00239.bin",
+    "shard_00240.bin",
+    "shard_00241.bin",
+    "shard_00242.bin",
+    "shard_00243.bin",
+    "shard_00244.bin",
+    "shard_00245.bin",
+    "shard_00246.bin",
+    "shard_00247.bin",
+    "shard_00248.bin",
+    "shard_00249.bin",
+    "shard_00250.bin",
+    "shard_00251.bin",
+    "shard_00252.bin",
+    "shard_00253.bin",
+    "shard_00254.bin",
+    "shard_00255.bin",
+    "shard_00256.bin",
+    "shard_00257.bin",
+    "shard_00258.bin",
+    "shard_00259.bin",
+    "shard_00260.bin",
+    "shard_00261.bin",
+    "shard_00262.bin",
+    "shard_00263.bin",
+    "shard_00264.bin",
+    "shard_00265.bin",
+    "shard_00266.bin",
+    "shard_00267.bin",
+    "shard_00268.bin",
+    "shard_00269.bin",
+    "shard_00270.bin",
+    "shard_00271.bin",
+    "shard_00272.bin",
+    "shard_00273.bin",
+    "shard_00274.bin",
+    "shard_00275.bin",
+    "shard_00276.bin",
+    "shard_00277.bin",
+    "shard_00278.bin",
+    "shard_00279.bin",
+    "shard_00280.bin",
+    "shard_00281.bin",
+    "shard_00282.bin",
+    "shard_00283.bin",
+    "shard_00284.bin",
+    "shard_00285.bin",
+    "shard_00286.bin",
+    "shard_00287.bin",
+    "shard_00288.bin",
+    "shard_00289.bin",
+    "shard_00290.bin",
+    "shard_00291.bin",
+    "shard_00292.bin",
+    "shard_00293.bin",
+    "shard_00294.bin",
+    "shard_00295.bin",
+    "shard_00296.bin",
+    "shard_00297.bin",
+    "shard_00298.bin",
+    "shard_00299.bin",
+    "shard_00300.bin"
+  ],
+  "lang_counts": {
+    "kat_Latn": {
+      "docs": 47431,
+      "tokens": 2669983,
+      "bytes": 8146349
+    },
+    "ada_Latn": {
+      "docs": 7,
+      "tokens": 82,
+      "bytes": 194
+    },
+    "cmn_Hani": {
+      "docs": 57481,
+      "tokens": 992692,
+      "bytes": 2159962
+    },
+    "gcf_Latn": {
+      "docs": 326,
+      "tokens": 4868,
+      "bytes": 11464
+    },
+    "crs_Latn": {
+      "docs": 3,
+      "tokens": 97,
+      "bytes": 271
+    },
+    "niu_Latn": {
+      "docs": 5,
+      "tokens": 80,
+      "bytes": 180
+    },
+    "bsb_Latn": {
+      "docs": 61233,
+      "tokens": 4110901,
+      "bytes": 12414002
+    },
+    "mah_Latn": {
+      "docs": 29,
+      "tokens": 1195,
+      "bytes": 2823
+    },
+    "gil_Latn": {
+      "docs": 2,
+      "tokens": 47,
+      "bytes": 102
+    },
+    "hrx_Latn": {
+      "docs": 257,
+      "tokens": 4223,
+      "bytes": 10306
+    },
+    "fon_Latn": {
+      "docs": 38734,
+      "tokens": 1062506,
+      "bytes": 3035866
+    },
+    "dzo_Tibt": {
+      "docs": 43903,
+      "tokens": 2833825,
+      "bytes": 11438602
+    },
+    "enm_Latn": {
+      "docs": 30,
+      "tokens": 1143,
+      "bytes": 3215
+    },
+    "kab_Latn": {
+      "docs": 165219,
+      "tokens": 4530543,
+      "bytes": 10948722
+    },
+    "ach_Latn": {
+      "docs": 181,
+      "tokens": 8949,
+      "bytes": 24783
+    },
+    "deu_Latn": {
+      "docs": 5884134,
+      "tokens": 214090121,
+      "bytes": 594340046
+    },
+    "jav_Latn": {
+      "docs": 445618,
+      "tokens": 18054979,
+      "bytes": 54467316
+    },
+    "gaa_Latn": {
+      "docs": 1,
+      "tokens": 18,
+      "bytes": 43
+    },
+    "hrv_Latn": {
+      "docs": 5840877,
+      "tokens": 188329752,
+      "bytes": 488184635
+    },
+    "afb_Arab": {
+      "docs": 181359,
+      "tokens": 5348424,
+      "bytes": 19890176
+    },
+    "ngl_Latn": {
+      "docs": 13,
+      "tokens": 409,
+      "bytes": 908
+    },
+    "bos_Latn": {
+      "docs": 5838171,
+      "tokens": 192187523,
+      "bytes": 498319281
+    },
+    "cos_Latn": {
+      "docs": 3002576,
+      "tokens": 157414173,
+      "bytes": 432549468
+    },
+    "bre_Latn": {
+      "docs": 728464,
+      "tokens": 41674153,
+      "bytes": 104892402
+    },
+    "ber_Latn": {
+      "docs": 261226,
+      "tokens": 5490227,
+      "bytes": 12691855
+    },
+    "iba_Latn": {
+      "docs": 19,
+      "tokens": 581,
+      "bytes": 1691
+    },
+    "lij_Latn": {
+      "docs": 39911,
+      "tokens": 3170503,
+      "bytes": 8838333
+    },
+    "mlg_Latn": {
+      "docs": 3694049,
+      "tokens": 252802691,
+      "bytes": 707664637
+    },
+    "ekk_Latn": {
+      "docs": 578309,
+      "tokens": 23855762,
+      "bytes": 63084424
+    },
+    "cat_Latn": {
+      "docs": 5882037,
+      "tokens": 280896720,
+      "bytes": 849489357
+    },
+    "epo_Latn": {
+      "docs": 5883775,
+      "tokens": 234838639,
+      "bytes": 655127713
+    },
+    "ibo_Latn": {
+      "docs": 1513407,
+      "tokens": 105602882,
+      "bytes": 295385253
+    },
+    "ind_Latn": {
+      "docs": 5883193,
+      "tokens": 166012419,
+      "bytes": 575445866
+    },
+    "ceb_Latn": {
+      "docs": 5878814,
+      "tokens": 383536153,
+      "bytes": 1096193016
+    },
+    "fin_Latn": {
+      "docs": 5882912,
+      "tokens": 242830370,
+      "bytes": 647444760
+    },
+    "ido_Latn": {
+      "docs": 328275,
+      "tokens": 17060368,
+      "bytes": 46635029
+    },
+    "kat_Geor": {
+      "docs": 989983,
+      "tokens": 119918314,
+      "bytes": 645046494
+    },
+    "kmr_Latn": {
+      "docs": 8630,
+      "tokens": 347768,
+      "bytes": 925531
+    },
+    "fra_Latn": {
+      "docs": 5883814,
+      "tokens": 174906419,
+      "bytes": 545648535
+    },
+    "ast_Latn": {
+      "docs": 4676543,
+      "tokens": 296809281,
+      "bytes": 910965543
+    },
+    "msa_Latn": {
+      "docs": 3889309,
+      "tokens": 194273748,
+      "bytes": 660353478
+    },
+    "glv_Latn": {
+      "docs": 43500,
+      "tokens": 2670812,
+      "bytes": 6477231
+    },
+    "aka_Latn": {
+      "docs": 21063,
+      "tokens": 633049,
+      "bytes": 1827936
+    },
+    "hau_Latn": {
+      "docs": 4339043,
+      "tokens": 245858262,
+      "bytes": 708905724
+    },
+    "kor_Hang": {
+      "docs": 5884106,
+      "tokens": 400952644,
+      "bytes": 918232707
+    },
+    "miq_Latn": {
+      "docs": 4,
+      "tokens": 133,
+      "bytes": 302
+    },
+    "mri_Latn": {
+      "docs": 2012128,
+      "tokens": 134801568,
+      "bytes": 399166230
+    },
+    "lmo_Latn": {
+      "docs": 339845,
+      "tokens": 22065079,
+      "bytes": 60148219
+    },
+    "mad_Latn": {
+      "docs": 8965,
+      "tokens": 272685,
+      "bytes": 933390
+    },
+    "dtp_Latn": {
+      "docs": 1355,
+      "tokens": 29577,
+      "bytes": 78872
+    },
+    "nan_Latn": {
+      "docs": 618393,
+      "tokens": 38670845,
+      "bytes": 80529098
+    },
+    "bcl_Latn": {
+      "docs": 69740,
+      "tokens": 5228168,
+      "bytes": 15912505
+    },
+    "kmb_Latn": {
+      "docs": 1992,
+      "tokens": 93577,
+      "bytes": 284024
+    },
+    "gom_Latn": {
+      "docs": 65728,
+      "tokens": 3313564,
+      "bytes": 8603488
+    },
+    "fas_Arab": {
+      "docs": 5881564,
+      "tokens": 196368442,
+      "bytes": 949895147
+    },
+    "min_Latn": {
+      "docs": 579368,
+      "tokens": 24157306,
+      "bytes": 76846175
+    },
+    "bqc_Latn": {
+      "docs": 31394,
+      "tokens": 1568155,
+      "bytes": 3657969
+    },
+    "fur_Latn": {
+      "docs": 27397,
+      "tokens": 1371289,
+      "bytes": 4429437
+    },
+    "hmo_Latn": {
+      "docs": 30441,
+      "tokens": 1980895,
+      "bytes": 5534012
+    },
+    "kon_Latn": {
+      "docs": 4108,
+      "tokens": 166568,
+      "bytes": 514407
+    },
+    "eus_Latn": {
+      "docs": 5883658,
+      "tokens": 230751243,
+      "bytes": 627846843
+    },
+    "fil_Latn": {
+      "docs": 5865969,
+      "tokens": 382909374,
+      "bytes": 1139672279
+    },
+    "ilo_Latn": {
+      "docs": 146569,
+      "tokens": 6876304,
+      "bytes": 20527944
+    },
+    "mlt_Latn": {
+      "docs": 5879831,
+      "tokens": 401529249,
+      "bytes": 1033407840
+    },
+    "mon_Latn": {
+      "docs": 427339,
+      "tokens": 30194060,
+      "bytes": 76580884
+    },
+    "ful_Latn": {
+      "docs": 38836,
+      "tokens": 3370085,
+      "bytes": 9279199
+    },
+    "ndo_Latn": {
+      "docs": 13531,
+      "tokens": 703035,
+      "bytes": 1938401
+    },
+    "bzj_Latn": {
+      "docs": 7520,
+      "tokens": 416916,
+      "bytes": 1096154
+    },
+    "diq_Latn": {
+      "docs": 126470,
+      "tokens": 6318203,
+      "bytes": 15789544
+    },
+    "hbo_Hebr": {
+      "docs": 68,
+      "tokens": 9061,
+      "bytes": 13632
+    },
+    "aln_Latn": {
+      "docs": 30130,
+      "tokens": 1553925,
+      "bytes": 4330432
+    },
+    "ary_Arab": {
+      "docs": 45773,
+      "tokens": 1387407,
+      "bytes": 5841106
+    },
+    "lim_Latn": {
+      "docs": 647060,
+      "tokens": 32658667,
+      "bytes": 88981817
+    },
+    "mos_Latn": {
+      "docs": 2024,
+      "tokens": 97241,
+      "bytes": 266148
+    },
+    "mzn_Arab": {
+      "docs": 71541,
+      "tokens": 3860452,
+      "bytes": 15403897
+    },
+    "cak_Latn": {
+      "docs": 109275,
+      "tokens": 9408437,
+      "bytes": 22062869
+    },
+    "est_Latn": {
+      "docs": 5879640,
+      "tokens": 234458553,
+      "bytes": 614482764
+    },
+    "guj_Deva": {
+      "docs": 46384,
+      "tokens": 3739448,
+      "bytes": 19055777
+    },
+    "apc_Arab": {
+      "docs": 100196,
+      "tokens": 2587394,
+      "bytes": 10584046
+    },
+    "kaa_Latn": {
+      "docs": 6570,
+      "tokens": 775643,
+      "bytes": 2006504
+    },
+    "ewe_Latn": {
+      "docs": 37473,
+      "tokens": 1326343,
+      "bytes": 3689229
+    },
+    "cjk_Latn": {
+      "docs": 1981,
+      "tokens": 91442,
+      "bytes": 272487
+    },
+    "chk_Latn": {
+      "docs": 30363,
+      "tokens": 1746238,
+      "bytes": 4557241
+    },
+    "csb_Latn": {
+      "docs": 31294,
+      "tokens": 2020571,
+      "bytes": 4734439
+    },
+    "ban_Latn": {
+      "docs": 47999,
+      "tokens": 1625467,
+      "bytes": 5970466
+    },
+    "gle_Latn": {
+      "docs": 5868868,
+      "tokens": 406075855,
+      "bytes": 1100153339
+    },
+    "aym_Latn": {
+      "docs": 33279,
+      "tokens": 1496388,
+      "bytes": 3955461
+    },
+    "lug_Latn": {
+      "docs": 531621,
+      "tokens": 28033370,
+      "bytes": 75394631
+    },
+    "dyu_Latn": {
+      "docs": 1982,
+      "tokens": 88426,
+      "bytes": 273008
+    },
+    "ita_Latn": {
+      "docs": 5883452,
+      "tokens": 184406530,
+      "bytes": 605963235
+    },
+    "jbo_Latn": {
+      "docs": 30224,
+      "tokens": 1340260,
+      "bytes": 2986042
+    },
+    "kos_Latn": {
+      "docs": 11578,
+      "tokens": 609331,
+      "bytes": 1657028
+    },
+    "lhu_Latn": {
+      "docs": 477,
+      "tokens": 52036,
+      "bytes": 90855
+    },
+    "mgh_Latn": {
+      "docs": 2289,
+      "tokens": 103413,
+      "bytes": 275982
+    },
+    "ara_Arab": {
+      "docs": 5884194,
+      "tokens": 167663619,
+      "bytes": 755954367
+    },
+    "dan_Latn": {
+      "docs": 5882534,
+      "tokens": 206408741,
+      "bytes": 583760049
+    },
+    "kin_Latn": {
+      "docs": 394057,
+      "tokens": 33417151,
+      "bytes": 95269885
+    },
+    "lin_Latn": {
+      "docs": 87571,
+      "tokens": 4339906,
+      "bytes": 12391763
+    },
+    "gsw_Latn": {
+      "docs": 437842,
+      "tokens": 18329938,
+      "bytes": 46815164
+    },
+    "jam_Latn": {
+      "docs": 3028,
+      "tokens": 379788,
+      "bytes": 1301892
+    },
+    "hus_Latn": {
+      "docs": 15505,
+      "tokens": 1178220,
+      "bytes": 2960831
+    },
+    "mhr_Cyrl": {
+      "docs": 91416,
+      "tokens": 5924075,
+      "bytes": 24180327
+    },
+    "bar_Latn": {
+      "docs": 347990,
+      "tokens": 19552356,
+      "bytes": 48767126
+    },
+    "kal_Latn": {
+      "docs": 218557,
+      "tokens": 17694634,
+      "bytes": 45695478
+    },
+    "meu_Latn": {
+      "docs": 30109,
+      "tokens": 1584472,
+      "bytes": 4244675
+    },
+    "fao_Latn": {
+      "docs": 2330671,
+      "tokens": 136677024,
+      "bytes": 376360876
+    },
+    "hnj_Latn": {
+      "docs": 60,
+      "tokens": 5106,
+      "bytes": 12670
+    },
+    "bjn_Latn": {
+      "docs": 46653,
+      "tokens": 2182383,
+      "bytes": 7444317
+    },
+    "heb_Hebr": {
+      "docs": 5885035,
+      "tokens": 198339399,
+      "bytes": 569597115
+    },
+    "ces_Latn": {
+      "docs": 5883636,
+      "tokens": 227338240,
+      "bytes": 571979968
+    },
+    "khm_Khmr": {
+      "docs": 557403,
+      "tokens": 104396613,
+      "bytes": 332678008
+    },
+    "arz_Arab": {
+      "docs": 3481933,
+      "tokens": 102485309,
+      "bytes": 433669382
+    },
+    "bam_Latn": {
+      "docs": 19503,
+      "tokens": 748820,
+      "bytes": 2385721
+    },
+    "kam_Latn": {
+      "docs": 2015,
+      "tokens": 91604,
+      "bytes": 262856
+    },
+    "azb_Arab": {
+      "docs": 1880,
+      "tokens": 114277,
+      "bytes": 529585
+    },
+    "nds_Latn": {
+      "docs": 930482,
+      "tokens": 50627170,
+      "bytes": 133520210
+    },
+    "alt_Cyrl": {
+      "docs": 10349,
+      "tokens": 463783,
+      "bytes": 1878733
+    },
+    "ext_Latn": {
+      "docs": 28159,
+      "tokens": 1660780,
+      "bytes": 4911400
+    },
+    "als_Latn": {
+      "docs": 2948307,
+      "tokens": 157029763,
+      "bytes": 437275314
+    },
+    "nch_Latn": {
+      "docs": 7862,
+      "tokens": 593967,
+      "bytes": 1512056
+    },
+    "crh_Cyrl": {
+      "docs": 7520,
+      "tokens": 377929,
+      "bytes": 1497023
+    },
+    "hat_Latn": {
+      "docs": 3185475,
+      "tokens": 201245672,
+      "bytes": 563766498
+    },
+    "gcr_Latn": {
+      "docs": 1,
+      "tokens": 55,
+      "bytes": 119
+    },
+    "gug_Latn": {
+      "docs": 7782,
+      "tokens": 357821,
+      "bytes": 1058140
+    },
+    "ixl_Latn": {
+      "docs": 22823,
+      "tokens": 2123430,
+      "bytes": 4186378
+    },
+    "chv_Cyrl": {
+      "docs": 855930,
+      "tokens": 45908365,
+      "bytes": 173639320
+    },
+    "hbs_Latn": {
+      "docs": 5878860,
+      "tokens": 471519004,
+      "bytes": 1253178655
+    },
+    "kom_Cyrl": {
+      "docs": 33127,
+      "tokens": 2024784,
+      "bytes": 7034378
+    },
+    "abk_Cyrl": {
+      "docs": 319486,
+      "tokens": 19112704,
+      "bytes": 51997584
+    },
+    "csy_Latn": {
+      "docs": 4904,
+      "tokens": 260627,
+      "bytes": 724223
+    },
+    "bul_Cyrl": {
+      "docs": 5884563,
+      "tokens": 271838878,
+      "bytes": 1133710669
+    },
+    "hun_Latn": {
+      "docs": 5883451,
+      "tokens": 239055500,
+      "bytes": 600758702
+    },
+    "isl_Latn": {
+      "docs": 5880747,
+      "tokens": 357285698,
+      "bytes": 945904997
+    },
+    "kbp_Latn": {
+      "docs": 10099,
+      "tokens": 1326867,
+      "bytes": 3576525
+    },
+    "ksh_Latn": {
+      "docs": 31633,
+      "tokens": 1647949,
+      "bytes": 4224940
+    },
+    "bak_Latn": {
+      "docs": 72724,
+      "tokens": 3383174,
+      "bytes": 9184444
+    },
+    "ksd_Latn": {
+      "docs": 29546,
+      "tokens": 1495524,
+      "bytes": 4270601
+    },
+    "che_Cyrl": {
+      "docs": 691472,
+      "tokens": 33942931,
+      "bytes": 121469039
+    },
+    "hin_Latn": {
+      "docs": 413052,
+      "tokens": 17247917,
+      "bytes": 53943384
+    },
+    "ikk_Latn": {
+      "docs": 7716,
+      "tokens": 523604,
+      "bytes": 1321875
+    },
+    "crh_Latn": {
+      "docs": 37367,
+      "tokens": 1644617,
+      "bytes": 5006830
+    },
+    "fij_Latn": {
+      "docs": 11588,
+      "tokens": 620212,
+      "bytes": 1858296
+    },
+    "bis_Latn": {
+      "docs": 2098,
+      "tokens": 82076,
+      "bytes": 229629
+    },
+    "luo_Latn": {
+      "docs": 7015,
+      "tokens": 303103,
+      "bytes": 877569
+    },
+    "ngu_Latn": {
+      "docs": 8049,
+      "tokens": 599288,
+      "bytes": 1447353
+    },
+    "hil_Latn": {
+      "docs": 115,
+      "tokens": 3311,
+      "bytes": 9746
+    },
+    "hmn_Latn": {
+      "docs": 1732210,
+      "tokens": 134201393,
+      "bytes": 332724697
+    },
+    "guj_Gujr": {
+      "docs": 5883757,
+      "tokens": 529274694,
+      "bytes": 1814185154
+    },
+    "lzh_Hani": {
+      "docs": 61191,
+      "tokens": 5039761,
+      "bytes": 10585250
+    },
+    "ksw_Mymr": {
+      "docs": 25,
+      "tokens": 1355,
+      "bytes": 3479
+    },
+    "mai_Deva": {
+      "docs": 39437,
+      "tokens": 4185603,
+      "bytes": 15229354
+    },
+    "mkd_Cyrl": {
+      "docs": 5882906,
+      "tokens": 338675756,
+      "bytes": 1473319804
+    },
+    "hbs_Cyrl": {
+      "docs": 4586412,
+      "tokens": 456975179,
+      "bytes": 1834994843
+    },
+    "mam_Latn": {
+      "docs": 47277,
+      "tokens": 3511960,
+      "bytes": 7547611
+    },
+    "grc_Grek": {
+      "docs": 23168,
+      "tokens": 2093483,
+      "bytes": 4810146
+    },
+    "ncj_Latn": {
+      "docs": 7820,
+      "tokens": 518310,
+      "bytes": 1278024
+    },
+    "bem_Latn": {
+      "docs": 2051,
+      "tokens": 101566,
+      "bytes": 319836
+    },
+    "kua_Latn": {
+      "docs": 1,
+      "tokens": 61,
+      "bytes": 153
+    },
+    "lvs_Latn": {
+      "docs": 420933,
+      "tokens": 17589939,
+      "bytes": 46555540
+    },
+    "acm_Arab": {
+      "docs": 42397,
+      "tokens": 1150175,
+      "bytes": 4283522
+    },
+    "amh_Ethi": {
+      "docs": 2829065,
+      "tokens": 376815896,
+      "bytes": 1324382055
+    },
+    "bel_Cyrl": {
+      "docs": 5311128,
+      "tokens": 379313983,
+      "bytes": 1435338468
+    },
+    "ace_Latn": {
+      "docs": 29332,
+      "tokens": 1270210,
+      "bytes": 4080386
+    },
+    "hin_Deva": {
+      "docs": 5876146,
+      "tokens": 423657689,
+      "bytes": 1674217693
+    },
+    "hyw_Armn": {
+      "docs": 50,
+      "tokens": 10009,
+      "bytes": 31188
+    },
+    "lat_Latn": {
+      "docs": 1147823,
+      "tokens": 86323615,
+      "bytes": 265175451
+    },
+    "gor_Latn": {
+      "docs": 24712,
+      "tokens": 1056487,
+      "bytes": 3225803
+    },
+    "lue_Latn": {
+      "docs": 58,
+      "tokens": 3321,
+      "bytes": 9647
+    },
+    "kaa_Cyrl": {
+      "docs": 58514,
+      "tokens": 4426846,
+      "bytes": 19032002
+    },
+    "azj_Latn": {
+      "docs": 1313496,
+      "tokens": 60036295,
+      "bytes": 170134060
+    },
+    "eml_Latn": {
+      "docs": 42526,
+      "tokens": 2108126,
+      "bytes": 5409194
+    },
+    "frr_Latn": {
+      "docs": 53171,
+      "tokens": 2847306,
+      "bytes": 7242527
+    },
+    "lao_Laoo": {
+      "docs": 56061,
+      "tokens": 11275996,
+      "bytes": 43099073
+    },
+    "nap_Latn": {
+      "docs": 39913,
+      "tokens": 2422484,
+      "bytes": 6460986
+    },
+    "kan_Knda": {
+      "docs": 5884274,
+      "tokens": 537284167,
+      "bytes": 1766800982
+    },
+    "cuk_Latn": {
+      "docs": 7701,
+      "tokens": 554749,
+      "bytes": 1263725
+    },
+    "nde_Latn": {
+      "docs": 20893,
+      "tokens": 1488031,
+      "bytes": 4163968
+    },
+    "grn_Latn": {
+      "docs": 85045,
+      "tokens": 4771627,
+      "bytes": 14345182
+    },
+    "kac_Latn": {
+      "docs": 1994,
+      "tokens": 99086,
+      "bytes": 325201
+    },
+    "kur_Arab": {
+      "docs": 131654,
+      "tokens": 11886592,
+      "bytes": 45343193
+    },
+    "kjb_Latn": {
+      "docs": 976,
+      "tokens": 55082,
+      "bytes": 134037
+    },
+    "eng_Latn": {
+      "docs": 5878920,
+      "tokens": 169174680,
+      "bytes": 530360476
+    },
+    "kea_Latn": {
+      "docs": 2073,
+      "tokens": 87151,
+      "bytes": 265365
+    },
+    "kbd_Cyrl": {
+      "docs": 12685,
+      "tokens": 1081044,
+      "bytes": 3268278
+    },
+    "kjh_Cyrl": {
+      "docs": 41263,
+      "tokens": 1407057,
+      "bytes": 5992301
+    },
+    "lua_Latn": {
+      "docs": 2004,
+      "tokens": 89025,
+      "bytes": 277303
+    },
+    "djk_Latn": {
+      "docs": 7785,
+      "tokens": 488617,
+      "bytes": 1337992
+    },
+    "ayr_Latn": {
+      "docs": 1951,
+      "tokens": 95823,
+      "bytes": 269277
+    },
+    "aze_Latn": {
+      "docs": 5877603,
+      "tokens": 525878400,
+      "bytes": 1491361215
+    },
+    "hye_Armn": {
+      "docs": 1411813,
+      "tokens": 167841066,
+      "bytes": 615463885
+    },
+    "lit_Latn": {
+      "docs": 5882116,
+      "tokens": 336631562,
+      "bytes": 899367256
+    },
+    "mzh_Latn": {
+      "docs": 28575,
+      "tokens": 1994449,
+      "bytes": 4771439
+    },
+    "guc_Latn": {
+      "docs": 7491,
+      "tokens": 724279,
+      "bytes": 1822639
+    },
+    "acr_Latn": {
+      "docs": 38547,
+      "tokens": 3042761,
+      "bytes": 6939796
+    },
+    "nep_Deva": {
+      "docs": 1294124,
+      "tokens": 132310671,
+      "bytes": 547964885
+    },
+    "afr_Latn": {
+      "docs": 5154491,
+      "tokens": 182396684,
+      "bytes": 529217956
+    },
+    "kik_Latn": {
+      "docs": 5377,
+      "tokens": 227680,
+      "bytes": 674731
+    },
+    "ile_Latn": {
+      "docs": 38774,
+      "tokens": 1545028,
+      "bytes": 4813571
+    },
+    "kek_Latn": {
+      "docs": 31162,
+      "tokens": 2513502,
+      "bytes": 5686817
+    },
+    "kpg_Latn": {
+      "docs": 28927,
+      "tokens": 1854929,
+      "bytes": 4987848
+    },
+    "bik_Latn": {
+      "docs": 40649,
+      "tokens": 1642556,
+      "bytes": 4862105
+    },
+    "naq_Latn": {
+      "docs": 7832,
+      "tokens": 554435,
+      "bytes": 1034467
+    },
+    "nav_Latn": {
+      "docs": 65505,
+      "tokens": 5215430,
+      "bytes": 11621453
+    },
+    "nbl_Latn": {
+      "docs": 14385,
+      "tokens": 1238191,
+      "bytes": 3397470
+    },
+    "glg_Latn": {
+      "docs": 5880476,
+      "tokens": 240181674,
+      "bytes": 755171611
+    },
+    "bpy_Beng": {
+      "docs": 157885,
+      "tokens": 17034971,
+      "bytes": 64907281
+    },
+    "cab_Latn": {
+      "docs": 7823,
+      "tokens": 550828,
+      "bytes": 1392680
+    },
+    "asm_Beng": {
+      "docs": 1872670,
+      "tokens": 219311586,
+      "bytes": 796559491
+    },
+    "cbk_Latn": {
+      "docs": 15742,
+      "tokens": 936706,
+      "bytes": 3089207
+    },
+    "ctu_Latn": {
+      "docs": 15743,
+      "tokens": 1340714,
+      "bytes": 2785432
+    },
+    "aoj_Latn": {
+      "docs": 15090,
+      "tokens": 1470140,
+      "bytes": 3117102
+    },
+    "hne_Deva": {
+      "docs": 20301,
+      "tokens": 1098965,
+      "bytes": 4149723
+    },
+    "krc_Cyrl": {
+      "docs": 26004,
+      "tokens": 1718489,
+      "bytes": 7038969
+    },
+    "arn_Latn": {
+      "docs": 7933,
+      "tokens": 524158,
+      "bytes": 1366831
+    },
+    "hau_Arab": {
+      "docs": 7501,
+      "tokens": 636255,
+      "bytes": 1746047
+    },
+    "mal_Mlym": {
+      "docs": 5883345,
+      "tokens": 623623662,
+      "bytes": 2049512859
+    },
+    "mps_Latn": {
+      "docs": 7283,
+      "tokens": 655486,
+      "bytes": 1796748
+    },
+    "kir_Cyrl": {
+      "docs": 1331763,
+      "tokens": 76412501,
+      "bytes": 380674005
+    },
+    "haw_Latn": {
+      "docs": 1050317,
+      "tokens": 74660234,
+      "bytes": 188395793
+    },
+    "bak_Cyrl": {
+      "docs": 2240612,
+      "tokens": 143079415,
+      "bytes": 586911947
+    },
+    "ina_Latn": {
+      "docs": 193143,
+      "tokens": 10864348,
+      "bytes": 34401927
+    },
+    "bod_Tibt": {
+      "docs": 243000,
+      "tokens": 57348128,
+      "bytes": 273089557
+    },
+    "mau_Latn": {
+      "docs": 7811,
+      "tokens": 1154077,
+      "bytes": 1688578
+    },
+    "new_Deva": {
+      "docs": 159150,
+      "tokens": 12772240,
+      "bytes": 42740534
+    },
+    "bew_Cyrl": {
+      "docs": 223978,
+      "tokens": 11192142,
+      "bytes": 42261337
+    },
+    "kaz_Cyrl": {
+      "docs": 5879316,
+      "tokens": 424263801,
+      "bytes": 1808944755
+    },
+    "div_Thaa": {
+      "docs": 2409762,
+      "tokens": 353832511,
+      "bytes": 665480318
+    },
+    "cym_Latn": {
+      "docs": 1159220,
+      "tokens": 101192957,
+      "bytes": 246160595
+    },
+    "hui_Latn": {
+      "docs": 33915,
+      "tokens": 2599109,
+      "bytes": 7276065
+    },
+    "mya_Mymr": {
+      "docs": 897746,
+      "tokens": 161549288,
+      "bytes": 687558698
+    },
+    "hsb_Latn": {
+      "docs": 102371,
+      "tokens": 5525173,
+      "bytes": 13637422
+    },
+    "arg_Latn": {
+      "docs": 406274,
+      "tokens": 23464036,
+      "bytes": 70749066
+    },
+    "gym_Latn": {
+      "docs": 7892,
+      "tokens": 717794,
+      "bytes": 1921063
+    },
+    "jpn_Japn": {
+      "docs": 507484,
+      "tokens": 90319647,
+      "bytes": 226976312
+    },
+    "aze_Arab": {
+      "docs": 898642,
+      "tokens": 63299811,
+      "bytes": 254318225
+    },
+    "lus_Latn": {
+      "docs": 114167,
+      "tokens": 6397590,
+      "bytes": 18036236
+    },
+    "ell_Grek": {
+      "docs": 5884578,
+      "tokens": 286910086,
+      "bytes": 942901907
+    },
+    "mco_Latn": {
+      "docs": 7781,
+      "tokens": 946272,
+      "bytes": 1629292
+    },
+    "hif_Latn": {
+      "docs": 134628,
+      "tokens": 15862626,
+      "bytes": 58738034
+    },
+    "arb_Arab": {
+      "docs": 9691,
+      "tokens": 908277,
+      "bytes": 2389158
+    },
+    "ckb_Arab": {
+      "docs": 853826,
+      "tokens": 103976528,
+      "bytes": 409164094
+    },
+    "kur_Latn": {
+      "docs": 399179,
+      "tokens": 50654660,
+      "bytes": 167660733
+    },
+    "mar_Deva": {
+      "docs": 5882985,
+      "tokens": 464881375,
+      "bytes": 1675906982
+    },
+    "mwl_Latn": {
+      "docs": 146518,
+      "tokens": 10681719,
+      "bytes": 31199585
+    },
+    "ajp_Arab": {
+      "docs": 81195,
+      "tokens": 2851196,
+      "bytes": 10808971
+    },
+    "knv_Latn": {
+      "docs": 29915,
+      "tokens": 3234454,
+      "bytes": 7906703
+    },
+    "mon_Cyrl": {
+      "docs": 4603012,
+      "tokens": 459763233,
+      "bytes": 1924835859
+    },
+    "iku_Cans": {
+      "docs": 462990,
+      "tokens": 123001321,
+      "bytes": 129113679
+    },
+    "fry_Latn": {
+      "docs": 923835,
+      "tokens": 44498283,
+      "bytes": 122137677
+    },
+    "ahk_Latn": {
+      "docs": 911,
+      "tokens": 110308,
+      "bytes": 180867
+    },
+    "lfn_Latn": {
+      "docs": 39555,
+      "tokens": 2472734,
+      "bytes": 7773152
+    },
+    "myv_Cyrl": {
+      "docs": 33089,
+      "tokens": 2060414,
+      "bytes": 8122807
+    },
+    "bih_Deva": {
+      "docs": 29530,
+      "tokens": 3189172,
+      "bytes": 12210815
+    },
+    "ltz_Latn": {
+      "docs": 5873635,
+      "tokens": 366355713,
+      "bytes": 943823424
+    },
+    "gla_Latn": {
+      "docs": 123886,
+      "tokens": 10024943,
+      "bytes": 27099154
+    },
+    "gom_Deva": {
+      "docs": 58623,
+      "tokens": 7053924,
+      "bytes": 25943463
+    },
+    "pau_Latn": {
+      "docs": 3,
+      "tokens": 64,
+      "bytes": 142
+    },
+    "ron_Latn": {
+      "docs": 5883470,
+      "tokens": 217350579,
+      "bytes": 612508437
+    },
+    "tso_Latn": {
+      "docs": 117742,
+      "tokens": 5222057,
+      "bytes": 16307877
+    },
+    "zho_Hani": {
+      "docs": 5882044,
+      "tokens": 182538342,
+      "bytes": 394965021
+    },
+    "sqi_Latn": {
+      "docs": 5467735,
+      "tokens": 289439050,
+      "bytes": 928222063
+    },
+    "toi_Latn": {
+      "docs": 1,
+      "tokens": 15,
+      "bytes": 38
+    },
+    "teo_Latn": {
+      "docs": 9,
+      "tokens": 259,
+      "bytes": 668
+    },
+    "vie_Latn": {
+      "docs": 5882879,
+      "tokens": 238246619,
+      "bytes": 700789374
+    },
+    "tsn_Latn": {
+      "docs": 312276,
+      "tokens": 13917180,
+      "bytes": 38716123
+    },
+    "vec_Latn": {
+      "docs": 449268,
+      "tokens": 21882869,
+      "bytes": 70221339
+    },
+    "tgl_Latn": {
+      "docs": 5865017,
+      "tokens": 226652156,
+      "bytes": 665966706
+    },
+    "pol_Latn": {
+      "docs": 5883392,
+      "tokens": 242163009,
+      "bytes": 642346131
+    },
+    "spa_Latn": {
+      "docs": 5880829,
+      "tokens": 196050591,
+      "bytes": 641737146
+    },
+    "plt_Latn": {
+      "docs": 188445,
+      "tokens": 7507780,
+      "bytes": 20322062
+    },
+    "swc_Latn": {
+      "docs": 15181,
+      "tokens": 378817,
+      "bytes": 1069263
+    },
+    "tlh_Latn": {
+      "docs": 2266,
+      "tokens": 60943,
+      "bytes": 107901
+    },
+    "rmy_Latn": {
+      "docs": 2640,
+      "tokens": 110604,
+      "bytes": 304128
+    },
+    "nno_Latn": {
+      "docs": 4854164,
+      "tokens": 214141644,
+      "bytes": 622216514
+    },
+    "wbm_Latn": {
+      "docs": 4,
+      "tokens": 190,
+      "bytes": 467
+    },
+    "pap_Latn": {
+      "docs": 145434,
+      "tokens": 5756317,
+      "bytes": 18082718
+    },
+    "tur_Latn": {
+      "docs": 5884364,
+      "tokens": 184498557,
+      "bytes": 528515730
+    },
+    "pag_Latn": {
+      "docs": 11747,
+      "tokens": 379777,
+      "bytes": 1105381
+    },
+    "tvl_Latn": {
+      "docs": 2,
+      "tokens": 34,
+      "bytes": 74
+    },
+    "pms_Latn": {
+      "docs": 225223,
+      "tokens": 11858880,
+      "bytes": 31908109
+    },
+    "som_Latn": {
+      "docs": 3907985,
+      "tokens": 282676957,
+      "bytes": 777994983
+    },
+    "tha_Thai": {
+      "docs": 5882445,
+      "tokens": 477683929,
+      "bytes": 2029492264
+    },
+    "zsm_Latn": {
+      "docs": 848490,
+      "tokens": 27475509,
+      "bytes": 92419634
+    },
+    "pon_Latn": {
+      "docs": 52066,
+      "tokens": 2601021,
+      "bytes": 6775251
+    },
+    "ton_Latn": {
+      "docs": 4580,
+      "tokens": 278883,
+      "bytes": 679593
+    },
+    "wol_Latn": {
+      "docs": 91757,
+      "tokens": 3890643,
+      "bytes": 9552088
+    },
+    "que_Latn": {
+      "docs": 147652,
+      "tokens": 6672376,
+      "bytes": 18299427
+    },
+    "tls_Latn": {
+      "docs": 48216,
+      "tokens": 1437148,
+      "bytes": 4390267
+    },
+    "pes_Arab": {
+      "docs": 18753,
+      "tokens": 370237,
+      "bytes": 1714727
+    },
+    "run_Latn": {
+      "docs": 41505,
+      "tokens": 6544422,
+      "bytes": 19664848
+    },
+    "por_Latn": {
+      "docs": 5883539,
+      "tokens": 187463864,
+      "bytes": 571980599
+    },
+    "oci_Latn": {
+      "docs": 1437256,
+      "tokens": 81618151,
+      "bytes": 241969489
+    },
+    "slv_Latn": {
+      "docs": 5883109,
+      "tokens": 199855745,
+      "bytes": 516473594
+    },
+    "tah_Latn": {
+      "docs": 1343,
+      "tokens": 56792,
+      "bytes": 151495
+    },
+    "srp_Latn": {
+      "docs": 5847066,
+      "tokens": 133386456,
+      "bytes": 333978404
+    },
+    "nor_Latn": {
+      "docs": 5872122,
+      "tokens": 218572407,
+      "bytes": 636165355
+    },
+    "yom_Latn": {
+      "docs": 7379,
+      "tokens": 320602,
+      "bytes": 897091
+    },
+    "scn_Latn": {
+      "docs": 180478,
+      "tokens": 10645776,
+      "bytes": 32978612
+    },
+    "sme_Latn": {
+      "docs": 137020,
+      "tokens": 10273450,
+      "bytes": 24692375
+    },
+    "quy_Latn": {
+      "docs": 1984,
+      "tokens": 90767,
+      "bytes": 275229
+    },
+    "wal_Latn": {
+      "docs": 29714,
+      "tokens": 1720145,
+      "bytes": 4283940
+    },
+    "qub_Latn": {
+      "docs": 61,
+      "tokens": 2783,
+      "bytes": 7254
+    },
+    "snd_Arab": {
+      "docs": 476996,
+      "tokens": 16547307,
+      "bytes": 62552869
+    },
+    "xho_Latn": {
+      "docs": 1184088,
+      "tokens": 78824509,
+      "bytes": 216331054
+    },
+    "sat_Olck": {
+      "docs": 37549,
+      "tokens": 5296908,
+      "bytes": 25817689
+    },
+    "slk_Latn": {
+      "docs": 5882432,
+      "tokens": 260133629,
+      "bytes": 669212247
+    },
+    "swa_Latn": {
+      "docs": 5879959,
+      "tokens": 244544622,
+      "bytes": 688274270
+    },
+    "uig_Latn": {
+      "docs": 1666,
+      "tokens": 82138,
+      "bytes": 213554
+    },
+    "sgs_Latn": {
+      "docs": 40338,
+      "tokens": 2298554,
+      "bytes": 5327720
+    },
+    "pfl_Latn": {
+      "docs": 31039,
+      "tokens": 1740311,
+      "bytes": 4492484
+    },
+    "tgk_Latn": {
+      "docs": 626175,
+      "tokens": 45582624,
+      "bytes": 123318309
+    },
+    "ven_Latn": {
+      "docs": 48387,
+      "tokens": 2914282,
+      "bytes": 7484111
+    },
+    "tdt_Latn": {
+      "docs": 7026,
+      "tokens": 410637,
+      "bytes": 1124282
+    },
+    "rug_Latn": {
+      "docs": 28920,
+      "tokens": 1782991,
+      "bytes": 4852765
+    },
+    "prs_Arab": {
+      "docs": 10753,
+      "tokens": 460242,
+      "bytes": 2441564
+    },
+    "war_Latn": {
+      "docs": 2448976,
+      "tokens": 130845239,
+      "bytes": 398220170
+    },
+    "pcd_Latn": {
+      "docs": 29121,
+      "tokens": 1285430,
+      "bytes": 3317931
+    },
+    "swe_Latn": {
+      "docs": 5883375,
+      "tokens": 201677899,
+      "bytes": 582543898
+    },
+    "urd_Arab": {
+      "docs": 5876341,
+      "tokens": 258738108,
+      "bytes": 1152311640
+    },
+    "tok_Latn": {
+      "docs": 40817,
+      "tokens": 678219,
+      "bytes": 1825191
+    },
+    "wuu_Hani": {
+      "docs": 221794,
+      "tokens": 13930752,
+      "bytes": 31551865
+    },
+    "rap_Latn": {
+      "docs": 442,
+      "tokens": 14432,
+      "bytes": 32836
+    },
+    "tum_Latn": {
+      "docs": 9941,
+      "tokens": 440865,
+      "bytes": 1355930
+    },
+    "zlm_Latn": {
+      "docs": 30474,
+      "tokens": 1323317,
+      "bytes": 4428368
+    },
+    "pis_Latn": {
+      "docs": 348,
+      "tokens": 31160,
+      "bytes": 85975
+    },
+    "vol_Latn": {
+      "docs": 307804,
+      "tokens": 17325471,
+      "bytes": 41427542
+    },
+    "swh_Latn": {
+      "docs": 43747,
+      "tokens": 1749189,
+      "bytes": 5031214
+    },
+    "sah_Cyrl": {
+      "docs": 344875,
+      "tokens": 45435885,
+      "bytes": 215817731
+    },
+    "sin_Sinh": {
+      "docs": 5879028,
+      "tokens": 411947530,
+      "bytes": 1380957749
+    },
+    "poh_Latn": {
+      "docs": 37979,
+      "tokens": 3562698,
+      "bytes": 8170419
+    },
+    "srd_Latn": {
+      "docs": 115831,
+      "tokens": 6807051,
+      "bytes": 21201664
+    },
+    "wln_Latn": {
+      "docs": 1251911,
+      "tokens": 43856270,
+      "bytes": 127369352
+    },
+    "ukr_Cyrl": {
+      "docs": 5883896,
+      "tokens": 346479879,
+      "bytes": 1414948717
+    },
+    "yue_Hani": {
+      "docs": 482993,
+      "tokens": 31687600,
+      "bytes": 70416067
+    },
+    "tuk_Latn": {
+      "docs": 312168,
+      "tokens": 18238519,
+      "bytes": 50242095
+    },
+    "nyu_Latn": {
+      "docs": 1948,
+      "tokens": 93264,
+      "bytes": 255632
+    },
+    "srp_Cyrl": {
+      "docs": 3859503,
+      "tokens": 162351668,
+      "bytes": 647276994
+    },
+    "umb_Latn": {
+      "docs": 1989,
+      "tokens": 91594,
+      "bytes": 267942
+    },
+    "tgk_Cyrl": {
+      "docs": 5847183,
+      "tokens": 599380942,
+      "bytes": 2397432345
+    },
+    "zai_Latn": {
+      "docs": 7868,
+      "tokens": 395288,
+      "bytes": 1028150
+    },
+    "tgk_Arab": {
+      "docs": 158375,
+      "tokens": 14458313,
+      "bytes": 59342785
+    },
+    "yao_Latn": {
+      "docs": 4975,
+      "tokens": 288020,
+      "bytes": 781985
+    },
+    "nnb_Latn": {
+      "docs": 7102,
+      "tokens": 232022,
+      "bytes": 606897
+    },
+    "pls_Latn": {
+      "docs": 10601,
+      "tokens": 772482,
+      "bytes": 2007522
+    },
+    "vls_Latn": {
+      "docs": 99554,
+      "tokens": 5238208,
+      "bytes": 13860807
+    },
+    "szl_Latn": {
+      "docs": 109540,
+      "tokens": 6807278,
+      "bytes": 17982670
+    },
+    "zea_Latn": {
+      "docs": 32336,
+      "tokens": 1663057,
+      "bytes": 4431292
+    },
+    "rue_Cyrl": {
+      "docs": 43358,
+      "tokens": 3355921,
+      "bytes": 12502147
+    },
+    "rmy_Cyrl": {
+      "docs": 1,
+      "tokens": 38,
+      "bytes": 154
+    },
+    "sag_Latn": {
+      "docs": 10439,
+      "tokens": 510162,
+      "bytes": 1581130
+    },
+    "udm_Cyrl": {
+      "docs": 28089,
+      "tokens": 1538625,
+      "bytes": 6116408
+    },
+    "seh_Latn": {
+      "docs": 6877,
+      "tokens": 346720,
+      "bytes": 966949
+    },
+    "sna_Latn": {
+      "docs": 2600429,
+      "tokens": 175935593,
+      "bytes": 487933205
+    },
+    "nso_Latn": {
+      "docs": 157316,
+      "tokens": 8049361,
+      "bytes": 22972257
+    },
+    "qvi_Latn": {
+      "docs": 7644,
+      "tokens": 538090,
+      "bytes": 1412285
+    },
+    "uig_Arab": {
+      "docs": 296564,
+      "tokens": 25388370,
+      "bytes": 94868294
+    },
+    "nld_Latn": {
+      "docs": 5883193,
+      "tokens": 191691703,
+      "bytes": 564139898
+    },
+    "tuc_Latn": {
+      "docs": 24024,
+      "tokens": 1714651,
+      "bytes": 4484573
+    },
+    "tat_Cyrl": {
+      "docs": 4673767,
+      "tokens": 275835151,
+      "bytes": 1195413745
+    },
+    "quw_Latn": {
+      "docs": 7564,
+      "tokens": 371286,
+      "bytes": 1000346
+    },
+    "roh_Latn": {
+      "docs": 372710,
+      "tokens": 20490737,
+      "bytes": 61466392
+    },
+    "toj_Latn": {
+      "docs": 7799,
+      "tokens": 592166,
+      "bytes": 1514253
+    },
+    "pan_Guru": {
+      "docs": 5883554,
+      "tokens": 554559056,
+      "bytes": 1930248068
+    },
+    "yap_Latn": {
+      "docs": 5015,
+      "tokens": 333262,
+      "bytes": 919858
+    },
+    "ssw_Latn": {
+      "docs": 40049,
+      "tokens": 2693969,
+      "bytes": 7676999
+    },
+    "yor_Latn": {
+      "docs": 1160588,
+      "tokens": 87689917,
+      "bytes": 247925056
+    },
+    "yid_Hebr": {
+      "docs": 217694,
+      "tokens": 31944309,
+      "bytes": 97311407
+    },
+    "san_Deva": {
+      "docs": 153994,
+      "tokens": 9130609,
+      "bytes": 32750700
+    },
+    "uzn_Cyrl": {
+      "docs": 2282177,
+      "tokens": 120876646,
+      "bytes": 471680746
+    },
+    "srn_Latn": {
+      "docs": 9659,
+      "tokens": 444986,
+      "bytes": 1232797
+    },
+    "ory_Orya": {
+      "docs": 5875648,
+      "tokens": 479893002,
+      "bytes": 1582627033
+    },
+    "tyv_Cyrl": {
+      "docs": 58277,
+      "tokens": 3972063,
+      "bytes": 16852036
+    },
+    "orm_Latn": {
+      "docs": 583962,
+      "tokens": 43257353,
+      "bytes": 124839446
+    },
+    "npi_Deva": {
+      "docs": 34618,
+      "tokens": 3650736,
+      "bytes": 13509069
+    },
+    "tbz_Latn": {
+      "docs": 29726,
+      "tokens": 2400325,
+      "bytes": 5303085
+    },
+    "quz_Latn": {
+      "docs": 9,
+      "tokens": 522,
+      "bytes": 1427
+    },
+    "som_Arab": {
+      "docs": 12006,
+      "tokens": 976142,
+      "bytes": 3258786
+    },
+    "ote_Latn": {
+      "docs": 7858,
+      "tokens": 623248,
+      "bytes": 1356811
+    },
+    "quc_Latn": {
+      "docs": 8712,
+      "tokens": 684700,
+      "bytes": 1607010
+    },
+    "sco_Latn": {
+      "docs": 384964,
+      "tokens": 23582036,
+      "bytes": 70221255
+    },
+    "nob_Latn": {
+      "docs": 5874976,
+      "tokens": 231041289,
+      "bytes": 660308675
+    },
+    "tpi_Latn": {
+      "docs": 41890,
+      "tokens": 2221877,
+      "bytes": 7487649
+    },
+    "tzo_Latn": {
+      "docs": 38566,
+      "tokens": 3328072,
+      "bytes": 7301437
+    },
+    "smo_Latn": {
+      "docs": 999779,
+      "tokens": 75623328,
+      "bytes": 205726412
+    },
+    "pnb_Arab": {
+      "docs": 895137,
+      "tokens": 81224201,
+      "bytes": 313538470
+    },
+    "pam_Latn": {
+      "docs": 287618,
+      "tokens": 22249435,
+      "bytes": 67486172
+    },
+    "tat_Latn": {
+      "docs": 38754,
+      "tokens": 2543062,
+      "bytes": 6996868
+    },
+    "quh_Latn": {
+      "docs": 36895,
+      "tokens": 2175305,
+      "bytes": 5793706
+    },
+    "tuk_Cyrl": {
+      "docs": 547,
+      "tokens": 28911,
+      "bytes": 111167
+    },
+    "rop_Latn": {
+      "docs": 28071,
+      "tokens": 1885182,
+      "bytes": 5335000
+    },
+    "oss_Cyrl": {
+      "docs": 69792,
+      "tokens": 6091908,
+      "bytes": 19028743
+    },
+    "suz_Deva": {
+      "docs": 29492,
+      "tokens": 2948945,
+      "bytes": 10884049
+    },
+    "zul_Latn": {
+      "docs": 3516546,
+      "tokens": 248377503,
+      "bytes": 680816737
+    },
+    "vep_Latn": {
+      "docs": 41042,
+      "tokens": 3041862,
+      "bytes": 7688166
+    },
+    "xmf_Geor": {
+      "docs": 79944,
+      "tokens": 8809969,
+      "bytes": 35910409
+    },
+    "srm_Latn": {
+      "docs": 7853,
+      "tokens": 635588,
+      "bytes": 1704473
+    },
+    "tam_Taml": {
+      "docs": 3361175,
+      "tokens": 390977642,
+      "bytes": 1437423212
+    },
+    "pcm_Latn": {
+      "docs": 169260,
+      "tokens": 14154487,
+      "bytes": 42940360
+    },
+    "top_Latn": {
+      "docs": 7822,
+      "tokens": 686242,
+      "bytes": 1619173
+    },
+    "twi_Latn": {
+      "docs": 13682,
+      "tokens": 1231460,
+      "bytes": 3530839
+    },
+    "xav_Latn": {
+      "docs": 14182,
+      "tokens": 2137444,
+      "bytes": 5045014
+    },
+    "pus_Arab": {
+      "docs": 728852,
+      "tokens": 36539449,
+      "bytes": 163069938
+    },
+    "uzb_Cyrl": {
+      "docs": 2983773,
+      "tokens": 278324109,
+      "bytes": 1095202212
+    },
+    "tir_Ethi": {
+      "docs": 55358,
+      "tokens": 17063096,
+      "bytes": 81940704
+    },
+    "nya_Latn": {
+      "docs": 1610543,
+      "tokens": 110290477,
+      "bytes": 317269313
+    },
+    "ori_Orya": {
+      "docs": 398911,
+      "tokens": 58408334,
+      "bytes": 197632567
+    },
+    "tca_Latn": {
+      "docs": 8695,
+      "tokens": 1065952,
+      "bytes": 2333323
+    },
+    "sun_Latn": {
+      "docs": 2540492,
+      "tokens": 141206301,
+      "bytes": 423311368
+    },
+    "uzb_Latn": {
+      "docs": 3166831,
+      "tokens": 241989804,
+      "bytes": 678499642
+    },
+    "sot_Latn": {
+      "docs": 1041023,
+      "tokens": 80496344,
+      "bytes": 225738776
+    },
+    "san_Latn": {
+      "docs": 115,
+      "tokens": 17076,
+      "bytes": 64252
+    }
+  },
+  "lang_token_gini": 0.7673347567283688,
+  "dedup_enabled": true,
+  "dropped_duplicate_docs": 1395152,
+  "dropped_duplicate_bytes": 653196026,
+  "dropped_duplicates_by_lang": {
+    "san_Latn": {
+      "docs": 3,
+      "bytes": 225
+    },
+    "hbo_Hebr": {
+      "docs": 1,
+      "bytes": 225
+    },
+    "srn_Latn": {
+      "docs": 409,
+      "bytes": 122986
+    },
+    "tum_Latn": {
+      "docs": 326,
+      "bytes": 125086
+    },
+    "bik_Latn": {
+      "docs": 3904,
+      "bytes": 456635
+    },
+    "gym_Latn": {
+      "docs": 533,
+      "bytes": 226154
+    },
+    "new_Deva": {
+      "docs": 20186,
+      "bytes": 10784742
+    },
+    "kin_Latn": {
+      "docs": 8501,
+      "bytes": 3128178
+    },
+    "uig_Latn": {
+      "docs": 39,
+      "bytes": 2790
+    },
+    "pcm_Latn": {
+      "docs": 8001,
+      "bytes": 11285776
+    },
+    "srm_Latn": {
+      "docs": 572,
+      "bytes": 192830
+    },
+    "hin_Latn": {
+      "docs": 21565,
+      "bytes": 2827367
+    },
+    "som_Arab": {
+      "docs": 197,
+      "bytes": 49257
+    },
+    "ton_Latn": {
+      "docs": 3,
+      "bytes": 457
+    },
+    "bam_Latn": {
+      "docs": 128,
+      "bytes": 18267
+    },
+    "twi_Latn": {
+      "docs": 556,
+      "bytes": 157128
+    },
+    "nbl_Latn": {
+      "docs": 5846,
+      "bytes": 1401278
+    },
+    "bcl_Latn": {
+      "docs": 10784,
+      "bytes": 1299076
+    },
+    "tca_Latn": {
+      "docs": 554,
+      "bytes": 195255
+    },
+    "chk_Latn": {
+      "docs": 1345,
+      "bytes": 218445
+    },
+    "csb_Latn": {
+      "docs": 217,
+      "bytes": 33608
+    },
+    "ban_Latn": {
+      "docs": 959,
+      "bytes": 103549
+    },
+    "fur_Latn": {
+      "docs": 194,
+      "bytes": 20962
+    },
+    "que_Latn": {
+      "docs": 3944,
+      "bytes": 418485
+    },
+    "wol_Latn": {
+      "docs": 748,
+      "bytes": 160293
+    },
+    "tuk_Cyrl": {
+      "docs": 1,
+      "bytes": 778
+    },
+    "ful_Latn": {
+      "docs": 345,
+      "bytes": 77414
+    },
+    "mad_Latn": {
+      "docs": 90,
+      "bytes": 9153
+    },
+    "bpy_Beng": {
+      "docs": 2950,
+      "bytes": 1288415
+    },
+    "hau_Arab": {
+      "docs": 93,
+      "bytes": 21691
+    },
+    "pon_Latn": {
+      "docs": 1475,
+      "bytes": 241830
+    },
+    "kat_Latn": {
+      "docs": 996,
+      "bytes": 145696
+    },
+    "jam_Latn": {
+      "docs": 13,
+      "bytes": 4194
+    },
+    "run_Latn": {
+      "docs": 300,
+      "bytes": 40922
+    },
+    "nde_Latn": {
+      "docs": 14120,
+      "bytes": 3414081
+    },
+    "tir_Ethi": {
+      "docs": 611,
+      "bytes": 1929190
+    },
+    "gla_Latn": {
+      "docs": 1067,
+      "bytes": 410174
+    },
+    "kik_Latn": {
+      "docs": 26,
+      "bytes": 2546
+    },
+    "rmy_Latn": {
+      "docs": 5,
+      "bytes": 1701
+    },
+    "nso_Latn": {
+      "docs": 3006,
+      "bytes": 550948
+    },
+    "hsb_Latn": {
+      "docs": 385,
+      "bytes": 32965
+    },
+    "bis_Latn": {
+      "docs": 9,
+      "bytes": 2675
+    },
+    "tat_Latn": {
+      "docs": 749,
+      "bytes": 80744
+    },
+    "bih_Deva": {
+      "docs": 126,
+      "bytes": 59055
+    },
+    "jav_Latn": {
+      "docs": 1886,
+      "bytes": 403755
+    },
+    "war_Latn": {
+      "docs": 111093,
+      "bytes": 11315584
+    },
+    "tah_Latn": {
+      "docs": 4,
+      "bytes": 1020
+    },
+    "kaa_Cyrl": {
+      "docs": 24,
+      "bytes": 9099
+    },
+    "kaa_Latn": {
+      "docs": 38,
+      "bytes": 6794
+    },
+    "crh_Cyrl": {
+      "docs": 9,
+      "bytes": 1583
+    },
+    "aka_Latn": {
+      "docs": 1190,
+      "bytes": 319747
+    },
+    "ido_Latn": {
+      "docs": 956,
+      "bytes": 121663
+    },
+    "lij_Latn": {
+      "docs": 177,
+      "bytes": 21344
+    },
+    "srd_Latn": {
+      "docs": 9234,
+      "bytes": 1039195
+    },
+    "san_Deva": {
+      "docs": 1076,
+      "bytes": 297679
+    },
+    "lmo_Latn": {
+      "docs": 2311,
+      "bytes": 467746
+    },
+    "kmr_Latn": {
+      "docs": 30,
+      "bytes": 4149
+    },
+    "swe_Latn": {
+      "docs": 1765,
+      "bytes": 369873
+    },
+    "pcd_Latn": {
+      "docs": 110,
+      "bytes": 7297
+    },
+    "ewe_Latn": {
+      "docs": 23,
+      "bytes": 5437
+    },
+    "bak_Latn": {
+      "docs": 2083,
+      "bytes": 231218
+    },
+    "mai_Deva": {
+      "docs": 418,
+      "bytes": 195887
+    },
+    "ext_Latn": {
+      "docs": 224,
+      "bytes": 20503
+    },
+    "ilo_Latn": {
+      "docs": 895,
+      "bytes": 104796
+    },
+    "knv_Latn": {
+      "docs": 219,
+      "bytes": 112521
+    },
+    "mwl_Latn": {
+      "docs": 648,
+      "bytes": 131761
+    },
+    "mos_Latn": {
+      "docs": 1,
+      "bytes": 56
+    },
+    "npi_Deva": {
+      "docs": 195,
+      "bytes": 84705
+    },
+    "azb_Arab": {
+      "docs": 1,
+      "bytes": 992
+    },
+    "scn_Latn": {
+      "docs": 13605,
+      "bytes": 1750273
+    },
+    "sun_Latn": {
+      "docs": 6410,
+      "bytes": 3431004
+    },
+    "bsb_Latn": {
+      "docs": 403,
+      "bytes": 79227
+    },
+    "ace_Latn": {
+      "docs": 91,
+      "bytes": 9479
+    },
+    "kab_Latn": {
+      "docs": 1734,
+      "bytes": 149927
+    },
+    "nap_Latn": {
+      "docs": 253,
+      "bytes": 33339
+    },
+    "sot_Latn": {
+      "docs": 26246,
+      "bytes": 6300834
+    },
+    "mzn_Arab": {
+      "docs": 169,
+      "bytes": 35041
+    },
+    "ssw_Latn": {
+      "docs": 346,
+      "bytes": 88938
+    },
+    "glv_Latn": {
+      "docs": 124,
+      "bytes": 15736
+    },
+    "suz_Deva": {
+      "docs": 18,
+      "bytes": 5322
+    },
+    "pag_Latn": {
+      "docs": 43,
+      "bytes": 2319
+    },
+    "pnb_Arab": {
+      "docs": 2792,
+      "bytes": 2268614
+    },
+    "nan_Latn": {
+      "docs": 21424,
+      "bytes": 5650148
+    },
+    "swh_Latn": {
+      "docs": 129,
+      "bytes": 15112
+    },
+    "cym_Latn": {
+      "docs": 4056,
+      "bytes": 1245915
+    },
+    "kea_Latn": {
+      "docs": 1,
+      "bytes": 74
+    },
+    "kon_Latn": {
+      "docs": 10,
+      "bytes": 965
+    },
+    "gom_Latn": {
+      "docs": 115,
+      "bytes": 58280
+    },
+    "nav_Latn": {
+      "docs": 10,
+      "bytes": 513
+    },
+    "vec_Latn": {
+      "docs": 6368,
+      "bytes": 801633
+    },
+    "crh_Latn": {
+      "docs": 226,
+      "bytes": 13388
+    },
+    "gor_Latn": {
+      "docs": 118,
+      "bytes": 109980
+    },
+    "bem_Latn": {
+      "docs": 1,
+      "bytes": 63
+    },
+    "ibo_Latn": {
+      "docs": 4295,
+      "bytes": 3852935
+    },
+    "lin_Latn": {
+      "docs": 309,
+      "bytes": 34429
+    },
+    "pfl_Latn": {
+      "docs": 109,
+      "bytes": 33007
+    },
+    "cbk_Latn": {
+      "docs": 79,
+      "bytes": 5378
+    },
+    "kur_Latn": {
+      "docs": 5990,
+      "bytes": 6584877
+    },
+    "ile_Latn": {
+      "docs": 209,
+      "bytes": 26904
+    },
+    "nds_Latn": {
+      "docs": 2741,
+      "bytes": 742100
+    },
+    "ori_Orya": {
+      "docs": 3165,
+      "bytes": 2049802
+    },
+    "fij_Latn": {
+      "docs": 2,
+      "bytes": 439
+    },
+    "hne_Deva": {
+      "docs": 42,
+      "bytes": 9591
+    },
+    "bar_Latn": {
+      "docs": 7889,
+      "bytes": 737536
+    },
+    "tsn_Latn": {
+      "docs": 13968,
+      "bytes": 2574935
+    },
+    "tyv_Cyrl": {
+      "docs": 105,
+      "bytes": 40374
+    },
+    "aze_Arab": {
+      "docs": 4104,
+      "bytes": 3422441
+    },
+    "bod_Tibt": {
+      "docs": 2103,
+      "bytes": 3089364
+    },
+    "kom_Cyrl": {
+      "docs": 38,
+      "bytes": 7832
+    },
+    "swa_Latn": {
+      "docs": 5181,
+      "bytes": 1373296
+    },
+    "ina_Latn": {
+      "docs": 2157,
+      "bytes": 524392
+    },
+    "hif_Latn": {
+      "docs": 3844,
+      "bytes": 4492566
+    },
+    "guj_Deva": {
+      "docs": 478,
+      "bytes": 406518
+    },
+    "wuu_Hani": {
+      "docs": 293,
+      "bytes": 21293
+    },
+    "tgl_Latn": {
+      "docs": 20123,
+      "bytes": 3340900
+    },
+    "tpi_Latn": {
+      "docs": 648,
+      "bytes": 222622
+    },
+    "mhr_Cyrl": {
+      "docs": 141,
+      "bytes": 83106
+    },
+    "wln_Latn": {
+      "docs": 109958,
+      "bytes": 11162755
+    },
+    "frr_Latn": {
+      "docs": 83,
+      "bytes": 7585
+    },
+    "sco_Latn": {
+      "docs": 22627,
+      "bytes": 2951986
+    },
+    "aym_Latn": {
+      "docs": 443,
+      "bytes": 31158
+    },
+    "zea_Latn": {
+      "docs": 90,
+      "bytes": 12986
+    },
+    "sgs_Latn": {
+      "docs": 124,
+      "bytes": 9598
+    },
+    "mon_Latn": {
+      "docs": 8599,
+      "bytes": 4797290
+    },
+    "sag_Latn": {
+      "docs": 13,
+      "bytes": 2488
+    },
+    "tgk_Latn": {
+      "docs": 8311,
+      "bytes": 2844960
+    },
+    "bre_Latn": {
+      "docs": 3475,
+      "bytes": 928159
+    },
+    "pls_Latn": {
+      "docs": 36,
+      "bytes": 13166
+    },
+    "pap_Latn": {
+      "docs": 81,
+      "bytes": 8827
+    },
+    "smo_Latn": {
+      "docs": 5147,
+      "bytes": 2560267
+    },
+    "uzb_Latn": {
+      "docs": 15356,
+      "bytes": 5935315
+    },
+    "bzj_Latn": {
+      "docs": 3,
+      "bytes": 760
+    },
+    "tat_Cyrl": {
+      "docs": 23425,
+      "bytes": 4781628
+    },
+    "sat_Olck": {
+      "docs": 32,
+      "bytes": 33364
+    },
+    "mri_Latn": {
+      "docs": 29691,
+      "bytes": 6616425
+    },
+    "vls_Latn": {
+      "docs": 346,
+      "bytes": 44022
+    },
+    "cos_Latn": {
+      "docs": 8692,
+      "bytes": 5196355
+    },
+    "nep_Deva": {
+      "docs": 4939,
+      "bytes": 3427841
+    },
+    "tgk_Arab": {
+      "docs": 2971,
+      "bytes": 1972602
+    },
+    "diq_Latn": {
+      "docs": 447,
+      "bytes": 64192
+    },
+    "kat_Geor": {
+      "docs": 802,
+      "bytes": 2662254
+    },
+    "dzo_Tibt": {
+      "docs": 197,
+      "bytes": 53086
+    },
+    "lfn_Latn": {
+      "docs": 78,
+      "bytes": 5571
+    },
+    "oci_Latn": {
+      "docs": 3358,
+      "bytes": 832867
+    },
+    "gom_Deva": {
+      "docs": 522,
+      "bytes": 180336
+    },
+    "roh_Latn": {
+      "docs": 1927,
+      "bytes": 817331
+    },
+    "top_Latn": {
+      "docs": 2,
+      "bytes": 541
+    },
+    "ksh_Latn": {
+      "docs": 101,
+      "bytes": 9338
+    },
+    "myv_Cyrl": {
+      "docs": 89,
+      "bytes": 17301
+    },
+    "arb_Arab": {
+      "docs": 6,
+      "bytes": 823
+    },
+    "yue_Hani": {
+      "docs": 757,
+      "bytes": 33490
+    },
+    "jbo_Latn": {
+      "docs": 64,
+      "bytes": 19482
+    },
+    "som_Latn": {
+      "docs": 7913,
+      "bytes": 39711058
+    },
+    "grn_Latn": {
+      "docs": 522,
+      "bytes": 148495
+    },
+    "afr_Latn": {
+      "docs": 2316,
+      "bytes": 641593
+    },
+    "bew_Cyrl": {
+      "docs": 2198,
+      "bytes": 357647
+    },
+    "als_Latn": {
+      "docs": 5568,
+      "bytes": 888823
+    },
+    "ven_Latn": {
+      "docs": 474,
+      "bytes": 76779
+    },
+    "urd_Arab": {
+      "docs": 8799,
+      "bytes": 5581063
+    },
+    "pam_Latn": {
+      "docs": 4675,
+      "bytes": 1651153
+    },
+    "mya_Mymr": {
+      "docs": 13272,
+      "bytes": 11695037
+    },
+    "lao_Laoo": {
+      "docs": 276,
+      "bytes": 332725
+    },
+    "bjn_Latn": {
+      "docs": 224,
+      "bytes": 23173
+    },
+    "lim_Latn": {
+      "docs": 3008,
+      "bytes": 762169
+    },
+    "szl_Latn": {
+      "docs": 180,
+      "bytes": 12055
+    },
+    "tso_Latn": {
+      "docs": 177,
+      "bytes": 100453
+    },
+    "khm_Khmr": {
+      "docs": 8391,
+      "bytes": 7720579
+    },
+    "kjh_Cyrl": {
+      "docs": 14,
+      "bytes": 2621
+    },
+    "ber_Latn": {
+      "docs": 1199,
+      "bytes": 57760
+    },
+    "oss_Cyrl": {
+      "docs": 110,
+      "bytes": 76785
+    },
+    "eml_Latn": {
+      "docs": 103,
+      "bytes": 8726
+    },
+    "ckb_Arab": {
+      "docs": 2137,
+      "bytes": 1697605
+    },
+    "sna_Latn": {
+      "docs": 4605,
+      "bytes": 7533789
+    },
+    "tbz_Latn": {
+      "docs": 62,
+      "bytes": 22654
+    },
+    "lat_Latn": {
+      "docs": 2073,
+      "bytes": 1082480
+    },
+    "lzh_Hani": {
+      "docs": 58,
+      "bytes": 7361
+    },
+    "sme_Latn": {
+      "docs": 787,
+      "bytes": 193474
+    },
+    "bel_Cyrl": {
+      "docs": 7528,
+      "bytes": 2551830
+    },
+    "kbp_Latn": {
+      "docs": 2,
+      "bytes": 1209
+    },
+    "zul_Latn": {
+      "docs": 26636,
+      "bytes": 11790295
+    },
+    "xho_Latn": {
+      "docs": 17173,
+      "bytes": 4041780
+    },
+    "kbd_Cyrl": {
+      "docs": 7,
+      "bytes": 2242
+    },
+    "tuk_Latn": {
+      "docs": 312,
+      "bytes": 59308
+    },
+    "arg_Latn": {
+      "docs": 1759,
+      "bytes": 467889
+    },
+    "acm_Arab": {
+      "docs": 105,
+      "bytes": 10909
+    },
+    "xmf_Geor": {
+      "docs": 126,
+      "bytes": 197312
+    },
+    "nno_Latn": {
+      "docs": 1606,
+      "bytes": 243206
+    },
+    "uig_Arab": {
+      "docs": 2130,
+      "bytes": 761142
+    },
+    "hau_Latn": {
+      "docs": 22614,
+      "bytes": 6705072
+    },
+    "haw_Latn": {
+      "docs": 3351,
+      "bytes": 1442296
+    },
+    "kir_Cyrl": {
+      "docs": 2899,
+      "bytes": 1038906
+    },
+    "tuc_Latn": {
+      "docs": 24,
+      "bytes": 8677
+    },
+    "lug_Latn": {
+      "docs": 1818,
+      "bytes": 363247
+    },
+    "kek_Latn": {
+      "docs": 67,
+      "bytes": 19174
+    },
+    "wal_Latn": {
+      "docs": 11,
+      "bytes": 4138
+    },
+    "snd_Arab": {
+      "docs": 1114,
+      "bytes": 482083
+    },
+    "ary_Arab": {
+      "docs": 45,
+      "bytes": 4159
+    },
+    "fon_Latn": {
+      "docs": 49,
+      "bytes": 1665
+    },
+    "ceb_Latn": {
+      "docs": 6327,
+      "bytes": 2075575
+    },
+    "poh_Latn": {
+      "docs": 36,
+      "bytes": 11714
+    },
+    "hui_Latn": {
+      "docs": 12,
+      "bytes": 5923
+    },
+    "hat_Latn": {
+      "docs": 8428,
+      "bytes": 3331572
+    },
+    "ndo_Latn": {
+      "docs": 8,
+      "bytes": 1133
+    },
+    "ajp_Arab": {
+      "docs": 103,
+      "bytes": 8793
+    },
+    "min_Latn": {
+      "docs": 13373,
+      "bytes": 1036892
+    },
+    "jpn_Japn": {
+      "docs": 54,
+      "bytes": 30091
+    },
+    "vol_Latn": {
+      "docs": 495,
+      "bytes": 92214
+    },
+    "guc_Latn": {
+      "docs": 5,
+      "bytes": 2126
+    },
+    "toj_Latn": {
+      "docs": 1,
+      "bytes": 263
+    },
+    "yor_Latn": {
+      "docs": 2748,
+      "bytes": 1373419
+    },
+    "uzb_Cyrl": {
+      "docs": 37368,
+      "bytes": 16512039
+    },
+    "aln_Latn": {
+      "docs": 56,
+      "bytes": 7277
+    },
+    "hbs_Cyrl": {
+      "docs": 9671,
+      "bytes": 7147000
+    },
+    "tdt_Latn": {
+      "docs": 2,
+      "bytes": 425
+    },
+    "hus_Latn": {
+      "docs": 1,
+      "bytes": 279
+    },
+    "tls_Latn": {
+      "docs": 70,
+      "bytes": 5586
+    },
+    "tgk_Cyrl": {
+      "docs": 37957,
+      "bytes": 17589379
+    },
+    "fry_Latn": {
+      "docs": 1966,
+      "bytes": 529621
+    },
+    "krc_Cyrl": {
+      "docs": 6,
+      "bytes": 1386
+    },
+    "fao_Latn": {
+      "docs": 2149,
+      "bytes": 896865
+    },
+    "aze_Latn": {
+      "docs": 7538,
+      "bytes": 5448769
+    },
+    "kur_Arab": {
+      "docs": 519,
+      "bytes": 370141
+    },
+    "rug_Latn": {
+      "docs": 5,
+      "bytes": 1810
+    },
+    "meu_Latn": {
+      "docs": 6,
+      "bytes": 883
+    },
+    "kaz_Cyrl": {
+      "docs": 5824,
+      "bytes": 5101173
+    },
+    "eng_Latn": {
+      "docs": 6221,
+      "bytes": 1526178
+    },
+    "vep_Latn": {
+      "docs": 28,
+      "bytes": 2071
+    },
+    "pes_Arab": {
+      "docs": 9,
+      "bytes": 769
+    },
+    "mps_Latn": {
+      "docs": 1,
+      "bytes": 431
+    },
+    "chv_Cyrl": {
+      "docs": 1065,
+      "bytes": 235673
+    },
+    "amh_Ethi": {
+      "docs": 6462,
+      "bytes": 3663173
+    },
+    "slk_Latn": {
+      "docs": 2708,
+      "bytes": 514238
+    },
+    "vie_Latn": {
+      "docs": 2261,
+      "bytes": 775147
+    },
+    "sqi_Latn": {
+      "docs": 5358,
+      "bytes": 3318055
+    },
+    "ast_Latn": {
+      "docs": 4730,
+      "bytes": 1102873
+    },
+    "apc_Arab": {
+      "docs": 195,
+      "bytes": 12738
+    },
+    "djk_Latn": {
+      "docs": 1,
+      "bytes": 271
+    },
+    "cak_Latn": {
+      "docs": 121,
+      "bytes": 36186
+    },
+    "mkd_Cyrl": {
+      "docs": 2234,
+      "bytes": 2056549
+    },
+    "ces_Latn": {
+      "docs": 1505,
+      "bytes": 265684
+    },
+    "pus_Arab": {
+      "docs": 1183,
+      "bytes": 567811
+    },
+    "tzo_Latn": {
+      "docs": 23,
+      "bytes": 8039
+    },
+    "bos_Latn": {
+      "docs": 46970,
+      "bytes": 2685274
+    },
+    "pms_Latn": {
+      "docs": 532,
+      "bytes": 74692
+    },
+    "msa_Latn": {
+      "docs": 5023,
+      "bytes": 1397069
+    },
+    "hin_Deva": {
+      "docs": 8994,
+      "bytes": 4194660
+    },
+    "bak_Cyrl": {
+      "docs": 20026,
+      "bytes": 4147188
+    },
+    "xav_Latn": {
+      "docs": 8,
+      "bytes": 3599
+    },
+    "kal_Latn": {
+      "docs": 236,
+      "bytes": 171655
+    },
+    "nya_Latn": {
+      "docs": 3906,
+      "bytes": 3172443
+    },
+    "swc_Latn": {
+      "docs": 1,
+      "bytes": 62
+    },
+    "slv_Latn": {
+      "docs": 2031,
+      "bytes": 316114
+    },
+    "nor_Latn": {
+      "docs": 13018,
+      "bytes": 1992248
+    },
+    "isl_Latn": {
+      "docs": 4393,
+      "bytes": 3263454
+    },
+    "gle_Latn": {
+      "docs": 16272,
+      "bytes": 7059321
+    },
+    "est_Latn": {
+      "docs": 5501,
+      "bytes": 680370
+    },
+    "hmo_Latn": {
+      "docs": 19,
+      "bytes": 5719
+    },
+    "mlg_Latn": {
+      "docs": 9088,
+      "bytes": 15779323
+    },
+    "hrv_Latn": {
+      "docs": 44263,
+      "bytes": 2580819
+    },
+    "mlt_Latn": {
+      "docs": 5309,
+      "bytes": 138458336
+    },
+    "hmn_Latn": {
+      "docs": 5817,
+      "bytes": 5423577
+    },
+    "grc_Grek": {
+      "docs": 2,
+      "bytes": 950
+    },
+    "ltz_Latn": {
+      "docs": 11505,
+      "bytes": 38095264
+    },
+    "ctu_Latn": {
+      "docs": 4,
+      "bytes": 768
+    },
+    "quh_Latn": {
+      "docs": 4,
+      "bytes": 979
+    },
+    "sah_Cyrl": {
+      "docs": 856,
+      "bytes": 936502
+    },
+    "orm_Latn": {
+      "docs": 2812,
+      "bytes": 964470
+    },
+    "ixl_Latn": {
+      "docs": 4,
+      "bytes": 1082
+    },
+    "cmn_Hani": {
+      "docs": 19,
+      "bytes": 486
+    },
+    "tok_Latn": {
+      "docs": 3,
+      "bytes": 66
+    },
+    "asm_Beng": {
+      "docs": 3974,
+      "bytes": 2805246
+    },
+    "ron_Latn": {
+      "docs": 1670,
+      "bytes": 362846
+    },
+    "afb_Arab": {
+      "docs": 349,
+      "bytes": 22432
+    },
+    "che_Cyrl": {
+      "docs": 711,
+      "bytes": 175519
+    },
+    "mon_Cyrl": {
+      "docs": 11937,
+      "bytes": 15205085
+    },
+    "udm_Cyrl": {
+      "docs": 20,
+      "bytes": 3636
+    },
+    "rue_Cyrl": {
+      "docs": 11,
+      "bytes": 5043
+    },
+    "ind_Latn": {
+      "docs": 1947,
+      "bytes": 202466
+    },
+    "kpg_Latn": {
+      "docs": 2,
+      "bytes": 719
+    },
+    "uzn_Cyrl": {
+      "docs": 5545,
+      "bytes": 1267122
+    },
+    "fra_Latn": {
+      "docs": 1326,
+      "bytes": 255965
+    },
+    "ory_Orya": {
+      "docs": 9492,
+      "bytes": 3591855
+    },
+    "srp_Cyrl": {
+      "docs": 3561,
+      "bytes": 858864
+    },
+    "srp_Latn": {
+      "docs": 38074,
+      "bytes": 1846933
+    },
+    "yid_Hebr": {
+      "docs": 528,
+      "bytes": 750926
+    },
+    "ekk_Latn": {
+      "docs": 2303,
+      "bytes": 224396
+    },
+    "plt_Latn": {
+      "docs": 623,
+      "bytes": 58511
+    },
+    "ksd_Latn": {
+      "docs": 5,
+      "bytes": 1228
+    },
+    "tam_Taml": {
+      "docs": 3717,
+      "bytes": 2949055
+    },
+    "zho_Hani": {
+      "docs": 3096,
+      "bytes": 200914
+    },
+    "mzh_Latn": {
+      "docs": 9,
+      "bytes": 3398
+    },
+    "fas_Arab": {
+      "docs": 3576,
+      "bytes": 816258
+    },
+    "hun_Latn": {
+      "docs": 1689,
+      "bytes": 255246
+    },
+    "bqc_Latn": {
+      "docs": 5,
+      "bytes": 834
+    },
+    "fil_Latn": {
+      "docs": 19171,
+      "bytes": 4970827
+    },
+    "acr_Latn": {
+      "docs": 10,
+      "bytes": 2831
+    },
+    "pol_Latn": {
+      "docs": 1748,
+      "bytes": 351495
+    },
+    "zsm_Latn": {
+      "docs": 543,
+      "bytes": 57616
+    },
+    "mam_Latn": {
+      "docs": 7,
+      "bytes": 1567
+    },
+    "nob_Latn": {
+      "docs": 10164,
+      "bytes": 1357841
+    },
+    "abk_Cyrl": {
+      "docs": 66,
+      "bytes": 10925
+    },
+    "epo_Latn": {
+      "docs": 1366,
+      "bytes": 161300
+    },
+    "ita_Latn": {
+      "docs": 1688,
+      "bytes": 327834
+    },
+    "cat_Latn": {
+      "docs": 3104,
+      "bytes": 567387
+    },
+    "lit_Latn": {
+      "docs": 3024,
+      "bytes": 787886
+    },
+    "lus_Latn": {
+      "docs": 43,
+      "bytes": 21713
+    },
+    "gsw_Latn": {
+      "docs": 1161,
+      "bytes": 135897
+    },
+    "sin_Sinh": {
+      "docs": 6112,
+      "bytes": 3428464
+    },
+    "arz_Arab": {
+      "docs": 5237,
+      "bytes": 1321139
+    },
+    "div_Thaa": {
+      "docs": 4037,
+      "bytes": 1593089
+    },
+    "nld_Latn": {
+      "docs": 1947,
+      "bytes": 357324
+    },
+    "hbs_Latn": {
+      "docs": 6280,
+      "bytes": 3092219
+    },
+    "glg_Latn": {
+      "docs": 4664,
+      "bytes": 692220
+    },
+    "zlm_Latn": {
+      "docs": 1,
+      "bytes": 144
+    },
+    "spa_Latn": {
+      "docs": 4311,
+      "bytes": 710505
+    },
+    "ara_Arab": {
+      "docs": 947,
+      "bytes": 236073
+    },
+    "rop_Latn": {
+      "docs": 1,
+      "bytes": 301
+    },
+    "dan_Latn": {
+      "docs": 2607,
+      "bytes": 449078
+    },
+    "hye_Armn": {
+      "docs": 1326,
+      "bytes": 1362640
+    },
+    "azj_Latn": {
+      "docs": 335,
+      "bytes": 46840
+    },
+    "guj_Gujr": {
+      "docs": 1383,
+      "bytes": 1035379
+    },
+    "tha_Thai": {
+      "docs": 2695,
+      "bytes": 3494411
+    },
+    "tur_Latn": {
+      "docs": 776,
+      "bytes": 95918
+    },
+    "fin_Latn": {
+      "docs": 2228,
+      "bytes": 403285
+    },
+    "kor_Hang": {
+      "docs": 1034,
+      "bytes": 517186
+    },
+    "iku_Cans": {
+      "docs": 16,
+      "bytes": 3411
+    },
+    "mar_Deva": {
+      "docs": 2155,
+      "bytes": 1046907
+    },
+    "kan_Knda": {
+      "docs": 866,
+      "bytes": 401136
+    },
+    "pan_Guru": {
+      "docs": 1586,
+      "bytes": 906144
+    },
+    "deu_Latn": {
+      "docs": 1007,
+      "bytes": 186155
+    },
+    "eus_Latn": {
+      "docs": 1483,
+      "bytes": 302238
+    },
+    "mal_Mlym": {
+      "docs": 1795,
+      "bytes": 887904
+    },
+    "por_Latn": {
+      "docs": 1601,
+      "bytes": 348274
+    },
+    "ell_Grek": {
+      "docs": 563,
+      "bytes": 316671
+    },
+    "ukr_Cyrl": {
+      "docs": 1244,
+      "bytes": 748985
+    },
+    "heb_Hebr": {
+      "docs": 105,
+      "bytes": 17970
+    },
+    "bul_Cyrl": {
+      "docs": 578,
+      "bytes": 318604
+    },
+    "lvs_Latn": {
+      "docs": 12,
+      "bytes": 1936
+    }
+  },
+  "max_doc_bytes": 4096,
+  "num_truncated_docs": 379066,
+  "num_truncated_by_lang": {
+    "tir_Ethi": 6798,
+    "ory_Orya": 3213,
+    "hye_Armn": 8693,
+    "gor_Latn": 1,
+    "guj_Deva": 331,
+    "mya_Mymr": 22364,
+    "gle_Latn": 3039,
+    "bod_Tibt": 11971,
+    "sna_Latn": 1961,
+    "sco_Latn": 334,
+    "san_Latn": 3,
+    "dzo_Tibt": 89,
+    "tgk_Cyrl": 10827,
+    "ckb_Arab": 2870,
+    "hif_Latn": 2106,
+    "run_Latn": 523,
+    "yor_Latn": 1663,
+    "oss_Cyrl": 39,
+    "sah_Cyrl": 7156,
+    "asm_Beng": 6448,
+    "yid_Hebr": 2594,
+    "srn_Latn": 1,
+    "bpy_Beng": 1016,
+    "lat_Latn": 4099,
+    "kur_Latn": 4565,
+    "sin_Sinh": 631,
+    "vie_Latn": 2424,
+    "tuk_Cyrl": 1,
+    "ori_Orya": 1357,
+    "gom_Deva": 206,
+    "guj_Gujr": 4756,
+    "kat_Geor": 11885,
+    "cos_Latn": 1390,
+    "amh_Ethi": 6918,
+    "mon_Cyrl": 13514,
+    "pol_Latn": 211,
+    "kin_Latn": 773,
+    "nep_Deva": 10821,
+    "ceb_Latn": 744,
+    "bak_Latn": 7,
+    "lmo_Latn": 97,
+    "urd_Arab": 5907,
+    "tam_Taml": 18782,
+    "tha_Thai": 39393,
+    "tgk_Arab": 453,
+    "pam_Latn": 1106,
+    "mri_Latn": 2976,
+    "fil_Latn": 3574,
+    "kur_Arab": 95,
+    "scn_Latn": 169,
+    "khm_Khmr": 1152,
+    "diq_Latn": 34,
+    "som_Latn": 3030,
+    "nds_Latn": 185,
+    "sqi_Latn": 15330,
+    "lij_Latn": 7,
+    "tat_Cyrl": 3883,
+    "kan_Knda": 1688,
+    "jam_Latn": 14,
+    "mal_Mlym": 3284,
+    "lao_Laoo": 104,
+    "lim_Latn": 134,
+    "ibo_Latn": 1753,
+    "mlt_Latn": 7402,
+    "mkd_Cyrl": 1503,
+    "bul_Cyrl": 390,
+    "azb_Arab": 4,
+    "hbs_Cyrl": 971,
+    "xmf_Geor": 92,
+    "mlg_Latn": 2192,
+    "tat_Latn": 43,
+    "orm_Latn": 1948,
+    "tsn_Latn": 6,
+    "arz_Arab": 761,
+    "msa_Latn": 3768,
+    "ukr_Cyrl": 8504,
+    "sat_Olck": 55,
+    "fry_Latn": 694,
+    "tgk_Latn": 326,
+    "kor_Hang": 11585,
+    "fur_Latn": 2,
+    "hmn_Latn": 2250,
+    "hau_Arab": 4,
+    "mar_Deva": 2784,
+    "pnb_Arab": 1543,
+    "nor_Latn": 1166,
+    "aze_Arab": 1929,
+    "zul_Latn": 3583,
+    "pus_Arab": 191,
+    "fas_Arab": 4947,
+    "mzn_Arab": 12,
+    "srd_Latn": 14,
+    "smo_Latn": 776,
+    "haw_Latn": 690,
+    "som_Arab": 15,
+    "ltz_Latn": 6137,
+    "vec_Latn": 195,
+    "als_Latn": 281,
+    "hin_Deva": 8774,
+    "uig_Arab": 221,
+    "pan_Guru": 5445,
+    "fao_Latn": 816,
+    "lit_Latn": 1629,
+    "sot_Latn": 836,
+    "xho_Latn": 743,
+    "nbl_Latn": 8,
+    "gla_Latn": 159,
+    "mhr_Cyrl": 39,
+    "new_Deva": 61,
+    "bcl_Latn": 88,
+    "ina_Latn": 149,
+    "mai_Deva": 34,
+    "rue_Cyrl": 8,
+    "kaa_Latn": 3,
+    "hat_Latn": 2359,
+    "kaz_Cyrl": 5139,
+    "kat_Latn": 54,
+    "cym_Latn": 1209,
+    "sme_Latn": 4,
+    "kaa_Cyrl": 38,
+    "pcd_Latn": 1,
+    "eml_Latn": 7,
+    "pap_Latn": 3,
+    "nya_Latn": 2312,
+    "nde_Latn": 5,
+    "jav_Latn": 115,
+    "tso_Latn": 70,
+    "tyv_Cyrl": 16,
+    "ile_Latn": 2,
+    "ton_Latn": 1,
+    "zea_Latn": 3,
+    "bar_Latn": 45,
+    "cat_Latn": 2333,
+    "gom_Latn": 9,
+    "bih_Deva": 9,
+    "nap_Latn": 6,
+    "hui_Latn": 2,
+    "lfn_Latn": 4,
+    "deu_Latn": 304,
+    "nav_Latn": 2,
+    "kbd_Cyrl": 2,
+    "uzb_Latn": 2701,
+    "que_Latn": 155,
+    "dan_Latn": 34,
+    "aze_Latn": 4383,
+    "sun_Latn": 2540,
+    "hin_Latn": 160,
+    "cbk_Latn": 1,
+    "nld_Latn": 145,
+    "aka_Latn": 4,
+    "vol_Latn": 21,
+    "frr_Latn": 6,
+    "jpn_Japn": 129,
+    "bak_Cyrl": 320,
+    "div_Thaa": 393,
+    "mon_Latn": 109,
+    "twi_Latn": 1,
+    "vep_Latn": 1,
+    "ksh_Latn": 3,
+    "crh_Cyrl": 1,
+    "tuk_Latn": 89,
+    "zho_Hani": 105,
+    "eng_Latn": 138,
+    "oci_Latn": 487,
+    "pms_Latn": 28,
+    "pcm_Latn": 23,
+    "ven_Latn": 1,
+    "hau_Latn": 1406,
+    "bel_Cyrl": 263,
+    "ssw_Latn": 2,
+    "bjn_Latn": 5,
+    "sgs_Latn": 1,
+    "pfl_Latn": 1,
+    "ful_Latn": 2,
+    "mwl_Latn": 9,
+    "aym_Latn": 3,
+    "slk_Latn": 126,
+    "pag_Latn": 1,
+    "krc_Cyrl": 3,
+    "ewe_Latn": 2,
+    "bre_Latn": 249,
+    "ron_Latn": 119,
+    "wuu_Hani": 9,
+    "grn_Latn": 11,
+    "hun_Latn": 169,
+    "myv_Cyrl": 4,
+    "udm_Cyrl": 2,
+    "arg_Latn": 57,
+    "jbo_Latn": 1,
+    "kir_Cyrl": 50,
+    "chv_Cyrl": 76,
+    "ast_Latn": 455,
+    "hbs_Latn": 140,
+    "est_Latn": 173,
+    "csb_Latn": 1,
+    "ara_Arab": 124,
+    "ext_Latn": 1,
+    "ita_Latn": 221,
+    "srp_Cyrl": 259,
+    "heb_Hebr": 53,
+    "epo_Latn": 244,
+    "san_Deva": 8,
+    "ace_Latn": 1,
+    "uzb_Cyrl": 148,
+    "ell_Grek": 83,
+    "ilo_Latn": 3,
+    "swa_Latn": 55,
+    "poh_Latn": 1,
+    "lzh_Hani": 3,
+    "hsb_Latn": 3,
+    "war_Latn": 35,
+    "ajp_Arab": 1,
+    "slv_Latn": 80,
+    "vls_Latn": 1,
+    "fra_Latn": 65,
+    "bos_Latn": 69,
+    "apc_Arab": 3,
+    "lug_Latn": 11,
+    "hrv_Latn": 36,
+    "spa_Latn": 17,
+    "nno_Latn": 191,
+    "ind_Latn": 56,
+    "fin_Latn": 110,
+    "snd_Arab": 1,
+    "ido_Latn": 2,
+    "kab_Latn": 1,
+    "min_Latn": 13,
+    "nso_Latn": 1,
+    "che_Cyrl": 16,
+    "por_Latn": 96,
+    "swe_Latn": 113,
+    "srp_Latn": 8,
+    "abk_Cyrl": 3,
+    "wln_Latn": 5,
+    "ces_Latn": 145,
+    "gsw_Latn": 1,
+    "yue_Hani": 3,
+    "roh_Latn": 2,
+    "tgl_Latn": 18,
+    "isl_Latn": 39,
+    "tur_Latn": 27,
+    "afr_Latn": 13,
+    "eus_Latn": 13,
+    "glg_Latn": 24
+  }
+}
