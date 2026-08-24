@@ -10,10 +10,12 @@ incident this guards against."""
 
 import dataclasses
 import os
+import time
 
 import pytest
 import torch
 
+import systems.pretraining.train as train_module
 from systems.pretraining.data_prep import prep_dataset
 from systems.pretraining.model import TransformerLM
 from systems.pretraining.model_configs import get_preset
@@ -205,6 +207,68 @@ def test_end_to_end_training_run_with_validation_and_grad_accum(tiny_shard_dir, 
         cfg, total_steps=cfg.total_steps + 4, resume_from=os.path.join(cfg.output_dir, "final.pt")
     )
     train(cfg_resumed)
+
+
+def test_tok_per_sec_excludes_validate_and_checkpoint_overhead(tiny_shard_dir, tmp_path, monkeypatch, capsys):
+    """Real bug this guards against: t_last_log used to reset right after
+    printing the log line, BEFORE validate()/save_checkpoint() ran for that
+    same step -- their wall-clock time then silently bled into the NEXT
+    window's dt, deflating that window's reported tok/s even though no
+    training slowdown actually occurred. Confirmed live on a real cluster
+    run: tok/s alternated ~90K/~35K in exact lockstep with eval_interval/
+    save_steps boundaries, every low reading immediately following a
+    validation or save from the previous logged step.
+
+    Injects an artificial delay into validate() and save_checkpoint() and
+    confirms the FOLLOWING step's reported tok/s isn't deflated by it."""
+    real_validate = train_module.validate
+    real_save_checkpoint = train_module.save_checkpoint
+
+    def slow_validate(*args, **kwargs):
+        time.sleep(0.3)
+        return real_validate(*args, **kwargs)
+
+    def slow_save_checkpoint(*args, **kwargs):
+        time.sleep(0.3)
+        return real_save_checkpoint(*args, **kwargs)
+
+    monkeypatch.setattr(train_module, "validate", slow_validate)
+    monkeypatch.setattr(train_module, "save_checkpoint", slow_save_checkpoint)
+
+    cfg = TrainConfig(
+        model_size="tiny",
+        shard_dir=tiny_shard_dir,
+        seq_len=16,
+        per_device_batch_size=4,
+        total_steps=4,
+        val_fraction=0.5,
+        eval_interval=1,  # fires every step -- injects slow_validate's delay into every window
+        log_steps=1,      # logs every step -- makes the very next window's dt visible immediately
+        save_steps=2,
+        output_dir=str(tmp_path / "out"),
+        device="cpu",
+        dtype="float32",
+        num_workers=0,
+    )
+
+    train(cfg)
+
+    out = capsys.readouterr().out
+    tok_per_sec_values = [
+        float(line.split("tok/s=")[1].replace(",", ""))
+        for line in out.splitlines()
+        if "tok/s=" in line
+    ]
+    assert len(tok_per_sec_values) == cfg.total_steps
+    # Without the fix, every step after the first would be deflated by the
+    # ~0.3s validate()/save_checkpoint() sleep injected into the PRECEDING
+    # step -- a tiny CPU model's real per-step time is low milliseconds, so
+    # a 0.3s leak would crater tok/s by 1-2 orders of magnitude. A loose
+    # 10x bound cleanly separates "bug present" from "fixed" while still
+    # tolerating real timing jitter on a shared CI machine.
+    baseline = tok_per_sec_values[0]
+    for value in tok_per_sec_values[1:]:
+        assert value > baseline * 0.1, tok_per_sec_values
 
 
 def test_end_to_end_training_run_logs_generated_samples(tiny_shard_dir, tmp_path, capsys):

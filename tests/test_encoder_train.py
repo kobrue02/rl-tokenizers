@@ -6,9 +6,11 @@ exact fixture shape rather than a new one."""
 
 import dataclasses
 import os
+import time
 
 import torch
 
+import systems.pretraining.encoder_train as encoder_train_module
 from systems.pretraining.data_prep import prep_dataset
 from systems.pretraining.encoder_train import EncoderTrainConfig, train
 from systems.tokenization.bpe.model import fit_bpe
@@ -83,6 +85,57 @@ def test_end_to_end_encoder_training_run_with_validation_and_grad_accum(tiny_sha
     assert os.path.exists(os.path.join(cfg.output_dir, "final.pt"))
     ckpt_resumed = torch.load(os.path.join(cfg.output_dir, "final.pt"), weights_only=False)
     assert ckpt_resumed["step"] == cfg_resumed.total_steps
+
+
+def test_tok_per_sec_excludes_validate_and_checkpoint_overhead(tiny_shard_dir, tmp_path, monkeypatch, capsys):
+    """See test_train.py's identical test for the full rationale -- this is
+    the same bug, in encoder_train.py's copy of the identical logging
+    pattern: t_last_log used to reset right after printing, BEFORE
+    validate()/save_checkpoint() ran, so their wall time silently bled into
+    the FOLLOWING window's dt. Injects an artificial delay into both and
+    confirms the next step's reported tok/s isn't deflated by it."""
+    real_validate = encoder_train_module.validate
+    real_save_checkpoint = encoder_train_module.save_checkpoint
+
+    def slow_validate(*args, **kwargs):
+        time.sleep(0.3)
+        return real_validate(*args, **kwargs)
+
+    def slow_save_checkpoint(*args, **kwargs):
+        time.sleep(0.3)
+        return real_save_checkpoint(*args, **kwargs)
+
+    monkeypatch.setattr(encoder_train_module, "validate", slow_validate)
+    monkeypatch.setattr(encoder_train_module, "save_checkpoint", slow_save_checkpoint)
+
+    cfg = EncoderTrainConfig(
+        encoder_size="tiny",
+        shard_dir=tiny_shard_dir,
+        seq_len=16,
+        per_device_batch_size=4,
+        total_steps=4,
+        val_fraction=0.5,
+        eval_interval=1,
+        log_steps=1,
+        save_steps=2,
+        output_dir=str(tmp_path / "out"),
+        device="cpu",
+        dtype="float32",
+        num_workers=0,
+    )
+
+    train(cfg)
+
+    out = capsys.readouterr().out
+    tok_per_sec_values = [
+        float(line.split("tok/s=")[1].replace(",", ""))
+        for line in out.splitlines()
+        if "tok/s=" in line
+    ]
+    assert len(tok_per_sec_values) == cfg.total_steps
+    baseline = tok_per_sec_values[0]
+    for value in tok_per_sec_values[1:]:
+        assert value > baseline * 0.1, tok_per_sec_values
 
 
 def test_training_actually_reduces_loss(tiny_shard_dir, tmp_path, capsys):

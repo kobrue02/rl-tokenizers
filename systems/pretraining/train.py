@@ -632,6 +632,17 @@ def train(cfg: TrainConfig):
     step = start_step
     t_last_log = time.time()
     tokens_since_log = 0
+    overhead_since_log = 0.0  # wall-clock spent in validate()/generate_samples()/
+    # save_checkpoint() since the last log -- excluded from the tok/s window
+    # below. Without this, an eval/generate/save that runs right after a log
+    # point (t_last_log resets there, BEFORE those blocks execute) silently
+    # bleeds its own wall time into the FOLLOWING window's dt, deflating
+    # that window's reported throughput even though no training slowdown
+    # actually happened -- confirmed live on a real run: tok/s alternated
+    # ~90K/~35K in exact lockstep with eval_interval/save_steps boundaries,
+    # every single low reading immediately following a validation or save
+    # from the previous logged step. The true sustained rate was the high
+    # number throughout.
     # step_{step}.pt paths tracked for rotation, oldest first -- seeded from
     # whatever's ALREADY in output_dir (e.g. from an earlier --resume-from
     # segment), not started empty, so keep_last_n_checkpoints correctly
@@ -681,7 +692,7 @@ def train(cfg: TrainConfig):
         step += 1
 
         if is_main and step % cfg.log_steps == 0:
-            dt = time.time() - t_last_log
+            dt = time.time() - t_last_log - overhead_since_log
             tok_per_sec = tokens_since_log / max(dt, 1e-9)
             lr = scheduler.get_last_lr()[0]
             print(
@@ -700,8 +711,10 @@ def train(cfg: TrainConfig):
                 )
             t_last_log = time.time()
             tokens_since_log = 0
+            overhead_since_log = 0.0
 
         if val_loader is not None and cfg.eval_interval and step % cfg.eval_interval == 0:
+            _overhead_start = time.time()
             if cfg.sharding == "fsdp":
                 # See module docstring's FSDP section: an FSDP-wrapped
                 # model's forward is ALWAYS a collective all-gather, so
@@ -739,8 +752,10 @@ def train(cfg: TrainConfig):
                     # pass to finish, rather than racing ahead into the next
                     # step's own backward() -- explicit here rather than relying
                     # on that next collective to implicitly serve as the wait.
+            overhead_since_log += time.time() - _overhead_start
 
         if generate_prompts and cfg.generate_interval and step % cfg.generate_interval == 0:
+            _overhead_start = time.time()
             if cfg.sharding == "fsdp":
                 # Same reasoning as validate() above: generate() calls
                 # self(context) internally (model.py), a collective
@@ -767,12 +782,14 @@ def train(cfg: TrainConfig):
                         run.log({"samples": table}, step=step)
                 if distributed:
                     dist.barrier()  # same reasoning as validate()'s own barrier above
+            overhead_since_log += time.time() - _overhead_start
 
         # save_checkpoint's own state-dict gather is collective under FSDP
         # (every rank must call it, even though only is_main writes the
         # file) -- gated on sharding=="fsdp" too, not just is_main, for
         # exactly that reason. See save_checkpoint's own docstring.
         if cfg.save_steps and step % cfg.save_steps == 0 and (is_main or cfg.sharding == "fsdp"):
+            _overhead_start = time.time()
             path = os.path.join(cfg.output_dir, f"step_{step}.pt")
             save_checkpoint(path, model, optimizer, scheduler, step, cfg, vocab_size, is_main=is_main)
             if is_main:
@@ -783,6 +800,7 @@ def train(cfg: TrainConfig):
                         stale_path = saved_checkpoint_paths.pop(0)
                         os.remove(stale_path)
                         print(f"removed older checkpoint {stale_path} (keeping last {cfg.keep_last_n_checkpoints})")
+            overhead_since_log += time.time() - _overhead_start
 
     if is_main or cfg.sharding == "fsdp":
         final_path = os.path.join(cfg.output_dir, "final.pt")

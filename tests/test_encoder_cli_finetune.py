@@ -296,6 +296,40 @@ def test_main_with_use_wandb_runs_end_to_end_for_taxi1500(mlm_checkpoint, bpe_ch
     assert "logged finetune results to wandb project=" in out
 
 
+def test_main_writes_results_output_json_with_label_and_result(mlm_checkpoint, bpe_checkpoint, tmp_path, monkeypatch):
+    rows_by_split = {
+        "train": "1\tFaith\twe believe\n2\tSin\the sinned\n3\tGrace\tgrace given\n4\tRecommendation\tdo this\n",
+        "test": "5\tFaith\tour faith\n6\tSin\tsin again\n",
+    }
+
+    def fake_download(split, cache_dir):
+        path = tmp_path / f"eng_{split}.tsv"
+        path.write_text(rows_by_split[split])
+        return str(path)
+
+    monkeypatch.setattr(cli_finetune_module, "download_taxi1500_split", fake_download)
+
+    results_output = tmp_path / "taxi1500_bpe.json"
+    main([
+        "--checkpoint", mlm_checkpoint,
+        "--system", "bpe", "--tokenizer-checkpoint", bpe_checkpoint,
+        "--task", "taxi1500",
+        "--taxi1500-cache-dir", str(tmp_path),
+        "--output-dir", str(tmp_path / "out"),
+        "--device", "cpu",
+        "--label", "my-bpe-run", "--results-output", str(results_output),
+    ])
+
+    import json
+
+    with open(results_output) as f:
+        record = json.load(f)
+    assert record["label"] == "my-bpe-run"
+    assert record["task"] == "taxi1500"
+    assert record["system"] == "bpe"
+    assert "eval_macro_f1" in record["result"]
+
+
 def test_wikiann_and_upos_label_lists_are_fixed_and_correctly_ordered():
     assert WIKIANN_LABELS == ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
     assert len(UPOS_LABELS) == 17

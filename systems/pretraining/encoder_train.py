@@ -289,6 +289,16 @@ def train(cfg: EncoderTrainConfig):
     step = start_step
     t_last_log = time.time()
     tokens_since_log = 0
+    overhead_since_log = 0.0  # wall-clock spent in validate()/save_checkpoint()
+    # since the last log -- excluded from the tok/s window below. Without
+    # this, a validation/save that runs right after a log point (t_last_log
+    # resets there, BEFORE eval/save execute) silently bleeds its own wall
+    # time into the FOLLOWING window's dt, deflating that window's reported
+    # throughput even though no training slowdown actually happened
+    # (confirmed against a real decoder run, train.py's own identical bug:
+    # tok/s alternated ~90K/~35K in exact lockstep with eval_interval/
+    # save_steps boundaries -- the true sustained rate was the high number
+    # throughout).
     saved_checkpoint_paths = _existing_checkpoints(cfg.output_dir) if is_main else []
 
     while step < cfg.total_steps:
@@ -316,7 +326,7 @@ def train(cfg: EncoderTrainConfig):
         step += 1
 
         if is_main and step % cfg.log_steps == 0:
-            dt = time.time() - t_last_log
+            dt = time.time() - t_last_log - overhead_since_log
             tok_per_sec = tokens_since_log / max(dt, 1e-9)
             lr = scheduler.get_last_lr()[0]
             print(
@@ -335,8 +345,10 @@ def train(cfg: EncoderTrainConfig):
                 )
             t_last_log = time.time()
             tokens_since_log = 0
+            overhead_since_log = 0.0
 
         if val_loader is not None and cfg.eval_interval and step % cfg.eval_interval == 0 and is_main:
+            _overhead_start = time.time()
             raw_model = model.module if isinstance(model, DistributedDataParallel) else model
             val_loss = validate(raw_model, val_loader, device, amp_dtype)
             print(f"[step {step:6d}/{cfg.total_steps}] val_loss={val_loss:.4f}")
@@ -346,10 +358,12 @@ def train(cfg: EncoderTrainConfig):
                 dist.barrier()  # other ranks wait for is_main's validation
                 # pass to finish, rather than racing ahead into the next
                 # step's backward() -- see train.py's identical DDP reasoning
+            overhead_since_log += time.time() - _overhead_start
         elif val_loader is not None and cfg.eval_interval and step % cfg.eval_interval == 0 and distributed:
             dist.barrier()
 
         if cfg.save_steps and step % cfg.save_steps == 0 and is_main:
+            _overhead_start = time.time()
             path = os.path.join(cfg.output_dir, f"step_{step}.pt")
             save_checkpoint(path, model, optimizer, scheduler, step, cfg, encoder_vocab_size)
             print(f"saved checkpoint to {path}")
@@ -359,6 +373,7 @@ def train(cfg: EncoderTrainConfig):
                     stale_path = saved_checkpoint_paths.pop(0)
                     os.remove(stale_path)
                     print(f"removed older checkpoint {stale_path} (keeping last {cfg.keep_last_n_checkpoints})")
+            overhead_since_log += time.time() - _overhead_start
 
     if is_main:
         final_path = os.path.join(cfg.output_dir, "final.pt")

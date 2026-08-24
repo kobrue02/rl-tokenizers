@@ -59,6 +59,7 @@ Usage:
 """
 
 import argparse
+import json
 
 from common.config_file import parse_args_with_config
 
@@ -277,6 +278,12 @@ def build_arg_parser():
     parser.add_argument("--max-eval-examples", type=int, default=None, help="applied PER language when evaluating on many")
     parser.add_argument("--output-dir", type=str, required=True, help="Trainer's own output_dir (checkpoints disabled -- save_strategy='no' -- but Trainer still writes logs here)")
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument(
+        "--label", type=str, default="", help="name this run compares under -- defaults to --system. "
+        "scripts.combine_encoder_results groups records by this key (not --output-dir, which is Trainer's own "
+        "unrelated log directory)",
+    )
+    parser.add_argument("--results-output", type=str, default="", help="write this run's result as JSON here (see scripts.combine_encoder_results); always also printed to stdout")
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -335,6 +342,25 @@ def main(argv=None):
         result = run_taxi1500(args, vocab)
     else:
         result = run_sib200(args, vocab)
+
+    if args.results_output:
+        record = {
+            "label": args.label or args.system,
+            "task": args.task,
+            "checkpoint": args.checkpoint,
+            "system": args.system,
+            "tokenizer_checkpoint": args.tokenizer_checkpoint,
+            "config": {
+                "train_lang": args.train_lang, "eval_lang": args.eval_lang, "eval_langs": args.eval_langs,
+                "train_config": args.train_config, "eval_config": args.eval_config, "eval_configs": args.eval_configs,
+                "train_lang_script": args.train_lang_script, "eval_lang_script": args.eval_lang_script,
+                "eval_lang_scripts": args.eval_lang_scripts,
+            },
+            "result": result,
+        }
+        with open(args.results_output, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2, default=str)
+        print(f"wrote result to {args.results_output}")
 
     if run is not None:
         run.log(result)

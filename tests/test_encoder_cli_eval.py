@@ -154,3 +154,58 @@ def test_main_with_use_wandb_runs_end_to_end_for_pppl(tmp_path, monkeypatch, cap
 
     out = capsys.readouterr().out
     assert "logged eval results to wandb project=" in out
+
+
+def test_main_writes_output_json_with_label_and_result(tmp_path, monkeypatch):
+    bpe_checkpoint = _bpe_checkpoint(tmp_path)
+    vocab = _load_vocab("bpe", bpe_checkpoint, "")
+    checkpoint_path, _ = _save_tiny_checkpoint(tmp_path, vocab_size=vocab.vocab_size)
+
+    import systems.pretraining.encoder_cli_eval as cli_eval_module
+
+    fake_rows = [{"deu": "der schnelle Fuchs", "eng": "the quick fox"}]
+    monkeypatch.setattr(cli_eval_module, "stream_groups", lambda *a, **k: iter(fake_rows))
+
+    output_path = tmp_path / "pppl_bpe.json"
+    main([
+        "--checkpoint", checkpoint_path,
+        "--system", "bpe", "--tokenizer-checkpoint", bpe_checkpoint,
+        "--benchmark", "pppl", "--dataset", "tatoeba_mt", "--split", "test", "--pair", "deu-eng", "--lang", "deu",
+        "--device", "cpu",
+        "--label", "my-bpe-run", "--output", str(output_path),
+    ])
+
+    import json
+
+    with open(output_path) as f:
+        record = json.load(f)
+    assert record["label"] == "my-bpe-run"
+    assert record["benchmark"] == "pppl"
+    assert record["system"] == "bpe"
+    assert "pseudoperplexity" in record["result"]
+
+
+def test_main_output_json_label_defaults_to_system(tmp_path, monkeypatch):
+    bpe_checkpoint = _bpe_checkpoint(tmp_path)
+    vocab = _load_vocab("bpe", bpe_checkpoint, "")
+    checkpoint_path, _ = _save_tiny_checkpoint(tmp_path, vocab_size=vocab.vocab_size)
+
+    import systems.pretraining.encoder_cli_eval as cli_eval_module
+
+    fake_rows = [{"deu": "der schnelle Fuchs", "eng": "the quick fox"}]
+    monkeypatch.setattr(cli_eval_module, "stream_groups", lambda *a, **k: iter(fake_rows))
+
+    output_path = tmp_path / "pppl_bpe.json"
+    main([
+        "--checkpoint", checkpoint_path,
+        "--system", "bpe", "--tokenizer-checkpoint", bpe_checkpoint,
+        "--benchmark", "pppl", "--dataset", "tatoeba_mt", "--split", "test", "--pair", "deu-eng", "--lang", "deu",
+        "--device", "cpu",
+        "--output", str(output_path),
+    ])
+
+    import json
+
+    with open(output_path) as f:
+        record = json.load(f)
+    assert record["label"] == "bpe"

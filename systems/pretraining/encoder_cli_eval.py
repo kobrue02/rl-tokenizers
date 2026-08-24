@@ -28,6 +28,7 @@ since only it yields N-way (3+ language) aligned groups in one call.
 """
 
 import argparse
+import json
 
 import torch
 
@@ -119,6 +120,13 @@ def build_arg_parser():
     parser.add_argument("--layer", type=int, default=8, help="hidden_states index to pool/align from -- Glot500's own default")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--vocab-json", type=str, default="", help="only needed if the checkpoint's tokenizer system is a span-family system")
+    parser.add_argument(
+        "--label", type=str, default="", help="name this run compares under -- defaults to --system. "
+        "scripts.combine_encoder_results groups records by this key (e.g. run bpe and fanta checkpoints "
+        "through this same --benchmark with --label bpe / --label fanta so both land under distinct keys "
+        "even if --system alone would collide, e.g. two fanta runs at different vocab sizes)",
+    )
+    parser.add_argument("--output", type=str, default="", help="write this run's result as JSON here (see scripts.combine_encoder_results); always also printed to stdout")
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
         "--wandb-project", type=str, default="pretraining",
@@ -141,6 +149,23 @@ def main(argv=None):
         result = run_roundtrip(args, model, vocab)
     else:
         result = run_pppl(args, model, vocab)
+
+    if args.output:
+        record = {
+            "label": args.label or args.system,
+            "benchmark": args.benchmark,
+            "checkpoint": args.checkpoint,
+            "system": args.system,
+            "tokenizer_checkpoint": args.tokenizer_checkpoint,
+            "config": {
+                "dataset": args.dataset, "pair": args.pair, "split": args.split,
+                "lang": args.lang, "cycle_langs": args.cycle_langs, "layer": args.layer,
+            },
+            "result": result,
+        }
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2, default=str)
+        print(f"wrote result to {args.output}")
 
     if args.use_wandb:
         import wandb
