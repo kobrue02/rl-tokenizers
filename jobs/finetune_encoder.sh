@@ -11,10 +11,13 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=konrad-rudolf.brueggemann@student.uni-tuebingen.de
 
-# NER/POS/Taxi1500 finetune-then-zero-shot-transfer eval
+# NER/POS/Taxi1500/SIB-200 finetune-then-zero-shot-transfer eval
 # (systems/pretraining/encoder_cli_finetune.py, built on transformers.Trainer)
 # for an encoder_train.py checkpoint. Single GPU -- Trainer handles its own
-# device placement, no torchrun/DDP wiring needed here.
+# device placement, no torchrun/DDP wiring needed here. SIB-200 (topic
+# classification, mteb/sib200) is NOT part of Glot500's own eval suite --
+# added on request, alongside the three Glot500 tasks that need a
+# finetuned head.
 #
 # NO AUTO-RESUBMIT (unlike jobs/train_encoder_pretraining.sh): Trainer runs
 # here with save_strategy="no" (see encoder_finetune_tagging.finetune_tagging/
@@ -22,17 +25,20 @@
 # -- there is no intermediate checkpoint to resume a killed run from, so a
 # run that exceeds --time just has to be resubmitted from scratch with a
 # longer --time (or a smaller --max-train-examples) rather than resumed.
-# NER/POS default to 10 epochs, Taxi1500 to 30 (Glot500's own
-# evaluate_ner.sh/evaluate_pos.sh/zero_shot_train.py constants) -- widen
-# --time or pass --max-train-examples/--max-eval-examples to cap dataset
-# size for a faster smoke-test run before committing to a full one.
+# NER/POS default to 10 epochs, Taxi1500/SIB-200 to 30 (Glot500's own
+# evaluate_ner.sh/evaluate_pos.sh/zero_shot_train.py constants, reused for
+# SIB-200 too since it's the same task shape as Taxi1500) -- widen --time or
+# pass --max-train-examples/--max-eval-examples to cap dataset size for a
+# faster smoke-test run before committing to a full one.
 #
-# --task ner and --task pos pull WikiANN / Universal Dependencies live from
-# the HF Hub (see encoder_cli_finetune.py's own module docstring for the
-# exact verified repo ids/configs) -- needs HF_TOKEN. --task taxi1500 pulls
-# English labels from GitHub directly (see encoder_finetune_taxi1500.py);
-# non-English needs --taxi1500-eval-tsv pointing at a labeled file you've
-# obtained yourself (Taxi1500-c is gated, not auto-downloadable).
+# --task ner/pos/sib200 pull WikiANN / Universal Dependencies / mteb/sib200
+# live from the HF Hub (see encoder_cli_finetune.py's own module docstring
+# for the exact verified repo ids/configs) -- needs HF_TOKEN. --task
+# taxi1500 pulls English labels from GitHub directly (see
+# encoder_finetune_taxi1500.py); non-English needs --taxi1500-eval-tsv
+# pointing at a labeled file you've obtained yourself (Taxi1500-c is gated,
+# not auto-downloadable) -- SIB-200 has no such gate, every one of its 206
+# language configs is directly loadable.
 #
 # Usage:
 #   sbatch jobs/finetune_encoder.sh --checkpoint checkpoints/encoder_pretrain/final.pt \
@@ -44,6 +50,18 @@
 #   sbatch jobs/finetune_encoder.sh --checkpoint checkpoints/encoder_pretrain/final.pt \
 #       --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \
 #       --task taxi1500 --output-dir finetune_out/taxi1500
+#   sbatch jobs/finetune_encoder.sh --checkpoint checkpoints/encoder_pretrain/final.pt \
+#       --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \
+#       --task sib200 --train-lang-script eng_Latn --eval-lang-script deu_Latn --output-dir finetune_out/sib200_deu
+#
+# FULL EVAL across many languages in ONE run, no per-language retraining
+# (--eval-langs/--eval-configs/--eval-lang-scripts for ner/pos/sib200
+# respectively -- comma-separated, or the literal "all" for every config
+# that Hub repo has, minus whichever language you trained on):
+#   sbatch jobs/finetune_encoder.sh --checkpoint checkpoints/encoder_pretrain/final.pt \
+#       --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \
+#       --task sib200 --train-lang-script eng_Latn --eval-lang-scripts all --output-dir finetune_out/sib200_full
+#   # --max-eval-langs N caps an "all" sweep (prints exactly what got dropped, never silently truncates)
 #
 # All flags forward directly -- see `python3 -m systems.pretraining.encoder_cli_finetune --help`.
 

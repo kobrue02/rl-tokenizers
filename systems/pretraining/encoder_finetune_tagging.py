@@ -139,6 +139,7 @@ def finetune_tagging(
     scheme="bio",
     train_lang=None,
     eval_lang=None,
+    eval_rows_by_name=None,
     num_train_epochs=10,
     learning_rate=2e-5,
     per_device_train_batch_size=8,
@@ -162,6 +163,19 @@ def finetune_tagging(
     docstring for why POS needs a different metric than Glot500's own
     run_tag.py actually uses).
 
+    eval_rows_by_name: dict[name -> (rows, lang)], for evaluating the SAME
+    trained model against MANY target languages in one run without
+    retraining -- overrides eval_rows/eval_lang entirely when given. Built
+    on Trainer's own native support for eval_dataset being a dict[str,
+    Dataset] (confirmed against this project's installed transformers
+    version's own source/docstring): Trainer evaluates each entry
+    separately and prefixes every metric name with its dict key (e.g.
+    eval_deu_f1, eval_fra_f1) -- this is the actual "zero-shot transfer to
+    many languages" protocol Glot500's own run_tag.py uses (train once on
+    English, evaluate the same model against every other test language),
+    just without a separate finetune_tagging call -- and therefore a
+    separate random task-head init and full re-training pass -- per language.
+
     Unlike Glot500's own run_tag.py (best-checkpoint selection + early
     stopping via a hand-rolled loop), this keeps Trainer's plain
     train-then-evaluate-once behavior -- save_strategy="no" since nothing
@@ -176,9 +190,11 @@ def finetune_tagging(
     just gets Trainer's metrics logged into it (confirmed against this
     project's installed transformers version's own source).
 
-    Returns trainer.evaluate()'s own dict (eval_precision/eval_recall/eval_f1
-    for scheme="bio", eval_accuracy for scheme="flat", plus Trainer's own
-    eval_loss/eval_runtime/etc.)."""
+    Returns trainer.evaluate()'s own dict -- eval_precision/eval_recall/
+    eval_f1 for scheme="bio" (eval_accuracy for scheme="flat"), plus
+    Trainer's own eval_loss/eval_runtime/etc., all under the plain "eval_"
+    prefix for the single-eval_rows path, or per-name-prefixed (e.g.
+    eval_deu_f1, eval_deu_loss) for every entry when eval_rows_by_name is given."""
     model = load_finetune_model(
         checkpoint_path,
         AutoModelForTokenClassification,
@@ -188,7 +204,13 @@ def finetune_tagging(
         label2id={label: i for i, label in enumerate(label_list)},
     )
     train_dataset = TaggingDataset(train_rows, tag_column, vocab, lang=train_lang, max_len=max_len)
-    eval_dataset = TaggingDataset(eval_rows, tag_column, vocab, lang=eval_lang, max_len=max_len)
+    if eval_rows_by_name is not None:
+        eval_dataset = {
+            name: TaggingDataset(rows, tag_column, vocab, lang=lang, max_len=max_len)
+            for name, (rows, lang) in eval_rows_by_name.items()
+        }
+    else:
+        eval_dataset = TaggingDataset(eval_rows, tag_column, vocab, lang=eval_lang, max_len=max_len)
 
     args = TrainingArguments(
         output_dir=output_dir,

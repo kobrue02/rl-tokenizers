@@ -135,5 +135,31 @@ def test_finetune_classification_with_use_wandb_runs_end_to_end(mlm_checkpoint, 
     assert "eval_macro_f1" in result
 
 
+def test_finetune_classification_with_eval_rows_by_name_evaluates_every_language_without_retraining(mlm_checkpoint, vocab, tmp_path):
+    """See test_encoder_finetune_tagging.py's identical test -- one train
+    pass, then per-language macro_f1 for every eval_rows_by_name entry via
+    Trainer's own eval_dataset=dict[str, Dataset] support."""
+    result = finetune_classification(
+        mlm_checkpoint,
+        TRAIN_ROWS,
+        eval_rows=None,
+        vocab=vocab,
+        output_dir=str(tmp_path / "out_multi"),
+        eval_rows_by_name={
+            "primary": (EVAL_ROWS, None),
+            "extra": (TRAIN_ROWS[:2], None),
+        },
+        num_train_epochs=1,
+        per_device_train_batch_size=3,
+        per_device_eval_batch_size=2,
+        gradient_accumulation_steps=1,
+        device="cpu",
+    )
+
+    assert "eval_primary_macro_f1" in result
+    assert "eval_extra_macro_f1" in result
+    assert "eval_macro_f1" not in result
+
+
 def test_taxi1500_labels_match_glot500s_own_scheme():
     assert TAXI1500_LABELS == ["Recommendation", "Faith", "Violence", "Grace", "Sin", "Description"]

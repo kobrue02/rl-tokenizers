@@ -9,7 +9,16 @@ import pytest
 import torch
 
 import systems.pretraining.encoder_cli_finetune as cli_finetune_module
-from systems.pretraining.encoder_cli_finetune import UPOS_LABELS, WIKIANN_LABELS, main, run_ner, run_pos, run_taxi1500
+from systems.pretraining.encoder_cli_finetune import (
+    SIB200_LABELS,
+    UPOS_LABELS,
+    WIKIANN_LABELS,
+    main,
+    run_ner,
+    run_pos,
+    run_sib200,
+    run_taxi1500,
+)
 from systems.pretraining.encoder_model import build_encoder
 from systems.pretraining.encoder_model_configs import get_preset
 from systems.pretraining.encoder_tokenizer import EncoderVocab
@@ -42,10 +51,15 @@ class _FakeHFDataset:
 NER_ROWS = {
     "en": [{"tokens": ["John", "works", "at", "Acme"], "ner_tags": [1, 0, 0, 3]}] * 4,
     "de": [{"tokens": ["Hans", "arbeitet", "bei", "Acme"], "ner_tags": [1, 0, 0, 3]}] * 2,
+    "fr": [{"tokens": ["Jean", "travaille", "chez", "Acme"], "ner_tags": [1, 0, 0, 3]}] * 2,
 }
 POS_ROWS = {
     "en_ewt": [{"tokens": ["the", "dog", "runs"], "upos": ["DET", "NOUN", "VERB"]}] * 4,
     "de_gsd": [{"tokens": ["der", "Hund", "läuft"], "upos": ["DET", "NOUN", "VERB"]}] * 2,
+}
+SIB200_ROWS = {
+    "eng_Latn": [{"text": "the weather is nice today", "label": 1, "lang": "eng_Latn"}] * 4,
+    "deu_Latn": [{"text": "das Wetter ist heute schoen", "label": 1, "lang": "deu_Latn"}] * 2,
 }
 
 
@@ -89,6 +103,14 @@ class _Args:
         self.use_wandb = False  # default -- overridable via kwargs, matches
         # build_arg_parser's own --use-wandb default of False
         self.run_name = ""
+        # Plural "evaluate on many languages" flags default to "" (falsy),
+        # matching build_arg_parser's own defaults -- _resolve_eval_names
+        # treats that as "use the singular --eval-lang/--eval-config/
+        # --eval-lang-script path instead", same as an unset CLI flag would.
+        self.eval_langs = ""
+        self.eval_configs = ""
+        self.eval_lang_scripts = ""
+        self.max_eval_langs = None
         self.__dict__.update(kwargs)
 
 
@@ -111,6 +133,73 @@ def test_run_ner_dispatches_wikiann_and_reports_f1(mlm_checkpoint, vocab, tmp_pa
     assert "eval_f1=" in out
 
 
+def test_run_ner_with_eval_langs_evaluates_every_language_without_retraining(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
+    def fake_load_dataset(name, config, split):
+        assert name == "unimelb-nlp/wikiann"
+        return _FakeHFDataset(NER_ROWS[config])
+
+    monkeypatch.setattr("datasets.load_dataset", fake_load_dataset)
+
+    args = _Args(
+        checkpoint=mlm_checkpoint, train_lang="en", eval_langs="de,fr",
+        max_train_examples=None, max_eval_examples=None,
+        output_dir=str(tmp_path / "out"), device="cpu",
+    )
+    result = run_ner(args, vocab)
+
+    out = capsys.readouterr().out
+    assert "evaluating on 2 language(s): ['de', 'fr']" in out
+    assert "de: eval_f1=" in out
+    assert "fr: eval_f1=" in out
+    assert "eval_f1" not in result  # single-target key must be absent
+    assert "eval_de_f1" in result
+    assert "eval_fr_f1" in result
+
+
+def test_run_ner_with_eval_langs_all_discovers_every_config_and_excludes_train_lang(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
+    def fake_load_dataset(name, config, split):
+        assert name == "unimelb-nlp/wikiann"
+        return _FakeHFDataset(NER_ROWS[config])
+
+    def fake_get_dataset_config_names(name):
+        assert name == "unimelb-nlp/wikiann"
+        return ["en", "de", "fr"]
+
+    monkeypatch.setattr("datasets.load_dataset", fake_load_dataset)
+    monkeypatch.setattr("datasets.get_dataset_config_names", fake_get_dataset_config_names)
+
+    args = _Args(
+        checkpoint=mlm_checkpoint, train_lang="en", eval_langs="all",
+        max_train_examples=None, max_eval_examples=None,
+        output_dir=str(tmp_path / "out"), device="cpu",
+    )
+    result = run_ner(args, vocab)
+
+    # "en" (the train language) must be excluded from its own eval sweep
+    assert "eval_en_f1" not in result
+    assert "eval_de_f1" in result
+    assert "eval_fr_f1" in result
+
+
+def test_run_ner_with_eval_langs_all_respects_max_eval_langs(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
+    def fake_load_dataset(name, config, split):
+        return _FakeHFDataset(NER_ROWS[config])
+
+    monkeypatch.setattr("datasets.load_dataset", fake_load_dataset)
+    monkeypatch.setattr("datasets.get_dataset_config_names", lambda name: ["en", "de", "fr"])
+
+    args = _Args(
+        checkpoint=mlm_checkpoint, train_lang="en", eval_langs="all", max_eval_langs=1,
+        max_train_examples=None, max_eval_examples=None,
+        output_dir=str(tmp_path / "out"), device="cpu",
+    )
+    result = run_ner(args, vocab)
+
+    out = capsys.readouterr().out
+    assert "capping 2 eval languages down to --max-eval-langs=1: dropping 1" in out
+    assert sum(1 for k in result if k.startswith("eval_") and k.endswith("_f1")) == 1
+
+
 def test_run_pos_dispatches_universal_dependencies_and_reports_f1(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
     def fake_load_dataset(name, config, split):
         assert name == "universal-dependencies/universal_dependencies"
@@ -128,6 +217,25 @@ def test_run_pos_dispatches_universal_dependencies_and_reports_f1(mlm_checkpoint
     out = capsys.readouterr().out
     assert "pos: 4 train (en_ewt) / 2 eval (de_gsd) rows" in out
     assert "eval_accuracy=" in out
+
+
+def test_run_sib200_dispatches_mteb_sib200_and_reports_macro_f1(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
+    def fake_load_dataset(name, config, split):
+        assert name == "mteb/sib200"
+        return _FakeHFDataset(SIB200_ROWS[config])
+
+    monkeypatch.setattr("datasets.load_dataset", fake_load_dataset)
+
+    args = _Args(
+        checkpoint=mlm_checkpoint, train_lang_script="eng_Latn", eval_lang_script="deu_Latn",
+        max_train_examples=None, max_eval_examples=None,
+        output_dir=str(tmp_path / "out"), device="cpu",
+    )
+    run_sib200(args, vocab)
+
+    out = capsys.readouterr().out
+    assert "sib200: 4 train (eng_Latn) / 2 eval (deu_Latn) rows" in out
+    assert "eval_macro_f1=" in out
 
 
 def test_run_taxi1500_dispatches_download_and_reports_macro_f1(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
@@ -192,3 +300,10 @@ def test_wikiann_and_upos_label_lists_are_fixed_and_correctly_ordered():
     assert WIKIANN_LABELS == ["O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC"]
     assert len(UPOS_LABELS) == 17
     assert len(set(UPOS_LABELS)) == 17
+
+
+def test_sib200_labels_match_the_datasets_own_classlabel_order():
+    # Confirmed live against mteb/sib200's own ClassLabel(...).names.
+    assert SIB200_LABELS == [
+        "entertainment", "geography", "health", "politics", "science/technology", "sports", "travel",
+    ]

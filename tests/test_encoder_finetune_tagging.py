@@ -198,3 +198,34 @@ def test_finetune_tagging_with_use_wandb_runs_end_to_end(mlm_checkpoint, vocab, 
     )
 
     assert "eval_f1" in result
+
+
+def test_finetune_tagging_with_eval_rows_by_name_evaluates_every_language_without_retraining(mlm_checkpoint, vocab, tmp_path):
+    """The actual "zero-shot transfer to many languages" ask: one train
+    pass, then per-language metrics for every entry -- Trainer's own
+    eval_dataset=dict[str, Dataset] support prefixes each metric with its
+    dict key (confirmed against this project's installed transformers
+    version's own docstring before writing this)."""
+    result = finetune_tagging(
+        mlm_checkpoint,
+        TRAIN_ROWS,
+        eval_rows=None,
+        tag_column="ner_tags",
+        label_list=LABEL_LIST,
+        vocab=vocab,
+        output_dir=str(tmp_path / "out_multi"),
+        eval_rows_by_name={
+            "primary": (EVAL_ROWS, None),
+            "extra": (TRAIN_ROWS[:2], None),
+        },
+        num_train_epochs=1,
+        per_device_train_batch_size=2,
+        per_device_eval_batch_size=2,
+        gradient_accumulation_steps=1,
+        device="cpu",
+    )
+
+    assert "eval_primary_f1" in result
+    assert "eval_extra_f1" in result
+    assert "eval_f1" not in result  # the single-target key must NOT appear
+    # when eval_rows_by_name is used instead of eval_rows

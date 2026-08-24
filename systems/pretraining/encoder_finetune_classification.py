@@ -91,6 +91,7 @@ def finetune_classification(
     label_column="label",
     train_lang=None,
     eval_lang=None,
+    eval_rows_by_name=None,
     num_train_epochs=30,
     learning_rate=2e-5,
     per_device_train_batch_size=8,
@@ -109,6 +110,13 @@ def finetune_classification(
     this project's own research into the Glot500 repo) -- NOT Trainer's
     own library defaults.
 
+    eval_rows_by_name: dict[name -> (rows, lang)], for evaluating the SAME
+    trained model against MANY target languages in one run without
+    retraining -- overrides eval_rows/eval_lang entirely when given. See
+    encoder_finetune_tagging.finetune_tagging's own docstring for the full
+    rationale (identical mechanism: Trainer's native eval_dataset=dict[str,
+    Dataset] support, each metric name prefixed with its dict key).
+
     use_wandb: sets report_to=["wandb"] instead of Trainer's own default
     ["all"]. Caller is expected to have already called wandb.init() (see
     encoder_cli_finetune.main) for their own project/job_type/config --
@@ -117,8 +125,10 @@ def finetune_classification(
     installed transformers version's own source), so a pre-existing run is
     left alone and just gets Trainer's metrics logged into it.
 
-    Returns trainer.evaluate()'s own dict (eval_macro_f1 plus Trainer's own
-    eval_loss/eval_runtime/etc.)."""
+    Returns trainer.evaluate()'s own dict -- eval_macro_f1 plus Trainer's
+    own eval_loss/eval_runtime/etc. under the plain "eval_" prefix for the
+    single-eval_rows path, or per-name-prefixed (e.g. eval_deu_macro_f1)
+    for every entry when eval_rows_by_name is given."""
     model = load_finetune_model(
         checkpoint_path,
         AutoModelForSequenceClassification,
@@ -130,9 +140,15 @@ def finetune_classification(
     train_dataset = ClassificationDataset(
         train_rows, vocab, text_column, label_column, lang=train_lang, max_len=max_len
     )
-    eval_dataset = ClassificationDataset(
-        eval_rows, vocab, text_column, label_column, lang=eval_lang, max_len=max_len
-    )
+    if eval_rows_by_name is not None:
+        eval_dataset = {
+            name: ClassificationDataset(rows, vocab, text_column, label_column, lang=lang, max_len=max_len)
+            for name, (rows, lang) in eval_rows_by_name.items()
+        }
+    else:
+        eval_dataset = ClassificationDataset(
+            eval_rows, vocab, text_column, label_column, lang=eval_lang, max_len=max_len
+        )
 
     args = TrainingArguments(
         output_dir=output_dir,
