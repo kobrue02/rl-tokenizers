@@ -21,6 +21,18 @@ def load_shard_meta(shard_dir):
         return json.load(f)
 
 
+def open_shards(shard_dir, meta, min_len, shard_files=None):
+    """Opens every shard (or shard_files, an explicit subset of meta's own
+    "shard_files") as a read-only memmap, dropping any shorter than min_len
+    tokens -- shared by ShardedTokenDataset below (decoder: needs seq_len+1
+    tokens per window, for its x/y shift) and encoder_data.MLMShardedTokenDataset
+    (encoder: needs exactly seq_len, no shift)."""
+    dtype = np.uint16 if meta["dtype"] == "uint16" else np.uint32
+    names = shard_files if shard_files is not None else meta["shard_files"]
+    shards = [np.memmap(os.path.join(shard_dir, name), dtype=dtype, mode="r") for name in names]
+    return [s for s in shards if len(s) >= min_len]
+
+
 class ShardedTokenDataset(Dataset):
     """One "epoch" is just `num_samples` random windows, not a real pass
     over the corpus -- a streamed corpus this large has no natural epoch
@@ -47,16 +59,11 @@ class ShardedTokenDataset(Dataset):
         self.num_samples = num_samples
         self.seed = seed
         self.index_offset = index_offset
-        dtype = np.uint16 if self.meta["dtype"] == "uint16" else np.uint32
-        names = shard_files if shard_files is not None else self.meta["shard_files"]
-        shards = [
-            np.memmap(os.path.join(shard_dir, name), dtype=dtype, mode="r")
-            for name in names
-        ]
         # A shard shorter than seq_len+1 tokens can never serve a full
-        # window -- skip it rather than let the offset sampler below divide
-        # by a non-positive range on one unlucky trailing partial shard.
-        self.shards = [s for s in shards if len(s) > seq_len]
+        # window -- open_shards drops it rather than letting the offset
+        # sampler below divide by a non-positive range on one unlucky
+        # trailing partial shard.
+        self.shards = open_shards(shard_dir, self.meta, seq_len + 1, shard_files)
         if not self.shards:
             raise ValueError(
                 f"no shard in {shard_dir} has more than seq_len={seq_len} tokens"

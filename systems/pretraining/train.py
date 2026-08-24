@@ -137,6 +137,9 @@ class TrainConfig:
     vocab_json: str = ""  # only needed if shards_meta.json's own "system"
     # is one of the span-family tokenizers (magnet/flexitokens/manta/fanta/
     # fairtok) -- see TokenizerAdapter.load. "" is fine for bpe/superbpe.
+    loss_chunk_size: int = 0  # 0 disables; see ModelConfig.loss_chunk_size's
+    # own docstring. Applied onto the preset's ModelConfig here (same pattern
+    # as seq_len -> max_seq_len below) since presets don't set it themselves.
 
 
 def is_distributed():
@@ -189,8 +192,20 @@ def wrap_fsdp(model, param_dtype, device):
 
     mesh = init_device_mesh(device.type, (dist.get_world_size(),))
     mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=torch.float32)
-    for block in model.blocks:
+    blocks = list(model.blocks)
+    for block in blocks:
         fully_shard(block, mesh=mesh, mp_policy=mp_policy)
+    # Explicit forward-prefetch: while block[i]'s forward is still running,
+    # start block[i+1]'s all-gather early rather than waiting for block[i]'s
+    # own forward to finish and issue it then -- overlaps that communication
+    # with block[i]'s compute instead of serializing them. fully_shard's
+    # default prefetch (no explicit hint) already overlaps SOME of this via
+    # backward-pass reshard ordering, but doesn't reliably prefetch ahead
+    # during the forward pass on every torch version -- an explicit hint
+    # removes the ambiguity. The last block is left alone (nothing after it
+    # to prefetch during forward).
+    for i, block in enumerate(blocks[:-1]):
+        block.set_modules_to_forward_prefetch([blocks[i + 1]])
     fully_shard(model, mesh=mesh, mp_policy=mp_policy)
     return model
 
@@ -440,6 +455,8 @@ def train(cfg: TrainConfig):
 
     model_cfg = get_preset(cfg.model_size)
     model_cfg.max_seq_len = max(model_cfg.max_seq_len, cfg.seq_len)
+    if cfg.loss_chunk_size > 0:
+        model_cfg.loss_chunk_size = cfg.loss_chunk_size
     model = TransformerLM(model_cfg, vocab_size).to(device)
     model_params = model.num_parameters()
     effective_batch_size = cfg.per_device_batch_size * cfg.grad_accum_steps * world_size
@@ -506,6 +523,16 @@ def train(cfg: TrainConfig):
         lr=cfg.learning_rate,
         betas=(cfg.beta1, cfg.beta2),
         weight_decay=cfg.weight_decay,
+        # fused=True dispatches the whole step (per-param update, not just
+        # per-op) to a single fused CUDA kernel -- meaningful at this
+        # project's larger presets, which have far more parameter tensors
+        # than "tiny"/"small" (embedding/lm_head untied, GQA's extra k/v
+        # projections). Unavailable on CPU (gloo test/debug runs) and,
+        # historically, flaky with DTensor-sharded (FSDP2) parameters on
+        # some torch versions -- restricted to plain CUDA (DDP/unsharded)
+        # for that reason; FSDP runs fall back to the (still vectorized)
+        # foreach default.
+        fused=(device.type == "cuda" and cfg.sharding != "fsdp"),
     )
     scheduler = build_lr_scheduler(
         optimizer, cfg.total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type

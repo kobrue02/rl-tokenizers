@@ -181,11 +181,63 @@ def test_prefetch_resume_after_simulated_crash_matches_uninterrupted_run(tmp_pat
         assert os.path.exists(resumed_dir / name)
 
 
+def test_prefetch_with_dedup_matches_non_prefetch_output(tmp_path, bpe_checkpoint, monkeypatch):
+    """Dedup now runs INSIDE the --prefetch background thread (see
+    _dedup_and_truncate/_prefetch in data_prep.py -- before this refactor,
+    --prefetch only covered the raw network pull, not dedup), so this is
+    the one prefetch-parity test that actually needs real duplicates in the
+    stream to exercise that path; the other prefetch tests all set
+    dedup=False. A fixed, hand-written stream (not "synthetic", which
+    doesn't naturally repeat documents) guarantees exact and near
+    duplicates are actually present."""
+    from systems.pretraining import data_prep as data_prep_module
+
+    def duplicate_heavy_stream(*args, **kwargs):
+        docs = [
+            "the quick brown fox jumps over the lazy dog again and again",
+            "the quick brown fox jumps over the lazy dog again and again",  # exact dup
+            "a completely different sentence about something else entirely",
+            "the quick brown fox jumps over the lazy dog again and again today",  # near dup
+            "yet another unique sentence with its own distinct content here",
+        ]
+        for doc in docs:
+            yield {"en": doc}
+
+    def run(output_dir):
+        monkeypatch.setattr(data_prep_module, "stream_groups", lambda *a, **k: duplicate_heavy_stream())
+        return prep_dataset(
+            dataset_name="synthetic",
+            system="bpe",
+            checkpoint_path=bpe_checkpoint,
+            output_dir=str(output_dir),
+            dedup=True,
+            shard_size=500,
+            encode_batch_size=2,
+            bucket_pool_multiplier=1,
+            prefetch=output_dir.name == "prefetch",
+        )
+
+    meta_plain = run(tmp_path / "plain")
+    meta_prefetch = run(tmp_path / "prefetch")
+
+    assert meta_plain["dropped_duplicate_docs"] > 0  # sanity: the stream's
+    # duplicates were actually caught, not just coincidentally absent from both
+    assert meta_prefetch["dropped_duplicate_docs"] == meta_plain["dropped_duplicate_docs"]
+    assert meta_prefetch["dropped_duplicates_by_lang"] == meta_plain["dropped_duplicates_by_lang"]
+    assert meta_prefetch["num_docs"] == meta_plain["num_docs"]
+    assert meta_prefetch["total_tokens"] == meta_plain["total_tokens"]
+    assert meta_prefetch["lang_counts"] == meta_plain["lang_counts"]
+    assert meta_prefetch["shard_files"] == meta_plain["shard_files"]
+    for name in meta_prefetch["shard_files"]:
+        with open(tmp_path / "plain" / name, "rb") as f_plain, open(tmp_path / "prefetch" / name, "rb") as f_pre:
+            assert f_plain.read() == f_pre.read()
+
+
 def test_prefetch_stream_exception_propagates(tmp_path, bpe_checkpoint, monkeypatch):
     """A producer-thread exception (e.g. the underlying stream itself
     raising, not just encode_batch) must surface in the main thread as a
     real exception, not vanish silently or hang -- see
-    _prefetch_source/_produce_stream's own docstrings."""
+    _prefetch/_produce's own docstrings."""
     from systems.pretraining import data_prep as data_prep_module
 
     def broken_stream(*args, **kwargs):

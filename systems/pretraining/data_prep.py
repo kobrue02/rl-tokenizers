@@ -43,15 +43,21 @@ max_tokens/max_docs are checked at pool granularity. =1 disables bucketing.
 PREFETCH (--prefetch, default off): confirmed live that pulling documents
 from glot500's ~411-config HF stream is NETWORK-bound, not CPU-bound (a
 real run took multiple days despite encode_batch() itself measuring fine).
-A background thread iterates the stream in the same order and pushes
-(lang, text, stream_docs_consumed) onto a bounded queue
-(--prefetch-queue-size, default 2 * pool_size) that the consumer reads
-instead of iterating directly -- changes only *when* documents arrive, not
-their order/content, so every RESUME/dedup/checkpoint invariant below is
+A background thread runs the network pull AND this loop's own per-document
+dedup + truncation (_dedup_and_truncate) -- the two per-document CPU costs
+that would otherwise sit in the same thread as the pool-accumulation/
+encode/pack work below -- pushing the resulting ("dup", ...)/("keep", ...)
+records onto a bounded queue (--prefetch-queue-size, default 2 * pool_size)
+that the consumer reads instead of iterating directly. This changes only
+*when* a document's dedup/truncation outcome is COMPUTED relative to the
+consumer's own pool/encode/pack work, not its order or content (dedup still
+sees every document in stream order, from a single thread, exactly as
+without --prefetch) -- every RESUME/dedup/checkpoint invariant below is
 unaffected. Off by default: verify with a real timing comparison before
 relying on it, since the win depends on how much of the slowness is really
-network wait vs. e.g. HF `datasets`' own decode overhead. A producer-thread
-exception is re-raised in the main thread via a queue sentinel, not swallowed.
+network/dedup wait vs. e.g. HF `datasets`' own decode overhead or the
+encode_batch() step this overlaps with. A producer-thread exception is
+re-raised in the main thread via a queue sentinel, not swallowed.
 
 RESUME (--prep-checkpoint-path, default "<output-dir>/prep_checkpoint.json"):
 lets a run killed mid-way (e.g. a SLURM time limit) continue instead of
@@ -116,7 +122,7 @@ def _dtype_for_vocab(vocab_size):
 
 
 class _ProducerError:
-    """Wraps an exception raised on _produce_stream's background thread so
+    """Wraps an exception raised on _produce's background thread so
     it can travel through a queue.Queue and be re-raised on the consuming
     (main) thread -- see PREFETCH docstring section. A bare background
     thread's exception would otherwise vanish silently."""
@@ -132,8 +138,9 @@ def _document_source(stream, skip_target):
     """Single-threaded generator yielding (lang, text, stream_docs_consumed)
     for every document in `stream`, in stream order -- this is exactly
     prep_dataset's own pre-prefetch iteration (see RESUME docstring
-    section), just factored out so _prefetch_source below can expose the
-    same interface. Applies the RESUME fast-forward skip: documents at or
+    section), just factored out so it can be wrapped in a --prefetch
+    background thread (see _dedup_and_truncate/_prefetch below). Applies
+    the RESUME fast-forward skip: documents at or
     below skip_target are counted (stream_docs_consumed still advances,
     matching the checkpoint's own semantics) but never yielded."""
     stream_docs_consumed = 0
@@ -146,16 +153,19 @@ def _document_source(stream, skip_target):
             yield lang, text, stream_docs_consumed
 
 
-def _produce_stream(stream, skip_target, q, stop_event, put_timeout=0.5):
-    """Runs _document_source on a background thread, pushing each item onto
-    `q` instead of returning it directly (see PREFETCH docstring section).
-    q.put() loops on a timeout rather than blocking indefinitely, so a full
-    queue can't deadlock this thread after the consumer has already decided
-    to stop (stop_event set, e.g. because max_tokens/max_docs was reached)
-    while this thread is blocked trying to enqueue. Always pushes exactly
-    one terminal item (_DONE, or a _ProducerError wrapping any exception) so
-    the consumer's q.get() can never block forever if this thread dies or
-    is asked to stop early."""
+def _produce(gen_factory, q, stop_event, put_timeout=0.5):
+    """Runs gen_factory() (a zero-arg callable building the generator to
+    iterate -- called ON this background thread, not the caller's, so any
+    per-item work the generator does, e.g. _dedup_and_truncate's dedup/
+    truncation, also runs here) on a background thread, pushing each item
+    onto `q` instead of returning it directly (see PREFETCH docstring
+    section). q.put() loops on a timeout rather than blocking indefinitely,
+    so a full queue can't deadlock this thread after the consumer has
+    already decided to stop (stop_event set, e.g. because max_tokens/
+    max_docs was reached) while this thread is blocked trying to enqueue.
+    Always pushes exactly one terminal item (_DONE, or a _ProducerError
+    wrapping any exception) so the consumer's q.get() can never block
+    forever if this thread dies or is asked to stop early."""
 
     def put(item):
         while not stop_event.is_set():
@@ -167,8 +177,8 @@ def _produce_stream(stream, skip_target, q, stop_event, put_timeout=0.5):
         return False
 
     try:
-        for doc in _document_source(stream, skip_target):
-            if not put(doc):
+        for item in gen_factory():
+            if not put(item):
                 return  # stop_event fired while blocked on a full queue
             if stop_event.is_set():
                 return
@@ -178,23 +188,22 @@ def _produce_stream(stream, skip_target, q, stop_event, put_timeout=0.5):
     put(_DONE)
 
 
-def _prefetch_source(stream, skip_target, queue_size):
-    """Wraps _produce_stream's background thread + bounded queue behind the
-    SAME plain-generator interface _document_source exposes, so
-    prep_dataset's consumer loop is written once regardless of --prefetch.
-    Raises in the CONSUMING thread if the producer thread itself raised.
-    Closing this generator early (e.g. the consumer `break`s out of its
-    loop, or an exception propagates through it) signals stop_event and
-    joins the producer thread before returning -- callers that iterate this
-    with a `for ... in` loop and then `break` should call .close() (or rely
-    on Python's own GeneratorExit-on-garbage-collection) before doing
-    anything that assumes the producer has stopped, e.g. the final
+def _prefetch(gen_factory, queue_size):
+    """Wraps _produce's background thread + bounded queue behind the SAME
+    plain-generator interface gen_factory() itself exposes, so a consumer
+    loop can be written once and reused whether or not it's threaded (see
+    prep_dataset's own record_source/build_records). Raises in the
+    CONSUMING thread if the producer thread itself raised. Closing this
+    generator early (e.g. the consumer `break`s out of its loop, or an
+    exception propagates through it) signals stop_event and joins the
+    producer thread before returning -- callers that iterate this with a
+    `for ... in` loop and then `break` should call .close() (or rely on
+    Python's own GeneratorExit-on-garbage-collection) before doing anything
+    that assumes the producer has stopped, e.g. the final
     process_pending(final=True)/flush() in prep_dataset."""
     q = queue.Queue(maxsize=queue_size)
     stop_event = threading.Event()
-    thread = threading.Thread(
-        target=_produce_stream, args=(stream, skip_target, q, stop_event), daemon=True,
-    )
+    thread = threading.Thread(target=_produce, args=(gen_factory, q, stop_event), daemon=True)
     thread.start()
     try:
         while True:
@@ -207,6 +216,42 @@ def _prefetch_source(stream, skip_target, queue_size):
     finally:
         stop_event.set()
         thread.join()
+
+
+def _dedup_and_truncate(document_source, deduper, max_doc_bytes):
+    """Wraps document_source (the RESUME-aware (lang, text,
+    stream_docs_consumed) stream _document_source yields) with the two
+    per-document CPU costs -- dedup and truncation -- that used to run
+    inline in prep_dataset's own consumer loop. Factored out so --prefetch
+    can run this on its background thread too (see PREFETCH docstring
+    section), overlapping it with the consumer's pool-accumulation/encode/
+    pack work instead of paying for both sequentially in the same thread.
+
+    deduper.is_duplicate(text) mutates deduper's own internal (MinHash/LSH)
+    state and must see every document in stream order -- guaranteed here
+    since this generator (run directly, or as --prefetch's single producer
+    thread) is document_source's only consumer, so document order into
+    deduper is identical to iterating document_source directly.
+
+    Yields one of:
+      ("dup", lang, raw_byte_len, stream_docs_consumed)
+      ("keep", lang, encode_bytes, raw_byte_len, was_truncated, stream_docs_consumed)
+    Empty documents are dropped silently, matching prep_dataset's own prior
+    inline `if not text: continue`."""
+    for lang, text, stream_docs_consumed in document_source:
+        if not text:
+            continue
+        raw_bytes = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+        if deduper is not None and deduper.is_duplicate(text):
+            yield ("dup", lang, len(raw_bytes), stream_docs_consumed)
+            continue
+        # Truncated for encoding only -- dedup already compared the
+        # untruncated text, and the caller's lang_counts["bytes"] should
+        # still count the full raw_bytes length, so a truncated document's
+        # compression_rate is very slightly inflated. Accepted since
+        # truncation is meant to be rare (see MAX_DOC_BYTES docstring section).
+        encode_bytes, was_truncated = truncate_to_max_bytes(raw_bytes, max_doc_bytes)
+        yield ("keep", lang, encode_bytes, len(raw_bytes), was_truncated, stream_docs_consumed)
 
 
 def prep_dataset(
@@ -445,49 +490,41 @@ def prep_dataset(
         desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True,
         initial=total_tokens if resume else 0,
     )
+    def build_records():
+        return _dedup_and_truncate(_document_source(stream, skip_target), deduper, max_doc_bytes)
+
     if prefetch:
         resolved_queue_size = prefetch_queue_size if prefetch_queue_size else 2 * pool_size
-        document_source = _prefetch_source(stream, skip_target, resolved_queue_size)
+        record_source = _prefetch(build_records, resolved_queue_size)
     else:
-        document_source = _document_source(stream, skip_target)
+        record_source = build_records()
 
     try:
-        for lang, text, stream_docs_consumed in document_source:
-            if not text:
-                continue
-            if deduper is not None and deduper.is_duplicate(text):
+        for record in record_source:
+            if record[0] == "dup":
                 # Dropped before tokenization; still counted per language
                 # so the drop rate stays visible in reports.
-                raw_bytes = text.encode("utf-8") if isinstance(text, str) else bytes(text)
+                _, lang, raw_len, stream_docs_consumed = record
                 dropped_dup_docs += 1
-                dropped_dup_bytes += len(raw_bytes)
+                dropped_dup_bytes += raw_len
                 dropped_dup_by_lang[lang]["docs"] += 1
-                dropped_dup_by_lang[lang]["bytes"] += len(raw_bytes)
+                dropped_dup_by_lang[lang]["bytes"] += raw_len
                 continue
-            # Encoded to bytes once here (encode_batch accepts bytes
-            # directly) so this also gives the exact byte count "bytes"
-            # needs, without encoding the text twice.
-            raw_bytes = text.encode("utf-8") if isinstance(text, str) else bytes(text)
-            # Truncated for encoding only -- dedup already compared the
-            # untruncated text, and lang_counts["bytes"] still counts the
-            # full raw_bytes length, so a truncated document's
-            # compression_rate is very slightly inflated. Accepted since
-            # truncation is meant to be rare (see MAX_DOC_BYTES section).
-            encode_bytes, was_truncated = truncate_to_max_bytes(raw_bytes, max_doc_bytes)
+            _, lang, encode_bytes, raw_len, was_truncated, stream_docs_consumed = record
             if was_truncated:
                 num_truncated_docs += 1
                 num_truncated_by_lang[lang] += 1
-            pending.append((lang, encode_bytes, len(raw_bytes)))
+            pending.append((lang, encode_bytes, raw_len))
             process_pending()  # no-op unless the pool has reached pool_size
 
             if (max_tokens and total_tokens >= max_tokens) or (max_docs and num_docs >= max_docs):
                 break
     finally:
         # For --prefetch, this signals the producer thread to stop and
-        # joins it (see _prefetch_source's own docstring) -- must happen
-        # BEFORE the final process_pending/flush below, not concurrently
-        # with them. A no-op for the plain _document_source generator.
-        document_source.close()
+        # joins it (see _prefetch's own docstring) -- must happen BEFORE
+        # the final process_pending/flush below, not concurrently with
+        # them. A no-op for the plain build_records() generator.
+        record_source.close()
     process_pending(final=True)  # flush any partial pool smaller than pool_size
     flush()
     pbar.close()

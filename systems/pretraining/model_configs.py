@@ -40,6 +40,16 @@ class ModelConfig:
     grad_checkpointing: bool = False  # recompute activations in the backward
     # pass instead of storing them -- essential at larger presets to fit
     # GPU memory, pure overhead at tiny/small scale.
+    loss_chunk_size: int = 0  # 0 disables (matches this project's other
+    # 0-disables flags, e.g. eval_interval/generate_interval/max_doc_bytes).
+    # >0 computes the LM loss in row-chunks of the lm_head projection (see
+    # model.chunked_cross_entropy) instead of materializing the full
+    # (batch*seq_len, padded_vocab_size) logits tensor at once -- the
+    # dominant activation-memory cost at large vocab*batch*seq_len, unrelated
+    # to grad_checkpointing (which covers the transformer blocks, not the
+    # output projection). Off by default: real payoff needs measuring
+    # tok/s and peak memory on real hardware first, same convention as
+    # TrainConfig.compile/--prefetch elsewhere in this project.
 
     def num_kv_heads_resolved(self):
         return self.num_kv_heads or self.num_heads

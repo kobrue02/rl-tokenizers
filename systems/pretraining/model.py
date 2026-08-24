@@ -166,6 +166,88 @@ class TransformerBlock(nn.Module):
         return x
 
 
+class _ChunkedCrossEntropy(torch.autograd.Function):
+    """Cross-entropy of hidden @ lm_head_weight.T against labels, computed
+    in row-chunks so the (chunk_size, vocab_size) logits slab is the only
+    one ever materialized -- never the full (num_rows, vocab_size) tensor a
+    plain `lm_head(x)` + F.cross_entropy would keep alive for backward.
+    Trades that memory for one extra lm_head-sized matmul: backward
+    recomputes each chunk's logits from the saved (hidden, weight) rather
+    than reusing logits saved from forward, since forward never kept them
+    around in the first place."""
+
+    @staticmethod
+    def forward(ctx, hidden, weight, labels, chunk_size, ignore_index):
+        num_rows = hidden.shape[0]
+        total_loss = hidden.new_zeros(())
+        total_count = 0
+        for start in range(0, num_rows, chunk_size):
+            end = min(start + chunk_size, num_rows)
+            chunk_labels = labels[start:end]
+            n_valid = int((chunk_labels != ignore_index).sum())
+            if n_valid == 0:
+                continue
+            chunk_logits = hidden[start:end] @ weight.t()
+            total_loss = total_loss + F.cross_entropy(
+                chunk_logits, chunk_labels, ignore_index=ignore_index, reduction="sum"
+            )
+            total_count += n_valid
+        ctx.save_for_backward(hidden, weight, labels)
+        ctx.chunk_size = chunk_size
+        ctx.ignore_index = ignore_index
+        ctx.total_count = total_count  # 0 possible (a batch entirely of
+        # ignore_index) -- guarded in both forward's division and backward's
+        # scaling below rather than letting either divide by zero.
+        return total_loss / max(total_count, 1)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        hidden, weight, labels = ctx.saved_tensors
+        if ctx.total_count == 0:
+            return torch.zeros_like(hidden), torch.zeros_like(weight), None, None, None
+        chunk_size, ignore_index = ctx.chunk_size, ctx.ignore_index
+        scale = grad_output / ctx.total_count
+        grad_hidden = torch.zeros_like(hidden)
+        grad_weight = torch.zeros_like(weight)
+        # The autograd engine runs Function.backward with grad mode globally
+        # OFF (unless the caller requested create_graph=True, which nothing
+        # here does) -- the recomputation below needs it explicitly back on,
+        # or chunk_logits/chunk_loss build no graph at all and
+        # torch.autograd.grad has nothing to differentiate through (same
+        # requirement torch.utils.checkpoint's own backward has, for the
+        # same reason).
+        with torch.enable_grad():
+            for start in range(0, hidden.shape[0], chunk_size):
+                end = min(start + chunk_size, hidden.shape[0])
+                chunk_labels = labels[start:end]
+                if not (chunk_labels != ignore_index).any():
+                    continue
+                # Fresh leaves, detached from `hidden`/`weight`'s own
+                # history -- this recomputation is what lets forward skip
+                # saving logits.
+                chunk_hidden = hidden[start:end].detach().requires_grad_(True)
+                chunk_weight = weight.detach().requires_grad_(True)
+                chunk_logits = chunk_hidden @ chunk_weight.t()
+                chunk_loss = F.cross_entropy(
+                    chunk_logits, chunk_labels, ignore_index=ignore_index, reduction="sum"
+                )
+                g_hidden, g_weight = torch.autograd.grad(chunk_loss * scale, [chunk_hidden, chunk_weight])
+                grad_hidden[start:end] = g_hidden
+                grad_weight += g_weight
+        return grad_hidden, grad_weight, None, None, None
+
+
+def chunked_cross_entropy(hidden, weight, labels, chunk_size, ignore_index=-100):
+    """hidden: (num_rows, hidden_size) -- already flattened over batch*seq.
+    weight: lm_head.weight, (vocab_size, hidden_size). labels: (num_rows,).
+    Returns a scalar loss, numerically and gradient-wise equivalent to
+    F.cross_entropy((hidden @ weight.T), labels, ignore_index=ignore_index)
+    up to float rounding from chunking's different summation order -- see
+    _ChunkedCrossEntropy for why this trades one extra matmul for never
+    materializing the full logits tensor."""
+    return _ChunkedCrossEntropy.apply(hidden, weight, labels, chunk_size, ignore_index)
+
+
 def _padded_vocab_size(vocab_size, multiple_of=64):
     """Rounds vocab_size up to a multiple of `multiple_of` for the
     embedding/lm_head matmul shapes -- a real tensor-core throughput win
@@ -233,9 +315,15 @@ class TransformerLM(nn.Module):
 
     def forward(self, input_ids, labels=None):
         """input_ids: (B, T) long. labels: (B, T) long or None -- if given,
-        returns (logits, loss) with standard next-token cross-entropy.
-        Callers with already-shifted (x, y) pairs (shard_dataset) pass
-        input_ids=x, labels=y directly; no internal shifting here."""
+        returns (logits, loss) with standard next-token cross-entropy,
+        UNLESS cfg.loss_chunk_size > 0, in which case logits is None (see
+        chunked_cross_entropy's docstring for why: the whole point is to
+        never materialize the full (B*T, padded_vocab_size) tensor). Every
+        current caller that passes labels only ever reads back the loss
+        (train.py, validate()) -- confirmed via a repo-wide grep before
+        making this trade. Callers with already-shifted (x, y) pairs
+        (shard_dataset) pass input_ids=x, labels=y directly; no internal
+        shifting here."""
         x = self.embed(input_ids)
         for block in self.blocks:
             if self.cfg.grad_checkpointing and self.training:
@@ -243,8 +331,17 @@ class TransformerLM(nn.Module):
             else:
                 x = block(x)
         x = self.norm(x)
-        logits = self.lm_head(x)
 
+        if labels is not None and self.cfg.loss_chunk_size > 0:
+            loss = chunked_cross_entropy(
+                x.reshape(-1, x.size(-1)),
+                self.lm_head.weight,
+                labels.reshape(-1),
+                self.cfg.loss_chunk_size,
+            )
+            return None, loss
+
+        logits = self.lm_head(x)
         loss = None
         if labels is not None:
             loss = F.cross_entropy(
