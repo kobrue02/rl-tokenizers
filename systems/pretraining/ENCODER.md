@@ -143,3 +143,33 @@ MEAN across every language evaluated, so a single `--eval-lang` run and a
 `--eval-langs=all` sweep both collapse to one comparable number), and
 **Detailed** (every raw metric key, including the full per-language
 breakdown from an `all` sweep). Missing cells render as `--`, never `0`.
+
+## 6. Running the whole suite at once
+
+`jobs/run_encoder_eval_suite.sh` submits all 7 benchmarks/tasks above
+(pppl, retrieval, roundtrip, ner, pos, taxi1500, sib200) for every
+tokenizer listed in its own `ENCODER_CHECKPOINTS`/`TOKENIZER_SYSTEMS`/
+`TOKENIZER_CHECKPOINTS`/`TOKENIZER_VOCAB_JSONS` arrays, then chains
+`jobs/combine_encoder_results.sh` to regenerate `results/encoder_comparison.{json,md}`
+automatically once everything finishes (`--dependency=afterany`, so one
+benchmark failing doesn't block combining what did succeed):
+
+```bash
+bash jobs/run_encoder_eval_suite.sh   # run directly on the login node, NOT via sbatch
+```
+
+Separate jobs per benchmark, not one chained job — mirrors
+`jobs/evaluate_latest_checkpoints.sh`'s own reasoning (one benchmark's own
+budget could exceed any single time limit with no way to resume partway).
+Edit the four arrays at the top of the script to add more tokenizers; edit
+the language-setting variables below them (`RETRIEVAL_PAIR`, `TRAIN_LANG`,
+etc.) for different eval languages. Two safety defaults worth knowing:
+
+- **`MAX_EVAL_LANGS=20`** caps the ner/pos/sib200 `--eval-*=all` sweeps —
+  WikiANN has 176 configs, Universal Dependencies 350, and finetuning has
+  no auto-resubmit (see §3 above), so a genuinely unbounded first run
+  risks a wasted multi-hour job that never finishes. Set to `0` once
+  you've confirmed a capped run's real wall-clock budget.
+- **Roundtrip is skipped automatically** (with a printed warning) if
+  `data/bible_nlp` isn't found locally, rather than submitting a job that
+  would fail immediately.
