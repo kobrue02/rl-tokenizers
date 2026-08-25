@@ -1,0 +1,26 @@
+{
+  "label": "fanta",
+  "task": "taxi1500",
+  "checkpoint": "checkpoints/encoder_pretrain_fanta/final.pt",
+  "system": "fanta",
+  "tokenizer_checkpoint": "checkpoints/fanta_6284655.pt",
+  "config": {
+    "train_lang": "en",
+    "eval_lang": "de",
+    "eval_langs": "",
+    "train_config": "en_ewt",
+    "eval_config": "de_gsd",
+    "eval_configs": "",
+    "train_lang_script": "eng_Latn",
+    "eval_lang_script": "deu_Latn",
+    "eval_lang_scripts": ""
+  },
+  "result": {
+    "eval_loss": 2.422349691390991,
+    "eval_macro_f1": 0.4998478868714804,
+    "eval_runtime": 0.6408,
+    "eval_samples_per_second": 173.218,
+    "eval_steps_per_second": 21.847,
+    "epoch": 30.0
+  }
+}

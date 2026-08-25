@@ -1,0 +1,20 @@
+{
+  "label": "bpe",
+  "benchmark": "retrieval",
+  "checkpoint": "checkpoints/encoder_pretrain_bpe/final.pt",
+  "system": "bpe",
+  "tokenizer_checkpoint": "checkpoints/bpe_50k.json",
+  "config": {
+    "dataset": "tatoeba_mt",
+    "pair": "deu-eng",
+    "split": "test",
+    "lang": null,
+    "cycle_langs": "eng,fra,deu,eng",
+    "layer": 8
+  },
+  "result": {
+    "top1_accuracy": 0.013663535006344318,
+    "top5_accuracy": 0.026359237730503082,
+    "top10_accuracy": 0.03341872990131378
+  }
+}

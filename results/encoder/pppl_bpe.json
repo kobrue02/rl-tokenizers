@@ -1,0 +1,18 @@
+{
+  "label": "bpe",
+  "benchmark": "pppl",
+  "checkpoint": "checkpoints/encoder_pretrain_bpe/final.pt",
+  "system": "bpe",
+  "tokenizer_checkpoint": "checkpoints/bpe_50k.json",
+  "config": {
+    "dataset": "tatoeba_mt",
+    "pair": "deu-eng",
+    "split": "test",
+    "lang": "deu",
+    "cycle_langs": "eng,fra,deu,eng",
+    "layer": 8
+  },
+  "result": {
+    "pseudoperplexity": 684.0874617800815
+  }
+}

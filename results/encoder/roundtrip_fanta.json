@@ -1,0 +1,18 @@
+{
+  "label": "fanta",
+  "benchmark": "roundtrip",
+  "checkpoint": "checkpoints/encoder_pretrain_fanta/final.pt",
+  "system": "fanta",
+  "tokenizer_checkpoint": "checkpoints/fanta_6284655.pt",
+  "config": {
+    "dataset": "tatoeba_mt",
+    "pair": null,
+    "split": "test",
+    "lang": null,
+    "cycle_langs": "eng,fra,deu,eng",
+    "layer": 8
+  },
+  "result": {
+    "roundtrip_accuracy": 0.12727496214242978
+  }
+}

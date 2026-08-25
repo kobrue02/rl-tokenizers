@@ -1,0 +1,26 @@
+{
+  "label": "bpe",
+  "task": "taxi1500",
+  "checkpoint": "checkpoints/encoder_pretrain_bpe/final.pt",
+  "system": "bpe",
+  "tokenizer_checkpoint": "checkpoints/bpe_50k.json",
+  "config": {
+    "train_lang": "en",
+    "eval_lang": "de",
+    "eval_langs": "",
+    "train_config": "en_ewt",
+    "eval_config": "de_gsd",
+    "eval_configs": "",
+    "train_lang_script": "eng_Latn",
+    "eval_lang_script": "deu_Latn",
+    "eval_lang_scripts": ""
+  },
+  "result": {
+    "eval_loss": 2.3576433658599854,
+    "eval_macro_f1": 0.56503322576594,
+    "eval_runtime": 0.1369,
+    "eval_samples_per_second": 810.835,
+    "eval_steps_per_second": 102.267,
+    "epoch": 30.0
+  }
+}
