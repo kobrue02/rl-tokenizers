@@ -1,0 +1,16 @@
+# systems/pretraining/encoder_cli.py -- sbatch --gres=gpu:4 jobs/train_encoder_pretraining.sh -c configs/pretrain_encoder_bpe_large.yml
+# Full-scale encoder counterpart to configs/pretrain_bpe_large.yml -- see
+# configs/pretrain_encoder_fanta_large.yml's own comment for the scale
+# rationale (identical here -- same encoder_size, same step/token budget,
+# just bpe's own shard_dir/output_dir). Reuses the SAME shards the decoder's
+# large run consumes (see ENCODER.md: "shard-dir points at the SAME shards
+# data_prep.py builds for the decoder").
+shard_dir: pretrain_data/glot500_bpe_large
+encoder_size: large
+total_steps: 450000
+seq_len: 1024
+per_device_batch_size: 16
+output_dir: checkpoints/encoder_pretrain_bpe_large
+use_wandb: true
+run_name: encoder_bpe_large_450k_steps
+resume_from: ""

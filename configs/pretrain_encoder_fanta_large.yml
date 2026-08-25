@@ -1,0 +1,35 @@
+# systems/pretraining/encoder_cli.py -- sbatch --gres=gpu:4 jobs/train_encoder_pretraining.sh -c configs/pretrain_encoder_fanta_large.yml
+# (--gres=gpu:4 on the sbatch command line overrides the job script's own
+# default #SBATCH --gres=gpu:1 pragma -- see train_encoder_pretraining.sh's
+# own comment on this. It also auto-detects SLURM_GPUS_ON_NODE > 1 and
+# launches via torchrun instead of a plain python3 call, no other change
+# needed.)
+shard_dir: pretrain_data/glot500_fanta_large
+encoder_size: large
+total_steps: 450000
+seq_len: 1024
+per_device_batch_size: 16
+output_dir: checkpoints/encoder_pretrain_fanta_large
+use_wandb: true
+run_name: encoder_fanta_large_450k_steps
+# --- scale rationale (rough planning estimate, not a verified benchmark) ---
+# Matches configs/pretrain_fanta_large.yml's own token budget EXACTLY
+# (effective_batch_size 64 * seq_len 1024 * 450,000 steps ~= 29.5B tokens)
+# so the two full-scale encoder runs are trained on the identical token
+# count as the decoder's own full runs -- a fair "same architecture family,
+# same budget, different tokenizer" comparison, one level up from the
+# 50k-step validation runs already in results/encoder_comparison.md.
+#
+# encoder_size=large is XLM-R-large dims (~303M transformer-body params,
+# see encoder_model_configs.py) vs. the decoder's own "large" preset
+# (~700M params) -- roughly 0.43x the params, and encoder_train.py has no
+# gradient-checkpointing recompute overhead (unlike the decoder's "large"
+# preset, on by default there). Net ballpark vs. the decoder large run's
+# own ~230-250h estimate: roughly 0.3x that, ~70-90 hours (~3-4 days) of
+# wall clock across 4 A100s for the full 450,000 steps, i.e. roughly 3-4
+# resubmits of this job's 24h SLURM time limit via
+# --resume-from checkpoints/encoder_pretrain_fanta_large/step_<N>.pt.
+# Treat this as a rough estimate to plan around -- watch this run's own
+# step-rate in its wandb run (encoder_fanta_large_450k_steps) and re-derive
+# a tighter ETA from real throughput once it's running.
+resume_from: ""
