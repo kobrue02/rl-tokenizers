@@ -14,7 +14,7 @@ with for a different source) and isn't auto-downloadable here.
 
 DOWNLOAD (download_taxi1500_split, one-time, mirrors common/data/
 prepare_bible_nlp.py's own local-cache convention): fetches
-eng_data/{split}.tsv from GitHub raw content into a local cache file, a
+eng_data/eng_{split}.tsv from GitHub raw content into a local cache file, a
 no-op if that file already exists.
 
 LOADING (load_taxi1500_tsv): parses that same 3-column format from ANY
@@ -31,7 +31,7 @@ import requests
 
 from .encoder_finetune_classification import TAXI1500_LABELS
 
-TAXI1500_GITHUB_RAW = "https://raw.githubusercontent.com/cisnlp/Taxi1500/main/eng_data/{split}.tsv"
+TAXI1500_GITHUB_RAW = "https://raw.githubusercontent.com/cisnlp/Taxi1500/main/eng_data/eng_{split}.tsv"
 
 
 def download_taxi1500_split(split, output_dir, timeout=60):

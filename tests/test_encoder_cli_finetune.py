@@ -13,6 +13,7 @@ from systems.pretraining.encoder_cli_finetune import (
     SIB200_LABELS,
     UPOS_LABELS,
     WIKIANN_LABELS,
+    _build_eval_rows_by_name,
     main,
     run_ner,
     run_pos,
@@ -29,11 +30,13 @@ from systems.tokenization.bpe.model import fit_bpe
 
 class _FakeHFDataset:
     """Minimal stand-in for a datasets.Dataset: len(), integer indexing
-    returning a dict row, and .select(range(...)) -- everything
-    encoder_cli_finetune._capped/TaggingDataset actually use."""
+    returning a dict row, .select(range(...)), and .column_names -- everything
+    encoder_cli_finetune._capped/_build_eval_rows_by_name/TaggingDataset
+    actually use."""
 
     def __init__(self, rows):
         self.rows = rows
+        self.column_names = list(rows[0].keys()) if rows else []
 
     def __len__(self):
         return len(self.rows)
@@ -235,6 +238,87 @@ def test_run_sib200_dispatches_mteb_sib200_and_reports_macro_f1(mlm_checkpoint, 
 
     out = capsys.readouterr().out
     assert "sib200: 4 train (eng_Latn) / 2 eval (deu_Latn) rows" in out
+
+
+def test_build_eval_rows_by_name_skips_a_malformed_language_and_warns(capsys):
+    """Real bug this guards against: 2 of mteb/sib200's first 20 non-English
+    configs (ace_Arab, arb_Arab) ship {'index_id', 'category', 'text',
+    'lang'} instead of {'label', 'text', 'lang'} -- confirmed live against
+    the real dataset -- which crashed a real 12-hour --eval-langs=all
+    finetune job partway through its first epoch. A malformed language must
+    be skipped (with a visible warning), not take down the whole sweep."""
+    def load_raw_fn(name, split, max_examples):
+        if name == "bad_lang":
+            return _FakeHFDataset([{"index_id": 0, "category": "x", "text": "t", "lang": "bad_lang"}])
+        return _FakeHFDataset([{"text": "hello", "label": 0, "lang": name}])
+
+    result = _build_eval_rows_by_name(
+        load_raw_fn, ["good_lang", "bad_lang"], ["text", "label"], "sib200", max_eval_examples=None
+    )
+
+    assert set(result.keys()) == {"good_lang"}
+    out = capsys.readouterr().out
+    assert "WARNING: sib200 config 'bad_lang' is missing column(s) ['label']" in out
+
+
+def test_build_eval_rows_by_name_raises_if_every_language_is_malformed():
+    def load_raw_fn(name, split, max_examples):
+        return _FakeHFDataset([{"index_id": 0, "category": "x", "text": "t", "lang": name}])
+
+    with pytest.raises(RuntimeError, match="every requested eval language failed schema validation"):
+        _build_eval_rows_by_name(load_raw_fn, ["bad1", "bad2"], ["text", "label"], "sib200", max_eval_examples=None)
+
+
+def test_build_eval_rows_by_name_applies_remap_fn_only_to_survivors():
+    def load_raw_fn(name, split, max_examples):
+        if name == "bad_lang":
+            return _FakeHFDataset([{"tokens": ["a"], "wrong_column": ["X"]}])
+        return _FakeHFDataset([{"tokens": ["a", "b"], "upos": ["DET", "NOUN"]}])
+
+    calls = []
+
+    def remap_fn(raw):
+        calls.append(raw)
+        return "remapped"
+
+    result = _build_eval_rows_by_name(
+        load_raw_fn, ["good_lang", "bad_lang"], ["tokens", "upos"], "universal_dependencies",
+        max_eval_examples=None, remap_fn=remap_fn,
+    )
+
+    assert result == {"good_lang": ("remapped", None)}
+    assert len(calls) == 1  # remap_fn must never run on the skipped language
+
+
+def test_run_sib200_with_eval_lang_scripts_skips_a_malformed_language(mlm_checkpoint, vocab, tmp_path, monkeypatch, capsys):
+    """Integration-level version of the two tests above: a real --task
+    sib200 --eval-lang-scripts run with one malformed language in the list
+    must finish successfully, reporting results for the good language and
+    a warning (not a crash) for the bad one."""
+    rows_by_config = {
+        "eng_Latn": [{"text": "the weather is nice", "label": 1, "lang": "eng_Latn"}] * 4,
+        "deu_Latn": [{"text": "das wetter ist schoen", "label": 1, "lang": "deu_Latn"}] * 2,
+        "ace_Arab": [{"index_id": 0, "category": "x", "text": "malformed", "lang": "ace_Arab"}] * 2,
+    }
+
+    def fake_load_dataset(name, config, split):
+        assert name == "mteb/sib200"
+        return _FakeHFDataset(rows_by_config[config])
+
+    monkeypatch.setattr("datasets.load_dataset", fake_load_dataset)
+
+    args = _Args(
+        checkpoint=mlm_checkpoint, train_lang_script="eng_Latn", eval_lang_scripts="deu_Latn,ace_Arab",
+        max_train_examples=None, max_eval_examples=None,
+        output_dir=str(tmp_path / "out"), device="cpu",
+    )
+    result = run_sib200(args, vocab)
+
+    out = capsys.readouterr().out
+    assert "WARNING: sib200 config 'ace_Arab' is missing column(s) ['label']" in out
+    assert "deu_Latn: eval_macro_f1=" in out
+    assert "eval_deu_Latn_macro_f1" in result
+    assert "eval_ace_Arab_macro_f1" not in result
     assert "eval_macro_f1=" in out
 
 

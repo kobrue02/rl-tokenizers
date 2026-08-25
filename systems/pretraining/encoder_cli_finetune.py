@@ -89,22 +89,71 @@ def _load_wikiann_split(lang, split, max_examples):
     return _capped(load_dataset("unimelb-nlp/wikiann", lang, split=split), max_examples)
 
 
-def _load_ud_split_with_int_upos(config, split, max_examples):
+def _load_ud_raw_split(config, split, max_examples):
+    from datasets import load_dataset
+
+    return _capped(load_dataset("universal-dependencies/universal_dependencies", config, split=split), max_examples)
+
+
+def _remap_ud_upos_to_int(hf_split):
     """Universal Dependencies' own `upos` column is a list of STRINGS (no
     ClassLabel) -- remapped here through UPOS_LABELS' own fixed order into
     plain Python dict rows (see encoder_finetune_tagging.TaggingDataset,
-    which just needs len()+index access, not specifically an HF Dataset)."""
-    from datasets import load_dataset
-
-    hf_split = _capped(load_dataset("universal-dependencies/universal_dependencies", config, split=split), max_examples)
+    which just needs len()+index access, not specifically an HF Dataset).
+    Split from _load_ud_raw_split so a multi-language sweep can validate
+    the raw HF Dataset's own columns (see _build_eval_rows_by_name) BEFORE
+    remapping -- remapping a malformed config would raise a much less
+    obvious KeyError on `row["upos"]` instead."""
     label_to_id = {label: i for i, label in enumerate(UPOS_LABELS)}
     return [{"tokens": row["tokens"], "upos_ids": [label_to_id[tag] for tag in row["upos"]]} for row in hf_split]
+
+
+def _load_ud_split_with_int_upos(config, split, max_examples):
+    return _remap_ud_upos_to_int(_load_ud_raw_split(config, split, max_examples))
 
 
 def _load_sib200_split(lang_script, split, max_examples):
     from datasets import load_dataset
 
     return _capped(load_dataset("mteb/sib200", lang_script, split=split), max_examples)
+
+
+def _build_eval_rows_by_name(load_raw_fn, eval_names, required_columns, dataset_label, max_eval_examples, remap_fn=None):
+    """Builds the eval_rows_by_name dict a multi-language sweep passes to
+    finetune_tagging/finetune_classification, skipping (with a printed
+    warning, never silently) any language whose loaded split is missing an
+    expected column -- not every config of a community-hosted multi-config
+    dataset necessarily shares the same schema. Confirmed live: 2 of
+    mteb/sib200's first 20 non-English configs (ace_Arab, arb_Arab) ship
+    {'index_id', 'category', 'text', 'lang'} instead of the expected
+    {'label', 'text', 'lang'} -- this crashed a real 12-hour
+    --eval-langs=all finetune job partway through its first epoch
+    (Trainer's own eval_strategy="epoch" hit the bad config on the first
+    end-of-epoch evaluation, deep enough in that the whole job's progress
+    was lost). load_raw_fn(name, "test", max_eval_examples) must return
+    the RAW HF Dataset (before any remapping, e.g. UD's own upos-string-
+    to-int step) so validation sees the dataset's own real columns;
+    remap_fn, if given, is applied only to languages that pass validation.
+
+    Raises if every single requested language fails validation (nothing
+    left to evaluate at all) rather than silently returning an empty,
+    useless eval_dataset."""
+    eval_rows_by_name = {}
+    for name in eval_names:
+        raw = load_raw_fn(name, "test", max_eval_examples)
+        missing = [c for c in required_columns if c not in raw.column_names]
+        if missing:
+            print(
+                f"  WARNING: {dataset_label} config {name!r} is missing column(s) {missing} "
+                f"(has {raw.column_names}) -- skipping this language, not the whole run."
+            )
+            continue
+        eval_rows_by_name[name] = (remap_fn(raw) if remap_fn is not None else raw, None)
+    if not eval_rows_by_name:
+        raise RuntimeError(
+            f"{dataset_label}: every requested eval language failed schema validation -- nothing to evaluate"
+        )
+    return eval_rows_by_name
 
 
 def _resolve_eval_names(eval_langs_arg, repo_id, train_name, max_eval_langs):
@@ -139,15 +188,15 @@ def run_ner(args, vocab):
 
     if eval_names is not None:
         print(f"ner: {len(train_rows)} train ({args.train_lang})")
-        eval_rows_by_name = {
-            name: (_load_wikiann_split(name, "test", args.max_eval_examples), None) for name in eval_names
-        }
+        eval_rows_by_name = _build_eval_rows_by_name(
+            _load_wikiann_split, eval_names, ["tokens", "ner_tags"], "wikiann", args.max_eval_examples
+        )
         result = finetune_tagging(
             args.checkpoint, train_rows, eval_rows=None, tag_column="ner_tags", label_list=WIKIANN_LABELS,
             vocab=vocab, output_dir=args.output_dir, device=args.device,
             eval_rows_by_name=eval_rows_by_name, use_wandb=args.use_wandb, run_name=args.run_name or None,
         )
-        for name in eval_names:
+        for name in eval_rows_by_name:
             print(f"  {name}: eval_f1={result[f'eval_{name}_f1']:.4f} eval_precision={result[f'eval_{name}_precision']:.4f} eval_recall={result[f'eval_{name}_recall']:.4f}")
         return result
 
@@ -170,15 +219,16 @@ def run_pos(args, vocab):
 
     if eval_names is not None:
         print(f"pos: {len(train_rows)} train ({args.train_config})")
-        eval_rows_by_name = {
-            name: (_load_ud_split_with_int_upos(name, "test", args.max_eval_examples), None) for name in eval_names
-        }
+        eval_rows_by_name = _build_eval_rows_by_name(
+            _load_ud_raw_split, eval_names, ["tokens", "upos"], "universal_dependencies",
+            args.max_eval_examples, remap_fn=_remap_ud_upos_to_int,
+        )
         result = finetune_tagging(
             args.checkpoint, train_rows, eval_rows=None, tag_column="upos_ids", label_list=UPOS_LABELS,
             scheme="flat", vocab=vocab, output_dir=args.output_dir, device=args.device,
             eval_rows_by_name=eval_rows_by_name, use_wandb=args.use_wandb, run_name=args.run_name or None,
         )
-        for name in eval_names:
+        for name in eval_rows_by_name:
             print(f"  {name}: eval_accuracy={result[f'eval_{name}_accuracy']:.4f}")
         return result
 
@@ -218,15 +268,15 @@ def run_sib200(args, vocab):
 
     if eval_names is not None:
         print(f"sib200: {len(train_rows)} train ({args.train_lang_script})")
-        eval_rows_by_name = {
-            name: (_load_sib200_split(name, "test", args.max_eval_examples), None) for name in eval_names
-        }
+        eval_rows_by_name = _build_eval_rows_by_name(
+            _load_sib200_split, eval_names, ["text", "label"], "sib200", args.max_eval_examples
+        )
         result = finetune_classification(
             args.checkpoint, train_rows, eval_rows=None, vocab=vocab, output_dir=args.output_dir,
             label_list=SIB200_LABELS, device=args.device,
             eval_rows_by_name=eval_rows_by_name, use_wandb=args.use_wandb, run_name=args.run_name or None,
         )
-        for name in eval_names:
+        for name in eval_rows_by_name:
             print(f"  {name}: eval_macro_f1={result[f'eval_{name}_macro_f1']:.4f}")
         return result
 

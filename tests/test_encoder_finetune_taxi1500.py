@@ -6,7 +6,6 @@ tests, e.g. test_data_prep.py's monkeypatched stream_groups)."""
 import pytest
 
 from systems.pretraining.encoder_finetune_taxi1500 import (
-    TAXI1500_GITHUB_RAW,
     download_taxi1500_split,
     load_taxi1500_tsv,
 )
@@ -75,7 +74,14 @@ def test_download_taxi1500_split_fetches_the_right_url_and_writes_the_file(tmp_p
 
     path = download_taxi1500_split("train", str(tmp_path))
 
-    assert calls == [TAXI1500_GITHUB_RAW.format(split="train")]
+    # Asserted against the LITERAL, live-verified URL, not
+    # TAXI1500_GITHUB_RAW.format(...) -- a wrong constant would otherwise
+    # pass this test by construction. Real bug this guards against: the
+    # constant briefly read "eng_data/{split}.tsv" (missing the "eng_"
+    # prefix on the FILENAME itself, not just the local cache path) --
+    # confirmed live to 404 -- while this same test, checked only against
+    # the module's own constant, kept passing the whole time.
+    assert calls == ["https://raw.githubusercontent.com/cisnlp/Taxi1500/main/eng_data/eng_train.tsv"]
     assert path == str(tmp_path / "eng_train.tsv")
     assert load_taxi1500_tsv(path) == [{"text": "hello world", "label": 1}]
 
