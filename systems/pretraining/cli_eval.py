@@ -32,6 +32,12 @@ Usage:
         # blimp is also multiple-choice (--langs there means paradigm names,
         # see benchmarks.load_blimp); cola/squad ignore --langs/--lang-pairs
         # entirely and use --max-new-tokens/--temperature like flores_mt does.
+        #
+        # --output's JSON is wrapped as {"label", "benchmark", "checkpoint",
+        # "system", "tokenizer_checkpoint", "results": {<benchmark>: ...}} --
+        # pass --label bpe / --label fanta (defaults to --system) so
+        # scripts.combine_decoder_results can group multiple runs' files
+        # under distinct keys for scripts.generate_eval_comparison_figures.
 
 Infrastructure only -- verified via run_smoke_test below against a tiny
 freshly-initialized model, not a real pretrained checkpoint.
@@ -315,6 +321,12 @@ def build_arg_parser():
     parser.add_argument("--max-new-tokens", type=int, default=128, help="flores_mt/squad only")
     parser.add_argument("--temperature", type=float, default=1.0, help="flores_mt/squad only")
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument(
+        "--label", type=str, default="", help="name this run compares under -- defaults to --system. "
+        "scripts.combine_decoder_results groups records by this key (e.g. run bpe and fanta checkpoints "
+        "through this same --benchmark list with --label bpe / --label fanta so both land under distinct "
+        "keys even if --system alone would collide, e.g. two bpe runs at different vocab sizes)",
+    )
     parser.add_argument("--output", type=str, default=None, help="write JSON results here (default: print to stdout)")
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument(
@@ -351,7 +363,15 @@ def main(argv=None):
         temperature=args.temperature,
     )
 
-    payload = json.dumps(results, indent=2, default=str)
+    record = {
+        "label": args.label or args.system,
+        "benchmark": benchmark_names,
+        "checkpoint": args.checkpoint,
+        "system": args.system,
+        "tokenizer_checkpoint": args.tokenizer_checkpoint,
+        "results": results,
+    }
+    payload = json.dumps(record, indent=2, default=str)
     if args.output:
         with open(args.output, "w") as f:
             f.write(payload)

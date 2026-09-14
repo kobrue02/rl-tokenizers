@@ -12,6 +12,7 @@ benchmark: "xnli,xcopa,flores_mt"
 langs: "ar,bg,de,el,en,es,et,fr,hi,ht,id,it,qu,ru,sw,ta,th,tr,ur,vi,zh"
 lang_pairs: "eng:spa,eng:arz,eng:ben"
 max_examples: 4000
+label: bpe
 output: results/all_bpe_large.json
 use_wandb: true
 run_name: bpe_large_450k_steps

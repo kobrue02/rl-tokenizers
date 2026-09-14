@@ -46,6 +46,22 @@ assumed from model family), each with a real gotcha:
      directly, no offset reconstruction needed. Selected via a
      "tiktoken:{encoding_name}" pseudo-repo-id (e.g. "tiktoken:cl100k_base")
      since these aren't HF Hub repos and a bare name could collide with one.
+
+  4. ID-offset byte tokenizers (ByT5, e.g. google/byt5-small): no merging
+     at all -- the id IS the raw UTF-8 byte value plus a constant
+     `tokenizer.offset` (a public attribute the tokenizer itself exposes,
+     e.g. 3 for ByT5's 3 reserved special-token ids), so 1 id = 1 byte.
+     Selected only when the tokenizer actually has an `.offset` attribute
+     (detected, never assumed from model family) and the round-trip
+     succeeds.
+
+  5. Codepoint tokenizers (CANINE, e.g. google/canine-s, google/canine-c):
+     no vocabulary at all -- the id IS the Unicode codepoint directly
+     (`vocab_size == 0x110000`, the entire codepoint range; special tokens
+     live in the Private Use Area so they never collide with real text),
+     so 1 id = 1 character, reconstructed via `chr(id).encode("utf-8")`.
+     Selected only when vocab_size matches that signature and the
+     round-trip succeeds.
 """
 
 import re
@@ -131,17 +147,40 @@ def _spans_via_offsets(tokenizer, text):
     return spans
 
 
-def _detect_span_method(tokenizer):
-    """Returns "byte_level" or "offset_mapping", chosen by actually trying
-    each and checking a round-trip against the canary. Raises ValueError
-    (not silently-wrong spans) if neither scheme reconstructs it exactly.
+def _spans_via_id_offset(tokenizer, text, offset):
+    """Scheme 4 (module docstring): 1 token = 1 raw byte, byte value =
+    id - offset. bytes([...]) raises ValueError for any id that maps
+    outside 0-255 (e.g. a special-token id below `offset`, already
+    excluded here via add_special_tokens=False) -- caller treats that as
+    "this scheme doesn't apply", same discipline as the KeyError caught
+    around _spans_via_byte_level."""
+    ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+    return [bytes([i - offset]) for i in ids]
 
-    Byte-level is tried FIRST regardless of tokenizer.is_fast: a "slow"
-    (pure-Python) tokenizer (e.g. Kimi-K3) can still be genuine byte-level
-    BPE, which only needs convert_ids_to_tokens. is_fast is only checked
-    before the offset_mapping fallback, since return_offsets_mapping
-    genuinely needs a fast tokenizer -- checked there, not up front, so a
-    slow-but-byte-level tokenizer isn't rejected before it gets a chance."""
+
+def _spans_via_codepoint(tokenizer, text):
+    """Scheme 5 (module docstring): 1 token = 1 raw Unicode codepoint,
+    reconstructed directly since the id IS the codepoint. chr()/encode()
+    raise ValueError/UnicodeEncodeError for an id that isn't a valid,
+    encodable codepoint (e.g. a lone surrogate) -- caller treats that the
+    same way as _spans_via_id_offset's out-of-range bytes()."""
+    ids = tokenizer(text, add_special_tokens=False)["input_ids"]
+    return [chr(i).encode("utf-8") for i in ids]
+
+
+def _detect_span_method(tokenizer):
+    """Returns "byte_level", "id_offset", "codepoint", or "offset_mapping",
+    chosen by actually trying each and checking a round-trip against the
+    canary. Raises ValueError (not silently-wrong spans) if none of them
+    reconstructs it exactly.
+
+    All of byte_level/id_offset/codepoint are tried FIRST, regardless of
+    tokenizer.is_fast: none of them needs return_offsets_mapping, so a
+    "slow" (pure-Python) tokenizer (e.g. Kimi-K3's byte-level BPE, ByT5,
+    CANINE) still gets a fair shot at them. is_fast is only checked before
+    the offset_mapping fallback, since THAT scheme genuinely needs a fast
+    tokenizer -- checked there, not up front, so none of the id-based
+    schemes is rejected before it gets a chance."""
     try:
         spans = _spans_via_byte_level(tokenizer, _CANARY_TEXT)
         if b"".join(spans) == _CANARY_TEXT.encode("utf-8"):
@@ -149,22 +188,39 @@ def _detect_span_method(tokenizer):
     except KeyError:
         pass
 
+    offset = getattr(tokenizer, "offset", None)
+    if offset is not None:
+        try:
+            spans = _spans_via_id_offset(tokenizer, _CANARY_TEXT, offset)
+            if b"".join(spans) == _CANARY_TEXT.encode("utf-8"):
+                return "id_offset"
+        except (KeyError, ValueError):
+            pass
+
+    if getattr(tokenizer, "vocab_size", 0) >= 0x110000:
+        try:
+            spans = _spans_via_codepoint(tokenizer, _CANARY_TEXT)
+            if b"".join(spans) == _CANARY_TEXT.encode("utf-8"):
+                return "codepoint"
+        except (KeyError, ValueError, UnicodeEncodeError):
+            pass
+
     if not tokenizer.is_fast:
         raise ValueError(
-            f"{tokenizer.__class__.__name__} is not a 'fast' (Rust-backed) tokenizer and its "
-            "byte-level-BPE reconstruction didn't round-trip -- the character-offset fallback "
-            "needs offset_mapping, which only fast tokenizers provide (this repo likely has no "
-            "tokenizer.json, and isn't byte-level-BPE either)"
+            f"{tokenizer.__class__.__name__} is not a 'fast' (Rust-backed) tokenizer, and none "
+            "of byte-level-BPE, id-offset, or codepoint reconstruction round-tripped -- the "
+            "character-offset fallback needs offset_mapping, which only fast tokenizers "
+            "provide (this repo likely has no tokenizer.json, and isn't byte-level-BPE, "
+            "ByT5-style, or CANINE-style either)"
         )
 
     spans = _spans_via_offsets(tokenizer, _CANARY_TEXT)
     if b"".join(spans) != _CANARY_TEXT.encode("utf-8"):
         raise ValueError(
-            f"{tokenizer.__class__.__name__}: neither byte-level-BPE nor offset-mapping "
-            "span reconstruction round-trips the canary string exactly -- this specific "
-            "tokenizer's scheme isn't one of the two handled by systems/hf_frontier/model.py "
-            "yet (see its own module docstring); do not use its results without extending "
-            "this module first"
+            f"{tokenizer.__class__.__name__}: none of the span-reconstruction schemes in "
+            "systems/hf_frontier/model.py round-trip the canary string exactly -- this "
+            "specific tokenizer's scheme isn't one of the ones handled here yet (see this "
+            "module's own docstring); do not use its results without extending this module first"
         )
     return "offset_mapping"
 
@@ -212,4 +268,8 @@ class HFFrontierTokenizer:
             return _spans_via_byte_level(self.tokenizer, text)
         if self.span_method == "tiktoken":
             return _spans_via_tiktoken(self.tokenizer, text)
+        if self.span_method == "id_offset":
+            return _spans_via_id_offset(self.tokenizer, text, self.tokenizer.offset)
+        if self.span_method == "codepoint":
+            return _spans_via_codepoint(self.tokenizer, text)
         return _spans_via_offsets(self.tokenizer, text)

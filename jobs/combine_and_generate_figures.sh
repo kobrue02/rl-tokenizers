@@ -17,13 +17,24 @@
 # Cheap (JSON merge + text generation, no model/network) -- 15min is generous headroom.
 #
 # Excludes results/all_tokenizers_comparison.json itself (avoids feeding a
-# stale combined file back into its own next combine) and any
+# stale combined file back into its own next combine), any
 # *indigenous_panel*_comparison.json -- CONFIRMED LIVE BUG: that file reuses
 # the SAME model-name keys as hf_frontier_comparison.json but a totally
 # different shape, and combine_eval_results.py's "later file wins" merge
 # silently overwrote 33 good hf_frontier entries with the wrong shape. The
 # indigenous panel has its own separate consumer
 # (scripts/generate_tikz_figures.py --indigenous-panel) and must stay excluded here.
+#
+# ALSO excludes results/encoder_comparison.json -- CONFIRMED LIVE, SAME BUG
+# CLASS: it reuses the literal keys "bpe"/"fanta" for a completely different
+# evaluation (downstream encoder task scores: ner/pos/pppl/retrieval/
+# roundtrip/sib200/taxi1500, see results/encoder_comparison.md), not
+# tokenizer-fairness metrics, and lacks token_parity_spread entirely --
+# combine_eval_results.py's "later file wins" merge silently clobbers the
+# real bpe_comparison.json/fanta_comparison.json entries with these,
+# and generate_tikz_figures.py then hard-fails on the missing field. The
+# encoder comparison has its own separate consumer (results/encoder_comparison.md,
+# written by hand from this file) and must stay excluded here too.
 #
 # Runs scripts/backfill_anchor_invariant_parity.py first (a no-op for
 # entries that already have token_parity_spread) since generate_tikz_figures.py
@@ -42,6 +53,7 @@ inputs=()
 for f in results/*_comparison.json; do
     [ "$f" = "results/all_tokenizers_comparison.json" ] && continue
     [[ "$f" == *indigenous_panel* ]] && continue
+    [ "$f" = "results/encoder_comparison.json" ] && continue
     inputs+=("$f")
 done
 

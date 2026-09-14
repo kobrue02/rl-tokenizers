@@ -96,9 +96,30 @@
 # renyi scores against xlm-roberta-base's, which matched to full float
 # precision for the large majority of languages. Kept as one representative:
 # xlm-roberta-base (already present from the original 33).
-hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony,Jarbas/m2v-256-multilingual-e5-small,Jarbas/m2v-256-bge-reranker-v2-m3,Yoonyoul/fine-tuned-e5-small-drugproduct,bluexmas/mbart50_ko_vi,antebe/token_punct_dilute,slone/mbart-large-51-myv-mul-v1"
+#
+# 2 more added: google/byt5-small and google/canine-s -- both mentioned in
+# the background chapter but previously unable to load, since neither is
+# byte-level-BPE (scheme 1) nor offset-mapping-reconstructible (scheme 2):
+# both are "slow" (pure-Python) tokenizers whose ids don't come from any
+# merge process at all. Fixed properly in systems/tokenization/hf_frontier/model.py
+# (two new schemes, not a workaround) rather than skipped:
+#   - ByT5: id = raw UTF-8 byte + tokenizer.offset (a public attribute, 3
+#     here) -- 1 id = 1 byte, no vocab. vocab_size=256.
+#   - CANINE: id = Unicode codepoint directly -- 1 id = 1 character, no
+#     vocab. vocab_size=0x110000 (1114112), the entire codepoint range.
+# Both verified live via a real HFFrontierTokenizer.load() + canary
+# round-trip, same discipline as every repo above.
+# google/canine-c NOT added alongside canine-s: confirmed live
+# (AutoTokenizer.from_pretrained on both) that CanineTokenizer's
+# vocab_size, special_tokens_map, and all_special_ids are byte-for-byte
+# identical between the two repos -- they differ only in pretrained model
+# WEIGHTS, which this tokenizer-only pipeline never loads, so canine-c
+# would just reproduce canine-s's numbers exactly. Same "one representative
+# when the tokenizer is provably identical" rule as the 5 XLM-R repos
+# dropped above.
+hf_repo_id: "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-cased,bert-base-multilingual-cased,distilbert-base-uncased,google/electra-base-discriminator,xlm-roberta-base,roberta-base,microsoft/deberta-base,microsoft/deberta-v3-base,answerdotai/ModernBERT-base,meta-models/Muse-Glimmer-30B,tiktoken:gpt2,tiktoken:r50k_base,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:cl100k_base,tiktoken:o200k_base,tiktoken:o200k_harmony,Jarbas/m2v-256-multilingual-e5-small,Jarbas/m2v-256-bge-reranker-v2-m3,Yoonyoul/fine-tuned-e5-small-drugproduct,bluexmas/mbart50_ko_vi,antebe/token_punct_dilute,slone/mbart-large-51-myv-mul-v1,google/byt5-small,google/canine-s"
 trust_remote_code: true
 eval_data_source: bouquet_test
 output: results/hf_frontier_comparison.json
 use_wandb: true
-run_name: hf_frontier_v6_39models
+run_name: hf_frontier_v7_41models

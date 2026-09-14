@@ -50,6 +50,34 @@ sbatch jobs/evaluate_pretrained.sh --checkpoint checkpoints/pretrain/final.pt \
   submissions rather than one giant job.
 - `contamination.py`/`cli_contamination.py` below is the thing to run
   *before* trusting these numbers, not after.
+- `--label` (defaults to `--system`) tags `--output`'s JSON for comparison
+  across tokenizers — see below.
+
+### Comparing multiple tokenizers' results
+
+`--output`'s JSON is `{"label", "benchmark", "checkpoint", "system",
+"tokenizer_checkpoint", "results": {<benchmark>: ...}}`. To compare several
+labels (e.g. `bpe` vs `fanta`) as a figure:
+
+```bash
+python3 -m scripts.combine_decoder_results \
+    --input results/all_bpe_large.json results/all_fanta_large.json \
+    --output results/decoder_comparison.json
+
+python3 -m scripts.generate_eval_comparison_figures \
+    --decoder-input results/decoder_comparison.json \
+    --encoder-input results/encoder_comparison.json \
+    --output-dir figures/tikz
+# --encoder-input is optional (scripts.combine_encoder_results's own output,
+# see ENCODER.md) -- pass either or both.
+```
+
+Writes `figures/tikz/decoder_classification/` (XNLI/XCOPA/BLiMP/SQuAD/CoLA,
+one grouped bar chart) and `figures/tikz/decoder_flores_mt/` (BLEU/chrF,
+kept separate since it's on a ~[0,100] scale unlike the others) — plus the
+encoder-side equivalents if `--encoder-input` is given. Same TikZ/pgfplots
+house style as `scripts/generate_tikz_figures.py` (no matplotlib); see that
+module's own docstring and `figures/tikz/README.md`.
 
 ## 2. Contamination check (`cli_contamination.py`)
 

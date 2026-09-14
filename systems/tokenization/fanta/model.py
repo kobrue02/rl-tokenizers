@@ -1,5 +1,5 @@
-"""FANTA = "FAir MANTa": MantaModel's architecture, unchanged, trained with two
-added loss terms (see fanta/train.py):
+"""FANTA = "Fair Adaptive Neural TokenizAtion": MantaModel's architecture,
+unchanged, trained with two added loss terms (see fanta/train.py):
 
   1. A differentiable Gini-coefficient penalty over each language's mean
      compression rate within a batch (differentiable_gini,

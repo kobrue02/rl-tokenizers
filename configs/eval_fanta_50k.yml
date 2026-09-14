@@ -21,6 +21,7 @@ lang_pairs: "eng:spa,eng:arz,eng:ben"
 # examples/language on average under the round-robin sampling both
 # load_xnli/load_xcopa use) rather than silently thinning to ~48/language.
 max_examples: 4000
+label: fanta_50k
 output: results/all_fanta.json
 use_wandb: true
 run_name: fanta_50k_250k_steps

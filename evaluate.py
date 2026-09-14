@@ -23,6 +23,7 @@ TOKENIZERS = {
     "parity_bpe": "systems.tokenization.parity_bpe.evaluate",
     "hf_frontier": "systems.tokenization.hf_frontier.evaluate",  # arbitrary HF tokenizer (--hf-repo-id), not one this project trains
     "claude_tokenizer": "systems.tokenization.claude_tokenizer.evaluate",  # token counts only via Anthropic's count_tokens API; no renyi/gini
+    "blt": "systems.tokenization.blt.evaluate",  # facebook/blt-1b's entropy model, real weights + forward pass (not tokenizer-only like hf_frontier); gated HF repo
 }
 
 
