@@ -20,19 +20,27 @@ import math
 import torch
 
 
-def build_lr_scheduler(optimizer, total_steps, warmup_ratio=0.1, scheduler_type="linear"):
+def build_lr_scheduler(optimizer, total_steps, warmup_ratio=0.1, scheduler_type="linear", min_lr_ratio=0.0):
     """Returns a torch.optim.lr_scheduler.LambdaLR wrapping `optimizer`, scaling
-    its base learning_rate by a factor in [0, 1] that:
+    its base learning_rate by a factor in [min_lr_ratio, 1] that:
 
       1. ramps LINEARLY from 0 up to 1.0 over the first `warmup_ratio *
          total_steps` steps (shared by all three scheduler_type values, matching
          HF's own get_*_schedule_with_warmup family), then
       2. depending on scheduler_type, either:
          - "constant": stays at 1.0 for the rest of training (warmup only, no decay)
-         - "linear": decays linearly from 1.0 down to 0.0 by the last step
-           (HF Trainer's own default -- get_linear_schedule_with_warmup)
-         - "cosine": decays following a half-cosine from 1.0 down to 0.0
-           (get_cosine_schedule_with_warmup)
+         - "linear": decays linearly from 1.0 down to min_lr_ratio by the last step
+           (HF Trainer's own default -- get_linear_schedule_with_warmup, whose
+           own min_lr_ratio is always 0.0)
+         - "cosine": decays following a half-cosine from 1.0 down to
+           min_lr_ratio (get_cosine_schedule_with_warmup, whose own
+           min_lr_ratio is always 0.0 -- EleutherAI/gpt-neox's Pythia suite
+           instead decays to min_lr_ratio=0.1, i.e. min_lr = 0.1 * peak lr,
+           see its own configs/pythia/*.yml "min_lr" field)
+
+    min_lr_ratio=0.0 (the default, matching every scheduler_type's original
+    HF formula) decays all the way to zero, same behavior as before this
+    parameter existed -- existing callers are unaffected.
 
     Caller is responsible for calling scheduler.step() once per optimizer.step()
     (see each trainer's own train() loop) -- LambdaLR doesn't do this on its own.
@@ -54,7 +62,9 @@ def build_lr_scheduler(optimizer, total_steps, warmup_ratio=0.1, scheduler_type=
         remaining = max(1, total_steps - warmup_steps)
         progress = min(1.0, (step - warmup_steps) / remaining)
         if scheduler_type == "linear":
-            return max(0.0, 1.0 - progress)
-        return 0.5 * (1.0 + math.cos(math.pi * progress))  # "cosine"
+            decay = 1.0 - progress
+        else:
+            decay = 0.5 * (1.0 + math.cos(math.pi * progress))  # "cosine"
+        return min_lr_ratio + (1.0 - min_lr_ratio) * decay
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)

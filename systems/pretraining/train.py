@@ -79,6 +79,14 @@ class TrainConfig:
     lr_scheduler_type: str = "cosine"  # standard for pretraining (vs.
     # "linear", HF Trainer's/tokenizer trainers' default) -- cosine's
     # slower-then-faster decay is established practice for long runs
+    min_lr_ratio: float = 0.0  # decay floor as a fraction of learning_rate --
+    # 0.0 (default) decays all the way to zero, matching every "llama"-family
+    # preset trained so far. EleutherAI's Pythia suite instead decays to
+    # 0.1 (min_lr = 0.1 * peak lr, see its own configs/pythia/*.yml) --
+    # set this explicitly to 0.1 in a "pythia_*"-model-size experiment's own
+    # pretrain_*.yml for a faithful reproduction; not defaulted here since
+    # every existing config file for the tiny..7b presets omits it and
+    # expects decay-to-zero.
     log_steps: int = 10
     val_fraction: float = 0.05  # fraction of shard_dir's own shards reserved
     # for held-out validation loss (never sampled for training) -- 0
@@ -535,7 +543,7 @@ def train(cfg: TrainConfig):
         fused=(device.type == "cuda" and cfg.sharding != "fsdp"),
     )
     scheduler = build_lr_scheduler(
-        optimizer, cfg.total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type
+        optimizer, cfg.total_steps, cfg.warmup_ratio, cfg.lr_scheduler_type, cfg.min_lr_ratio
     )
 
     # Resumed before the dataset is built -- start_step feeds directly into

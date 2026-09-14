@@ -1,7 +1,10 @@
-"""Named model-size presets, tiny through 7B, so `--model-size` picks a
-sensible shape without hand-specifying every dimension. Every preset is a
-LLaMA-style decoder-only transformer (see model.py); presets differ only in
-scale, not architecture family.
+"""Named model-size presets, tiny through 12B, so `--model-size` picks a
+sensible shape without hand-specifying every dimension. Two architecture
+families (see ModelConfig.architecture and model.py): "llama" (tiny through
+7b below -- RMSNorm/SwiGLU/full rotary/sequential residual) and "gpt_neox"
+(the "pythia_*" presets -- LayerNorm/GELU/partial rotary/parallel residual,
+reproducing EleutherAI's Pythia suite). Presets within a family differ only
+in scale, not architecture.
 
 vocab_size is deliberately not part of a preset -- it comes from whichever
 systems/ tokenizer checkpoint is in use (TokenizerAdapter.vocab_size), so
@@ -21,6 +24,13 @@ def _swiglu_intermediate_size(hidden_size, multiple_of=256):
     return multiple_of * ((raw + multiple_of - 1) // multiple_of)
 
 
+def _gelu_intermediate_size(hidden_size):
+    """GPT-NeoX/Pythia convention: a plain (non-gated) GELU MLP is exactly
+    4x hidden_size -- no rounding needed since there's no extra gating
+    matmul narrowing it the way SwiGLU's is (see _swiglu_intermediate_size)."""
+    return 4 * hidden_size
+
+
 @dataclasses.dataclass
 class ModelConfig:
     hidden_size: int = 768
@@ -37,6 +47,25 @@ class ModelConfig:
     tie_embeddings: bool = True  # share input embedding/output projection
     # (GPT-2/LLaMA-small convention) -- saves vocab_size*hidden_size params;
     # presets below untie this for the largest tiers, matching LLaMA.
+    architecture: str = "llama"  # "llama" (default -- RMSNorm, SwiGLU MLP,
+    # full rotary embeddings, sequential pre-norm residual, GPT-2-style init
+    # with a depth-rescaled residual write, exactly what every preset above
+    # this field used before it existed) or "gpt_neox" (LayerNorm, plain
+    # GELU MLP, partial rotary via rotary_pct below, PARALLEL residual --
+    # x = x + attn(norm(x)) + mlp(norm(x)), one shared norm, not two
+    # sequential ones -- and small_init/wang_init). See model.py's
+    # TransformerBlock/TransformerLM for where this branches, and the
+    # "pythia_*" presets below, which reproduce EleutherAI/gpt-neox's own
+    # configs/pythia/*.yml (confirmed by fetching those files directly:
+    # pos_emb=rotary+rotary_pct=0.25, gpt_j_residual=true, no_weight_tying=
+    # true, norm defaults to layernorm, activation defaults to gelu,
+    # init_method=small_init/output_layer_init_method=wang_init).
+    rotary_pct: float = 1.0  # fraction of head_dim RoPE is applied to; the
+    # remaining (1 - rotary_pct) fraction of each head passes through
+    # unrotated. 1.0 (full rotary, LLaMA convention) unless overridden --
+    # every "pythia_*" preset below sets 0.25, GPT-NeoX-20B/Pythia's own
+    # choice (a full-precision ablation in the GPT-NeoX-20B paper found
+    # partial rotary matches full rotary's quality at lower compute).
     grad_checkpointing: bool = False  # recompute activations in the backward
     # pass instead of storing them -- essential at larger presets to fit
     # GPU memory, pure overhead at tiny/small scale.
@@ -62,6 +91,28 @@ def _preset(hidden_size, num_layers, num_heads, num_kv_heads=0, **overrides):
         num_heads=num_heads,
         num_kv_heads=num_kv_heads,
         intermediate_size=_swiglu_intermediate_size(hidden_size),
+        **overrides,
+    )
+
+
+def _gpt_neox_preset(hidden_size, num_layers, num_heads, **overrides):
+    """Builds a "gpt_neox"-architecture ModelConfig at the given shape.
+    grad_checkpointing intentionally does NOT blanket-copy every
+    "pythia_*" preset's own checkpoint_activations=true (see
+    configs/pythia/*.yml) -- this project's own "large" preset above found
+    (via a real profiled run, see its own comment) that checkpointing can
+    be a pure loss at a size that already fits comfortably in memory
+    without it, so the same on-by-default-only-at-real-memory-pressure
+    policy is kept here rather than importing GPT-NeoX's DeepSpeed-era
+    default uncritically; overridable per preset below regardless."""
+    return ModelConfig(
+        hidden_size=hidden_size,
+        num_layers=num_layers,
+        num_heads=num_heads,
+        intermediate_size=_gelu_intermediate_size(hidden_size),
+        architecture="gpt_neox",
+        rotary_pct=0.25,
+        tie_embeddings=False,  # no_weight_tying: true in every pythia/*.yml
         **overrides,
     )
 
@@ -105,6 +156,34 @@ PRESETS = {
     # rank) can't provide that, but train.py's TrainConfig.sharding="fsdp"
     # now can (see train.py's own module docstring); hasn't been run
     # end-to-end yet either way, unlike every smaller preset.
+    # --- Pythia suite (EleutherAI/pythia's own README table, architecture
+    # cross-checked directly against EleutherAI/gpt-neox's configs/pythia/
+    # *.yml -- see ModelConfig.architecture's own docstring). hidden_size/
+    # num_layers/num_heads below are exact; each preset's own comment gives
+    # the paper's reported peak learning_rate (a TrainConfig field, not a
+    # ModelConfig one) to set explicitly in that experiment's own
+    # pretrain_*.yml -- e.g. `learning_rate: 6.0e-4` for pythia_160m --
+    # plus train.py's own effective_batch_size (per_device_batch_size *
+    # grad_accum_steps * world_size * seq_len) to reach the paper's 2M
+    # tokens/step, and (matching Pythia's own cosine-to-1/10th-peak decay,
+    # not this project's other presets' decay-to-zero) `min_lr_ratio: 0.1`
+    # -- see TrainConfig.min_lr_ratio.
+    "pythia_14m": _gpt_neox_preset(128, 6, 4),  # peak lr 1.0e-3
+    "pythia_31m": _gpt_neox_preset(256, 6, 8),  # peak lr 1.0e-3
+    "pythia_70m": _gpt_neox_preset(512, 6, 8),  # peak lr 1.0e-3
+    "pythia_160m": _gpt_neox_preset(768, 12, 12),  # peak lr 6.0e-4
+    "pythia_410m": _gpt_neox_preset(1024, 24, 16),  # peak lr 3.0e-4
+    "pythia_1b": _gpt_neox_preset(2048, 16, 8),  # peak lr 3.0e-4
+    "pythia_1_4b": _gpt_neox_preset(2048, 24, 16),  # peak lr 2.0e-4
+    "pythia_2_8b": _gpt_neox_preset(
+        2560, 32, 32, grad_checkpointing=True
+    ),  # peak lr 1.6e-4
+    "pythia_6_9b": _gpt_neox_preset(
+        4096, 32, 32, grad_checkpointing=True
+    ),  # peak lr 1.2e-4 -- needs FSDP, same as this project's own "7b" above
+    "pythia_12b": _gpt_neox_preset(
+        5120, 36, 40, grad_checkpointing=True
+    ),  # peak lr 1.2e-4 -- needs FSDP, same as this project's own "7b" above
 }
 
 

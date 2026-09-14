@@ -1,9 +1,20 @@
-"""A LLaMA-style decoder-only transformer: RMSNorm, rotary position
-embeddings (RoPE), SwiGLU-gated MLP, causal self-attention (optionally
-grouped-query, for the largest presets) via torch's fused
-scaled_dot_product_attention -- the architecture essentially every current
-open LLM (LLaMA, Mistral, Qwen, Gemma, ...) uses. See model_configs.py for
-the named size presets built on this one architecture.
+"""A decoder-only transformer supporting two architecture families (see
+ModelConfig.architecture in model_configs.py, which also holds the named
+size presets for both):
+
+- "llama" (default): RMSNorm, rotary position embeddings (RoPE), SwiGLU-gated
+  MLP, causal self-attention (optionally grouped-query, for the largest
+  presets) via torch's fused scaled_dot_product_attention, sequential
+  pre-norm residual -- the architecture essentially every current open LLM
+  (LLaMA, Mistral, Qwen, Gemma, ...) uses.
+- "gpt_neox": LayerNorm, partial rotary embeddings, plain GELU MLP, PARALLEL
+  residual (attn and mlp both read the same norm output, summed together
+  rather than composed sequentially), small_init/wang_init weight init --
+  reproducing EleutherAI/gpt-neox's own architecture (confirmed against
+  their configs/pythia/*.yml and megatron/model/init_functions.py), for the
+  "pythia_*" presets.
+
+Both use causal self-attention via torch's fused scaled_dot_product_attention.
 
 Unlike the tokenizer baselines in systems/, this isn't a scaled-down
 simplification -- it uses real architectural choices, at whatever
@@ -35,6 +46,21 @@ class RMSNorm(nn.Module):
         variance = x_fp32.pow(2).mean(dim=-1, keepdim=True)
         x_normed = x_fp32 * torch.rsqrt(variance + self.eps)
         return self.weight * x_normed.to(dtype)
+
+
+class LayerNorm(nn.Module):
+    """Standard (mean-subtracting, biased) LayerNorm -- GPT-NeoX/Pythia's
+    norm of choice (configs/neox_arguments.md's own "norm" default is
+    "layernorm"), unlike LLaMA's bias-free RMSNorm above."""
+
+    def __init__(self, hidden_size, eps=1e-5):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.bias = nn.Parameter(torch.zeros(hidden_size))
+        self.eps = eps
+
+    def forward(self, x):
+        return F.layer_norm(x, self.weight.shape, self.weight, self.bias, self.eps)
 
 
 def precompute_rope(head_dim, max_seq_len, theta=10000.0, device=None):
@@ -80,20 +106,31 @@ class Attention(nn.Module):
     the same O(T^2) cost that OOM'd systems.tokenization.fanta's dense-attention
     baseline at far smaller scale."""
 
-    def __init__(self, hidden_size, num_heads, num_kv_heads, max_seq_len, rope_theta, dropout):
+    def __init__(
+        self, hidden_size, num_heads, num_kv_heads, max_seq_len, rope_theta, dropout, rotary_pct=1.0
+    ):
         super().__init__()
         assert hidden_size % num_heads == 0
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
         self.head_dim = hidden_size // num_heads
         self.dropout = dropout
+        # GPT-NeoX-20B/Pythia's "partial rotary": only the first rotary_dim
+        # of each head gets RoPE, the rest passes through unrotated (see
+        # ModelConfig.rotary_pct's own docstring). rotary_dim must be even
+        # (precompute_rope/apply_rope split it into two equal halves) --
+        # rounding down matches GPT-NeoX's own int(rotary_pct * head_dim)
+        # for its published rotary_pct=0.25 * head_dim in {32,64,80,128,256}
+        # (every value in the Pythia suite table), which is already even.
+        self.rotary_dim = int(rotary_pct * self.head_dim)
+        self.rotary_dim -= self.rotary_dim % 2
 
         self.q_proj = nn.Linear(hidden_size, num_heads * self.head_dim, bias=False)
         self.k_proj = nn.Linear(hidden_size, num_kv_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(hidden_size, num_kv_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(num_heads * self.head_dim, hidden_size, bias=False)
 
-        cos, sin = precompute_rope(self.head_dim, max_seq_len, rope_theta)
+        cos, sin = precompute_rope(self.rotary_dim, max_seq_len, rope_theta)
         self.register_buffer("rope_cos", cos, persistent=False)
         self.register_buffer("rope_sin", sin, persistent=False)
 
@@ -109,7 +146,14 @@ class Attention(nn.Module):
 
         cos = self.rope_cos[:T].to(dtype=q.dtype, device=q.device)
         sin = self.rope_sin[:T].to(dtype=q.dtype, device=q.device)
-        q, k = apply_rope(q, k, cos, sin)
+        if self.rotary_dim < self.head_dim:
+            q_rot, q_pass = q[..., : self.rotary_dim], q[..., self.rotary_dim :]
+            k_rot, k_pass = k[..., : self.rotary_dim], k[..., self.rotary_dim :]
+            q_rot, k_rot = apply_rope(q_rot, k_rot, cos, sin)
+            q = torch.cat([q_rot, q_pass], dim=-1)
+            k = torch.cat([k_rot, k_pass], dim=-1)
+        else:
+            q, k = apply_rope(q, k, cos, sin)
 
         if self.num_kv_heads != self.num_heads:
             # GQA: each KV head is shared by num_heads/num_kv_heads query
@@ -141,13 +185,42 @@ class SwiGLU(nn.Module):
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
 
 
+class GELUMLP(nn.Module):
+    """GPT-NeoX/Pythia's plain (non-gated) MLP: down(gelu(up(x))), both
+    projections biased -- two matmuls at a full 4x intermediate_size (see
+    model_configs._gelu_intermediate_size), vs. SwiGLU's three matmuls at a
+    shrunk 8/3x width above."""
+
+    def __init__(self, hidden_size, intermediate_size):
+        super().__init__()
+        self.dense_h_to_4h = nn.Linear(hidden_size, intermediate_size, bias=True)
+        self.dense_4h_to_h = nn.Linear(intermediate_size, hidden_size, bias=True)
+
+    def forward(self, x):
+        return self.dense_4h_to_h(F.gelu(self.dense_h_to_4h(x)))
+
+
 class TransformerBlock(nn.Module):
-    """Pre-norm residual block: x = x + attn(norm1(x)); x = x + mlp(norm2(x))
-    -- standard LLaMA-family block shape."""
+    """cfg.architecture == "llama" (default): pre-norm SEQUENTIAL residual,
+    x = x + attn(norm1(x)); x = x + mlp(norm2(x)) -- standard LLaMA-family
+    block shape, RMSNorm + SwiGLU, full rotary.
+
+    cfg.architecture == "gpt_neox": PARALLEL residual (GPT-J/GPT-NeoX-20B's
+    "gpt_j_residual"), x = x + attn(norm(x)) + mlp(norm(x)) -- ONE shared
+    norm feeds both branches (computed once, reused), not two sequential
+    ones; LayerNorm + plain GELU MLP, partial rotary (see Attention's own
+    rotary_pct handling). The parallel form lets attn/mlp run independently
+    off the same normed input instead of each depending on the other's
+    output, which is where GPT-NeoX-20B's paper reports its ~15% speedup
+    coming from at hidden_size>=2048 -- not exploited here (still two
+    sequential Python calls), reproduced for architectural/quality fidelity
+    only, not that throughput win."""
 
     def __init__(self, cfg):
         super().__init__()
-        self.norm1 = RMSNorm(cfg.hidden_size, cfg.norm_eps)
+        self.parallel_residual = cfg.architecture == "gpt_neox"
+        norm_cls = LayerNorm if self.parallel_residual else RMSNorm
+        self.norm1 = norm_cls(cfg.hidden_size, cfg.norm_eps)
         self.attn = Attention(
             cfg.hidden_size,
             cfg.num_heads,
@@ -155,12 +228,20 @@ class TransformerBlock(nn.Module):
             cfg.max_seq_len,
             cfg.rope_theta,
             cfg.dropout,
+            rotary_pct=cfg.rotary_pct,
         )
-        self.norm2 = RMSNorm(cfg.hidden_size, cfg.norm_eps)
-        self.mlp = SwiGLU(cfg.hidden_size, cfg.intermediate_size)
+        if self.parallel_residual:
+            self.mlp = GELUMLP(cfg.hidden_size, cfg.intermediate_size)
+        else:
+            self.norm2 = norm_cls(cfg.hidden_size, cfg.norm_eps)
+            self.mlp = SwiGLU(cfg.hidden_size, cfg.intermediate_size)
         self.dropout = nn.Dropout(cfg.dropout)
 
     def forward(self, x):
+        if self.parallel_residual:
+            normed = self.norm1(x)
+            x = x + self.dropout(self.attn(normed)) + self.dropout(self.mlp(normed))
+            return x
         x = x + self.dropout(self.attn(self.norm1(x)))
         x = x + self.dropout(self.mlp(self.norm2(x)))
         return x
@@ -266,9 +347,10 @@ def _padded_vocab_size(vocab_size, multiple_of=64):
 
 class TransformerLM(nn.Module):
     """Full decoder-only LM: token embedding -> N TransformerBlocks -> final
-    RMSNorm -> output projection to vocab logits. vocab_size is passed
-    separately from `cfg` (purely architectural) since it comes from
-    whichever tokenizer is in use, not the chosen model size."""
+    norm (RMSNorm, or LayerNorm under cfg.architecture=="gpt_neox") ->
+    output projection to vocab logits. vocab_size is passed separately from
+    `cfg` (purely architectural) since it comes from whichever tokenizer is
+    in use, not the chosen model size."""
 
     def __init__(self, cfg, vocab_size):
         super().__init__()
@@ -277,22 +359,28 @@ class TransformerLM(nn.Module):
         padded_vocab_size = _padded_vocab_size(vocab_size)
         self.embed = nn.Embedding(padded_vocab_size, cfg.hidden_size)
         self.blocks = nn.ModuleList(TransformerBlock(cfg) for _ in range(cfg.num_layers))
-        self.norm = RMSNorm(cfg.hidden_size, cfg.norm_eps)
+        norm_cls = LayerNorm if cfg.architecture == "gpt_neox" else RMSNorm
+        self.norm = norm_cls(cfg.hidden_size, cfg.norm_eps)
         self.lm_head = nn.Linear(cfg.hidden_size, padded_vocab_size, bias=False)
         if cfg.tie_embeddings:
             self.lm_head.weight = self.embed.weight
-        self.apply(self._init_weights)
-        # Second, targeted pass: rescale the two per-block projections that
-        # write into the residual stream (attn.o_proj, mlp.down_proj) by
-        # 1/sqrt(2*num_layers) -- GPT-2's fix for residual variance growing
-        # with depth. Needs dotted parameter names to target just these two
-        # Linear layers, which _init_weights (called per-module via
-        # nn.Module.apply) can't see -- hence a separate named_parameters() pass.
-        residual_scale = 1.0 / math.sqrt(2 * cfg.num_layers)
-        for name, p in self.named_parameters():
-            if name.endswith("o_proj.weight") or name.endswith("down_proj.weight"):
-                with torch.no_grad():
-                    p.mul_(residual_scale)
+
+        if cfg.architecture == "gpt_neox":
+            self._init_weights_gpt_neox()
+        else:
+            self.apply(self._init_weights)
+            # Second, targeted pass: rescale the two per-block projections
+            # that write into the residual stream (attn.o_proj,
+            # mlp.down_proj) by 1/sqrt(2*num_layers) -- GPT-2's fix for
+            # residual variance growing with depth. Needs dotted parameter
+            # names to target just these two Linear layers, which
+            # _init_weights (called per-module via nn.Module.apply) can't
+            # see -- hence a separate named_parameters() pass.
+            residual_scale = 1.0 / math.sqrt(2 * cfg.num_layers)
+            for name, p in self.named_parameters():
+                if name.endswith("o_proj.weight") or name.endswith("down_proj.weight"):
+                    with torch.no_grad():
+                        p.mul_(residual_scale)
 
     def _init_weights(self, module):
         # Standard GPT-2/LLaMA-style init: small normal on projections and
@@ -304,6 +392,27 @@ class TransformerLM(nn.Module):
                 nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def _init_weights_gpt_neox(self):
+        """GPT-NeoX-20B/Pythia's own init (megatron/model/init_functions.py's
+        get_init_methods, fetched directly from EleutherAI/gpt-neox): every
+        weight gets "small_init" (std = sqrt(2/(5*hidden_size)), Nguyen &
+        Salazar 2019) EXCEPT the two per-block projections that write into
+        the residual stream (attn.o_proj, mlp.dense_4h_to_h), which instead
+        get "wang_init" (std = 2/(num_layers*sqrt(hidden_size))) -- a
+        direct depth-and-width-scaled init applied straight to the weight,
+        not (unlike the "llama" branch's residual_scale above) a post-hoc
+        rescale of some other, differently-scaled init."""
+        small_std = math.sqrt(2 / (5 * self.cfg.hidden_size))
+        wang_std = 2 / (self.cfg.num_layers * math.sqrt(self.cfg.hidden_size))
+        for name, module in self.named_modules():
+            if isinstance(module, nn.Linear):
+                std = wang_std if name.endswith("o_proj") or name.endswith("dense_4h_to_h") else small_std
+                nn.init.normal_(module.weight, mean=0.0, std=std)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                nn.init.normal_(module.weight, mean=0.0, std=small_std)
 
     def num_parameters(self, non_embedding=False):
         n = sum(p.numel() for p in self.parameters())

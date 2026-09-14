@@ -30,8 +30,12 @@ stage, as in the example below.
 `data_source` (every `systems/tokenization/*/cli.py`, plus `systems/pretraining/data_prep.py`'s
 `dataset`) is where a config file decides WHICH corpora feed a given run —
 see `common/data/corpora.py`'s own module docstring for the full registry
-(`oldi_seed`/`flores_dev`, `glot500`/`fineweb_edu`/`olmo_mix`,
+(`oldi_seed`/`flores_dev`, `glot500`/`fineweb_edu`/`olmo_mix`/`pile`,
 `smol`/`ccmatrix`/`un_pc`/`europarl`/`tatoeba_mt`, `bible_nlp`, `synthetic`).
+`pile` (EleutherAI/the_pile_deduplicated) is English-only, included
+specifically to reproduce EleutherAI's own Pythia-suite training data for
+validating `model_size: pythia_*` presets independent of this project's
+multilingual data pipeline.
 Every source now defaults to loading EVERY language/pair it natively offers
 — no curated subset of any kind — so `langs`/`dataset_config` are rarely
 needed at all (`bible_nlp` is the one exception: it always needs an

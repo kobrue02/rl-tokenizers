@@ -281,8 +281,9 @@ def prep_dataset(
     """dataset_name: one of common.data.corpora.ALL_SOURCES. langs: codes for
     the language-selectable sources (synthetic/oldi_seed/flores_dev/glot500
     default to "all"; bible_nlp takes an arbitrary subset); ignored for
-    fineweb_edu/olmo_mix and BITEXT_SOURCES, which use `dataset_config`
-    instead (see common.data.corpora.stream_groups). max_tokens/max_docs:
+    fineweb_edu/olmo_mix/pile and BITEXT_SOURCES, which use `dataset_config`
+    instead (unused by pile specifically -- it has no HF configs to select
+    between, see common.data.corpora.stream_groups). max_tokens/max_docs:
     stop once either is reached (None disables); checked against KEPT
     (post-dedup) counts. dedup/dedup_*: see common.data.dedup.Deduplicator
     and the module docstring's DEDUPLICATION section. max_doc_bytes: see
@@ -305,7 +306,7 @@ def prep_dataset(
     if prep_checkpoint_path is None:
         prep_checkpoint_path = os.path.join(output_dir, "prep_checkpoint.json")
 
-    if dataset_name in ("fineweb_edu", "olmo_mix") or dataset_name in BITEXT_SOURCES:
+    if dataset_name in ("fineweb_edu", "olmo_mix", "pile") or dataset_name in BITEXT_SOURCES:
         stream = stream_groups(dataset_name, config=dataset_config)
     else:
         # `config` is also passed here (not just langs) even though most

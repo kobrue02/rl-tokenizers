@@ -15,18 +15,30 @@ Source categories:
     lazy network streaming. Both default to `langs="all"`; common.data.
     oldi_data.LANGS (a fixed 9-code list, still used elsewhere) remains
     available as an explicit override.
-  - MONOLINGUAL_SOURCES = {glot500, fineweb_edu, olmo_mix}: no cross-lingual
-    alignment, one key per group. fineweb_edu/olmo_mix are lazily streamed
-    from the HF Hub; multiple languages/configs are INTERLEAVED round-robin
-    (not concatenated) so a --num-groups cap smaller than the per-language
-    cap still sees a balanced mix rather than all of language A before
-    language B. glot500 is the one exception: like bible_nlp/
-    indigenous_panel below, it reads from a one-time LOCAL disk cache
-    (common.data.prepare_glot500) instead of live streaming -- confirmed
-    live that re-streaming its ~308GB/~411-config corpus from the HF Hub on
-    every prep run (and on every RESUME's fast-forward) was the actual
-    bottleneck of a real glot500-scale pretraining data prep. fineweb_edu/
-    olmo_mix stay live-streamed (far larger, out of scope for that fix).
+  - MONOLINGUAL_SOURCES = {glot500, fineweb_edu, olmo_mix, pile}: no
+    cross-lingual alignment, one key per group. fineweb_edu/olmo_mix are
+    lazily streamed from the HF Hub; multiple languages/configs are
+    INTERLEAVED round-robin (not concatenated) so a --num-groups cap
+    smaller than the per-language cap still sees a balanced mix rather than
+    all of language A before language B. glot500 and pile are the two
+    exceptions: like bible_nlp/indigenous_panel below, they read from a
+    one-time LOCAL disk cache instead of live streaming -- confirmed live
+    (for glot500) that re-streaming its ~308GB/~411-config corpus from the
+    HF Hub on every prep run (and on every RESUME's fast-forward) was the
+    actual bottleneck of a real glot500-scale pretraining data prep; pile is
+    smaller as ONE corpus (~451GB, no per-language split) but a real
+    full-scale (~300B-token, matching EleutherAI's own Pythia-suite training
+    budget) prep run still needs multiple SLURM resubmits, so the same
+    lesson applies (see common.data.prepare_pile's own docstring for why its
+    cache is a verbatim parquet download rather than glot500's custom
+    per-language JSONL rewrite -- Pile is already one flat corpus, not ~411
+    separate configs). pile (EleutherAI/the_pile_deduplicated) is
+    English-only and has no HF configs to select between (`config` instead
+    overrides its local cache directory, like glot500's own `config`
+    override does) -- included specifically to reproduce EleutherAI's own
+    Pythia suite's training data, for ModelConfig.architecture=="gpt_neox"
+    (see systems/pretraining/model_configs.py's "pythia_*" presets)
+    decoupled from this project's own multilingual data pipeline.
   - BITEXT_SOURCES = {smol, ccmatrix, un_pc, europarl, tatoeba_mt}: parallel
     like PARALLEL_SOURCES, but each group has exactly TWO keys (one
     language pair), lazily streamed like MONOLINGUAL_SOURCES -- `config`
@@ -78,7 +90,7 @@ from .synthetic import LANG_PROFILES, make_synthetic_parallel_groups
 from .oldi_data import LANG_SCRIPT, load_flores_plus, load_oldi_seed
 
 PARALLEL_SOURCES = {"oldi_seed", "flores_dev"}
-MONOLINGUAL_SOURCES = {"glot500", "fineweb_edu", "olmo_mix"}
+MONOLINGUAL_SOURCES = {"glot500", "fineweb_edu", "olmo_mix", "pile"}
 BITEXT_SOURCES = {"smol", "ccmatrix", "un_pc", "europarl", "tatoeba_mt"}
 STREAMED_PARALLEL_SOURCES = {"bible_nlp"}
 LOCAL_BITEXT_SOURCES = {"indigenous_panel"}
@@ -112,6 +124,7 @@ UN_PC_REPO = "Helsinki-NLP/un_pc"
 EUROPARL_REPO = "Helsinki-NLP/europarl"
 TATOEBA_MT_REPO = "Helsinki-NLP/tatoeba_mt"
 BIBLE_NLP_REPO = "bible-nlp/biblenlp-corpus"
+PILE_REPO = "EleutherAI/the_pile_deduplicated"
 
 # ccmatrix/un_pc/europarl configs live in card_data, discovered the same way
 # as Glot500's; tatoeba_mt has no card_data configs (plain per-pair TSV
@@ -237,6 +250,12 @@ def _stream_monolingual_single(source, config_or_lang):
                 # simplification, not a verified per-row claim -- OLMo-mix
                 # has no reliable per-row language field to check.
                 yield {"eng": row["text"]}
+    elif source == "pile":
+        # Local parquet cache only, no live-HF fallback -- see
+        # _stream_pile_local and PILE_LOCAL_DIR's own docstrings.
+        # config_or_lang overrides the cache directory, like glot500's own
+        # `config` override (see stream_groups's own docstring).
+        yield from _stream_pile_local(output_dir=config_or_lang)
     else:
         raise ValueError(f"{source!r} is not a monolingual source")
 
@@ -396,6 +415,39 @@ def _stream_glot500_local_single(lang, output_dir=None):
             yield json.loads(line)
 
 
+PILE_LOCAL_DIR = "data/pile"  # default local disk cache -- see
+# common.data.prepare_pile, which must be run once before this source is
+# usable. No live fallback: unlike glot500's per-language JSONL rewrite,
+# this cache is a verbatim local mirror of the HF repo's own parquet shards
+# (common.data.prepare_pile uses huggingface_hub.snapshot_download directly,
+# no custom per-row resumability needed -- see that module's own docstring
+# for why Pile's single-flat-corpus shape doesn't need glot500's approach).
+
+
+def _stream_pile_local(output_dir=None):
+    """Reads the local parquet shard cache common.data.prepare_pile builds
+    -- no live HF-Hub fallback, same lesson as glot500 (see this module's
+    own docstring and prepare_pile.py's own): a real full-scale (~300B-token)
+    Pile run needs multiple SLURM resubmits, and re-streaming ~451GB from
+    scratch on every resume would be exactly the glot500 mistake repeated.
+    Reading local parquet directly via `datasets`' own "parquet" loader
+    (streaming=True) needs no network access at all once prepare_pile has
+    run, unlike _stream_hf's HF Hub repo_id loading."""
+    output_dir = output_dir or PILE_LOCAL_DIR
+    data_dir = os.path.join(output_dir, "data")
+    if not os.path.isdir(data_dir) or not any(f.endswith(".parquet") for f in os.listdir(data_dir)):
+        raise ValueError(
+            f"pile needs a one-time local prep step before it can be used -- {data_dir!r} "
+            f"has no parquet shards. Run: python -m common.data.prepare_pile --output-dir {output_dir}"
+        )
+    ds = hf_datasets.load_dataset(
+        "parquet", data_files=os.path.join(data_dir, "*.parquet"), split="train", streaming=True
+    )
+    for row in ds:
+        if row.get("text"):
+            yield {"eng": row["text"]}
+
+
 INDIGENOUS_PANEL_LOCAL_DIR = "data/indigenous_panel"  # default local disk
 # cache -- see common.data.prepare_indigenous_panel, which must be run once
 # before this source is usable. No live fallback: every pair here has its
@@ -458,14 +510,16 @@ def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=
     defaults to "all" for oldi_seed/flores_dev/glot500 when omitted;
     synthetic defaults to its own fake profile set. Also an arbitrary
     (small) language subset for bible_nlp (no "all" default -- see
-    _stream_bible_nlp); `config` optionally overrides bible_nlp's OR
-    glot500's local disk cache directory (default BIBLE_NLP_LOCAL_DIR /
-    GLOT500_LOCAL_DIR respectively -- see _stream_glot500_local_single).
-    Like bible_nlp, glot500 reads from a local disk cache (built by
-    common.data.prepare_glot500) rather than live HF streaming -- no live
-    fallback; see that module's own docstring for why. Ignored for
-    fineweb_edu/olmo_mix and BITEXT_SOURCES, which select what they load
-    via `config` instead: an HF config name for fineweb_edu/olmo_mix, a
+    _stream_bible_nlp); `config` optionally overrides bible_nlp's, glot500's,
+    OR pile's local disk cache directory (default BIBLE_NLP_LOCAL_DIR /
+    GLOT500_LOCAL_DIR / PILE_LOCAL_DIR respectively -- see
+    _stream_glot500_local_single / _stream_pile_local). Like bible_nlp,
+    glot500 and pile read from a local disk cache (built by
+    common.data.prepare_glot500 / common.data.prepare_pile respectively)
+    rather than live HF streaming -- no live fallback; see those modules'
+    own docstrings for why. Ignored for fineweb_edu/olmo_mix and
+    BITEXT_SOURCES, which select what they load via `config` instead: an HF
+    config name for fineweb_edu/olmo_mix, a
     native pair name or "all"/omitted for smol/ccmatrix/un_pc/europarl, a
     "{split}/{pair-or-all}" string or "all"/omitted for tatoeba_mt, or a
     pair-code or "all"/omitted for indigenous_panel (same round-robin-
@@ -518,7 +572,7 @@ def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=
             iter(_stream_glot500_local_single(lang, output_dir=config)) for lang in lang_list
         )
         return
-    if source in ("fineweb_edu", "olmo_mix"):
+    if source in ("fineweb_edu", "olmo_mix", "pile"):
         yield from _stream_monolingual_single(source, config)
         return
     if source in _CONFIG_BASED_BITEXT_REPOS:
