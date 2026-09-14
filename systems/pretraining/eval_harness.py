@@ -255,7 +255,10 @@ def evaluate_translation(
     translation via model.generate (no beam search / KV cache -- fine for
     infrastructure verification, a real large-scale eval would want a
     faster decode path) and scores against ex.reference_text with sacrebleu
-    BLEU + chrF, aggregated per (source_lang, target_lang) pair.
+    BLEU + chrF, aggregated per (source_lang, target_lang) pair. Generation
+    is cut at the first newline, same reasoning as evaluate_qa: no stop
+    token exists for "end of translation" without instruction-tuning, so
+    anything after is the model continuing past the answer, not part of it.
 
     prompt_template(ex) -> str builds the generation prompt; default is a
     minimal English-worded instruction ("Translate {source_lang} to
@@ -290,7 +293,11 @@ def evaluate_translation(
             ids_tensor, max_new_tokens=max_new_tokens, temperature=temperature
         )
         new_ids = generated[0, len(ids) :].tolist()
-        hyp_text = adapter.decode(new_ids).decode("utf-8", errors="replace")
+        # Cut at the first newline, same reasoning as evaluate_qa: no stop
+        # token exists for "end of translation" without instruction-tuning,
+        # so anything after is the model rambling past the answer, not part
+        # of the translation, and left uncut it drags corpus BLEU/chrF down.
+        hyp_text = adapter.decode(new_ids).decode("utf-8", errors="replace").split("\n", 1)[0]
         pair_key = f"{ex.source_lang}->{ex.target_lang}"
         by_pair[pair_key]["srcs"].append(ex.source_text)
         by_pair[pair_key]["hyps"].append(hyp_text)
