@@ -44,5 +44,18 @@ tokens_per_language: 128217455
 # (~8 sequential groups) instead; each group still fills to its own
 # tokens_per_language quota above before the next starts.
 lang_batch_size: 15
+# Confirmed live: even with lang_batch_size, prep still OOM'd after only
+# 5.53M tokens (a tiny fraction of even one batch's own target) -- pointing
+# at common/data/dedup.py's own documented limitation, not the round-robin
+# concurrency lang_batch_size already fixed: "the LSH index holds one
+# MinHash sketch per document ever indexed... a corpus of long documents
+# would need [a disk/database-backed index]" (CulturaX's median ~2050-char
+# documents vs. Glot500's ~60-110-char single sentences the dedup module
+# was actually validated against). Disabled here rather than built out an
+# external index: CulturaX is already deduplicated at construction (it's
+# built by deduplicating mC4+OSCAR together -- that's what distinguishes it
+# from raw mC4), so a local near-dup pass is far less load-bearing for this
+# source than it was for Glot500's messier construction.
+dedup: false
 use_wandb: true
 run_name: bpe_culturax_large_data_prep

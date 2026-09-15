@@ -27,5 +27,11 @@ tokens_per_language: 128217455
 # holding all 106 CulturaX languages open simultaneously OOM's even at
 # ~125GB (a whole Ice Lake node); process 15 at a time instead.
 lang_batch_size: 15
+# See configs/prep_bpe_culturax.yml's own comment -- confirmed live that
+# dedup's LSH near-dup index (unbounded, one MinHash sketch per document
+# ever seen -- see common/data/dedup.py's own documented limitation for
+# long-document corpora) OOM'd prep after only 5.53M tokens. Disabled here;
+# CulturaX is already deduplicated at construction.
+dedup: false
 use_wandb: true
 run_name: fanta_culturax_large_data_prep
