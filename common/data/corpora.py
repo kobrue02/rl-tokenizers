@@ -557,11 +557,55 @@ def _round_robin(iterators):
                 active.remove(it)
 
 
-def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=None):
+def _round_robin_by_lang(iterators_by_lang, is_lang_done=None):
+    """Same interleaving as _round_robin, but keyed by language so a
+    caller-supplied is_lang_done(lang) predicate can drop a language's own
+    iterator (letting its underlying object -- e.g. an HF streaming dataset
+    builder -- be garbage-collected) the moment the CALLER considers it
+    done, not just when its own stream naturally exhausts.
+
+    Exists specifically for a per-language TOKEN quota (see
+    systems.pretraining.data_prep's own tokens_per_language), which this
+    module has no visibility into itself (corpora.py stays tokenizer/quota-
+    agnostic by design -- is_lang_done is an opaque callback, never
+    inspected here beyond calling it). Without this, a language that
+    reaches its caller-side quota early keeps getting pulled-and-discarded
+    by the caller for the rest of the run/batch -- confirmed live to be the
+    actual cause of an unbounded-looking memory growth in a real culturax
+    prep job: whatever a long-lived HF streaming iterator accumulates
+    internally per item pulled (independent of what the caller does with
+    that item) keeps growing on an already-quota-satisfied language's own
+    stream for as long as it's still being pulled from, eventually
+    exhausting available memory even with a bounded lang_batch_size. Also
+    exactly why a RESUME re-crashed almost instantly at the same point:
+    fast-forwarding past already-consumed documents pulls just as much
+    through each language's stream as normal processing would (only the
+    caller's own downstream work is skipped), reproducing the same
+    cumulative growth in a much shorter wall-clock window.
+    """
+    active = dict(iterators_by_lang)
+    while active:
+        for lang in list(active):
+            if is_lang_done is not None and is_lang_done(lang):
+                del active[lang]
+                continue
+            try:
+                yield next(active[lang])
+            except StopIteration:
+                del active[lang]
+
+
+def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=None, is_lang_done=None):
     """The one entry point both common.data.cli_data.load_groups (tokenizer
     training) and systems.pretraining.data_prep (LLM pretraining) use.
 
     source: one of ALL_SOURCES.
+    is_lang_done: culturax ONLY (every other source ignores it) -- optional
+    callable(lang) -> bool, checked before each pull from that language's
+    own stream; see _round_robin_by_lang's own docstring for why this
+    exists (letting a caller-side per-language quota actually stop a
+    satisfied language's stream from being pulled, not just discard what
+    it yields).
     langs: language codes for synthetic/oldi_seed/flores_dev/glot500 --
     defaults to "all" for oldi_seed/flores_dev/glot500 when omitted;
     synthetic defaults to its own fake profile set. Also an arbitrary
@@ -633,7 +677,9 @@ def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=
         if len(lang_list) == 1:
             yield from _stream_culturax_single(lang_list[0])
             return
-        yield from _round_robin(iter(_stream_culturax_single(lang)) for lang in lang_list)
+        yield from _round_robin_by_lang(
+            {lang: _stream_culturax_single(lang) for lang in lang_list}, is_lang_done=is_lang_done
+        )
         return
     if source in ("fineweb_edu", "olmo_mix", "pile"):
         yield from _stream_monolingual_single(source, config)

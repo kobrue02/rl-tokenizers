@@ -371,6 +371,20 @@ def prep_dataset(
     if prep_checkpoint_path is None:
         prep_checkpoint_path = os.path.join(output_dir, "prep_checkpoint.json")
 
+    def _is_lang_done(lang):
+        # Passed to stream_groups as is_lang_done -- lets a quota-satisfied
+        # language's own underlying stream actually stop being pulled (see
+        # common.data.corpora._round_robin_by_lang's own docstring for why
+        # this matters beyond just discarding its documents downstream:
+        # confirmed live that a satisfied-but-still-pulled language's
+        # stream kept accumulating memory for the rest of a real culturax
+        # prep run). References lang_counts, defined below -- safe despite
+        # the forward reference since this closure is only ever CALLED once
+        # actual stream iteration begins, well after lang_counts exists;
+        # every source other than culturax ignores is_lang_done entirely,
+        # so this is a harmless no-op for them.
+        return bool(tokens_per_language) and lang_counts[lang]["tokens"] >= tokens_per_language
+
     # lang_langs_for_batching: the concrete language LIST to split into
     # groups, resolved here (not left to stream_groups's own internal "all"
     # resolution) so this function can see it -- see lang_batch_size's own
@@ -381,7 +395,7 @@ def prep_dataset(
     # glot500 doesn't need this).
     lang_batches = None
     if dataset_name in ("fineweb_edu", "olmo_mix", "pile") or dataset_name in BITEXT_SOURCES:
-        single_stream = stream_groups(dataset_name, config=dataset_config)
+        single_stream = stream_groups(dataset_name, config=dataset_config, is_lang_done=_is_lang_done)
     else:
         langs_for_batching = None
         if lang_batch_size:
@@ -401,7 +415,9 @@ def prep_dataset(
             # use it as a local disk cache directory override (see
             # common.data.corpora.stream_groups's own docstring); omitting it
             # made that override unreachable from this CLI entirely.
-            single_stream = stream_groups(dataset_name, langs=langs, config=dataset_config)
+            single_stream = stream_groups(
+                dataset_name, langs=langs, config=dataset_config, is_lang_done=_is_lang_done
+            )
 
     resume = os.path.exists(prep_checkpoint_path)
     if resume:
@@ -598,7 +614,9 @@ def prep_dataset(
     stop_all = False
     while batch_idx < num_batches:
         if lang_batches is not None:
-            stream = stream_groups(dataset_name, langs=lang_batches[batch_idx], config=dataset_config)
+            stream = stream_groups(
+                dataset_name, langs=lang_batches[batch_idx], config=dataset_config, is_lang_done=_is_lang_done
+            )
             current_batch_langs = set(lang_batches[batch_idx])
         else:
             stream = single_stream
