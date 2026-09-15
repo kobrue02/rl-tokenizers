@@ -23,10 +23,11 @@ output_dir: pretrain_data/culturax_fanta_large
 # params * 20 tokens/param / 106 languages = 128,217,455 tokens/language).
 max_tokens: 13591050230
 tokens_per_language: 128217455
-# See configs/prep_bpe_culturax.yml's own comment -- confirmed live that
-# holding all 106 CulturaX languages open simultaneously OOM's even at
-# ~125GB (a whole Ice Lake node); process 15 at a time instead.
-lang_batch_size: 15
+# See configs/prep_bpe_culturax.yml's own comment for the full 3-round
+# debugging history -- a genuine ~3.5KB/document leak in the underlying
+# datasets/parquet streaming implementation means even a bounded batch size
+# needs real headroom; 5 concurrent streams keeps total leak to ~2.1GB.
+lang_batch_size: 5
 # See configs/prep_bpe_culturax.yml's own comment -- confirmed live that
 # dedup's LSH near-dup index (unbounded, one MinHash sketch per document
 # ever seen -- see common/data/dedup.py's own documented limitation for

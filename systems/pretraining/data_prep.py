@@ -423,6 +423,23 @@ def prep_dataset(
     if resume:
         with open(prep_checkpoint_path) as f:
             _ckpt = json.load(f)
+        # batch_idx alone (see below) is only a valid resume position for
+        # the SAME lang_batch_size that produced it -- lang_batches itself
+        # is recomputed fresh from CULTURAX_LANGS/langs/lang_batch_size on
+        # every invocation, never persisted, so a DIFFERENT lang_batch_size
+        # would silently make the same batch_idx point at a different set
+        # of languages, corrupting the per-language quota guarantee rather
+        # than raising anything -- caught here explicitly instead.
+        ckpt_lang_batch_size = _ckpt.get("lang_batch_size")
+        if lang_batches is not None and ckpt_lang_batch_size != lang_batch_size:
+            raise ValueError(
+                f"{prep_checkpoint_path} was written with lang_batch_size="
+                f"{ckpt_lang_batch_size!r}, but this run passed lang_batch_size="
+                f"{lang_batch_size!r} -- resuming would silently point batch_idx at a "
+                "different set of languages. Either pass the original lang_batch_size, "
+                "or delete this checkpoint (and its .buffer.bin sibling) to start fresh "
+                "with the new value."
+            )
         print(f"\nresuming from {prep_checkpoint_path}: {_ckpt['total_tokens']:,} tokens / "
               f"{_ckpt['num_docs']:,} docs / {len(_ckpt['shard_files'])} shards already written")
     else:
@@ -529,6 +546,7 @@ def prep_dataset(
         # early partial shard flush that would fragment shard files.
         ckpt = {
             "batch_idx": batch_idx,
+            "lang_batch_size": lang_batch_size,
             "stream_docs_consumed": stream_docs_consumed,
             "total_tokens": total_tokens,
             "num_docs": num_docs,

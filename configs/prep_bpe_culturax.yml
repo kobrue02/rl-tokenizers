@@ -36,14 +36,21 @@ output_dir: pretrain_data/culturax_bpe_large
 # only ~73M tokens/language, heavily skewed toward high-resource languages).
 max_tokens: 13591050230
 tokens_per_language: 128217455
-# Confirmed live: holding all 106 CulturaX languages' own HF streaming
-# connections open simultaneously (genuine round-robin needs every one
-# alive at once) OOM'd a real prep job even at ~125GB (bwUniCluster's
-# entire Ice Lake node) -- see lang_batch_size's own docstring in
-# data_prep.py for the full explanation. Processes 15 languages at a time
-# (~8 sequential groups) instead; each group still fills to its own
-# tokens_per_language quota above before the next starts.
-lang_batch_size: 15
+# Confirmed live (3 rounds of debugging a real prep job): (1) holding all
+# 106 CulturaX streams open at once OOM'd even at ~125GB, fixed by
+# batching; (2) the dedup near-dup LSH index OOM'd separately on CulturaX's
+# long documents, fixed by disabling it below; (3) EVEN with both of those
+# fixed, a genuine memory leak in the underlying datasets/parquet streaming
+# implementation itself -- confirmed directly (see data_prep.py's own
+# lang_batch_size docstring): ~3.5KB retained per document pulled, NEVER
+# freed, for the lifetime of one stream. At ~120-135K documents needed per
+# language to reach its own 128M-token quota, lang_batch_size=15
+# concurrently open streams accumulates ~15 * 120K * 3.5KB =~ 6.3GB of pure
+# leak before that batch's languages finish -- confirmed to OOM in
+# practice. 5 concurrent streams instead (~22 sequential groups) keeps the
+# same leak at ~2.1GB, a real safety margin -- starting a new batch opens
+# entirely fresh stream objects, resetting the leak to ~0 each time.
+lang_batch_size: 5
 # Confirmed live: even with lang_batch_size, prep still OOM'd after only
 # 5.53M tokens (a tiny fraction of even one batch's own target) -- pointing
 # at common/data/dedup.py's own documented limitation, not the round-robin
