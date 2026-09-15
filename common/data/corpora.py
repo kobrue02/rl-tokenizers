@@ -136,7 +136,7 @@ CULTURAX_REPO = "uonlp/CulturaX"  # GATED -- needs HF access approval at
 # macrolanguage/individual-language pairs langcodes doesn't collapse on its
 # own -- e.g. "swh" (Swahili individual language) -> "sw" (its macrolanguage,
 # CulturaX's actual config name), "cmn"/"yue" (Mandarin/Cantonese) -> "zh").
-# 107 unique CulturaX codes (BOUQuET's cmn/yue collapse to one CulturaX "zh"
+# 106 unique CulturaX codes (BOUQuET's cmn/yue collapse to one CulturaX "zh"
 # stream, and quz/quh collapse to one "qu" stream -- CulturaX doesn't
 # distinguish these varieties, so streaming the same config twice under two
 # different BOUQuET identities would just duplicate content, not add
@@ -151,7 +151,7 @@ CULTURAX_REPO = "uonlp/CulturaX"  # GATED -- needs HF access approval at
 # construction.
 CULTURAX_LANGS = [
     "af", "als", "am", "arz", "as", "az", "azb", "ba", "be", "bg", "bn", "bo",
-    "br", "bs", "ca", "ce", "ceb", "ckb", "cs", "cy", "da", "de", "diq", "dv",
+    "br", "bs", "ca", "ce", "ceb", "ckb", "cs", "cy", "da", "de", "dv",
     "el", "en", "es", "et", "eu", "fi", "fr", "fy", "ga", "gd", "gl", "gom",
     "gu", "he", "hi", "hr", "ht", "hu", "hy", "id", "ilo", "is", "it", "ja",
     "jv", "ka", "kk", "km", "kn", "ko", "ky", "li", "lo", "lt", "lv", "mai",

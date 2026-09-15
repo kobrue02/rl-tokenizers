@@ -9,7 +9,7 @@
 dataset: culturax
 langs: all
 # "all" resolves to common.data.corpora.CULTURAX_LANGS -- see
-# configs/prep_bpe_culturax.yml's own comment for what/why (the 107-language
+# configs/prep_bpe_culturax.yml's own comment for what/why (the 106-language
 # BOUQuET x CulturaX intersection, matching the tokenizer eval's own
 # language set, all 21 XNLI+XCOPA eval languages included natively).
 system: fanta
@@ -20,8 +20,8 @@ vocab_json: vocab_out/fanta_vocab_6284655.json
 output_dir: pretrain_data/culturax_fanta_large
 # Same Chinchilla-derived budget as configs/prep_bpe_culturax.yml -- see its
 # own comment for the full derivation (679,552,512 non-embedding "large"
-# params * 20 tokens/param / 107 languages = 127,019,161 tokens/language).
-max_tokens: 13591050227
-tokens_per_language: 127019161
+# params * 20 tokens/param / 106 languages = 128,217,455 tokens/language).
+max_tokens: 13591050230
+tokens_per_language: 128217455
 use_wandb: true
 run_name: fanta_culturax_large_data_prep
