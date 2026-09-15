@@ -1,0 +1,15 @@
+# systems/pretraining/cli.py -- sbatch --gres=gpu:4 --partition=gpu_h100 jobs/train_pretraining.sh -c configs/pretrain_fanta_culturax.yml
+# --partition=gpu_h100 (NOT gpu_h100_il) -- see configs/pretrain_bpe_culturax.yml's own comment.
+# Re-run of pretrain_fanta_large.yml on the corrected culturax data pipeline
+# -- see configs/pretrain_bpe_culturax.yml's own comment for the full
+# rationale (identical here -- same model_size, same derived total_steps,
+# just fanta's own shard_dir/output_dir).
+shard_dir: pretrain_data/culturax_fanta_large
+model_size: large
+seq_len: 1024
+per_device_batch_size: 16
+total_steps: 207383
+output_dir: checkpoints/pretrain_fanta_culturax_large
+use_wandb: true
+run_name: fanta_culturax_large_207k_steps
+resume_from: ""

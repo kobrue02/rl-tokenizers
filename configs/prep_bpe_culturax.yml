@@ -1,0 +1,40 @@
+# systems/pretraining/data_prep.py -- sbatch jobs/prep_pretraining_data.sh -c configs/prep_bpe_culturax.yml
+# CPU-only job (jobs/prep_pretraining_data.sh, NOT the _gpu variant -- bpe's
+# induce_spans is plain CPU BPE, no torch forward pass, same rationale as
+# configs/prep_bpe_large.yml).
+#
+# Replaces configs/prep_bpe_large.yml's glot500 source: Glot500 documents
+# were confirmed live to be single sentences/short fragments (median
+# 60-110 chars across eng/deu/spa/swh), not real documents -- the model
+# never saw genuinely long, coherent context during that run. culturax
+# (uonlp/CulturaX, GATED -- request access at
+# https://huggingface.co/datasets/uonlp/CulturaX before this will stream)
+# is document-level web text instead.
+dataset: culturax
+langs: all
+# "all" resolves to common.data.corpora.CULTURAX_LANGS -- the 107-language
+# BOUQuET (facebook/bouquet, 259 langs) x CulturaX (167 langs) intersection,
+# so this LM's training languages exactly match the language set
+# common.eval.cross_tokenizer's own BOUQuET-based tokenizer eval already
+# covers (minus BOUQuET's ~150 languages too low-resource for ANY
+# web-crawled corpus to have real document-level text for). All 21
+# XNLI+XCOPA eval languages are included natively.
+system: bpe
+checkpoint: checkpoints/bpe_50k.json
+output_dir: pretrain_data/culturax_bpe_large
+# Chinchilla-optimal for the "large" preset's 679,552,512 NON-EMBEDDING
+# params (vocab-independent, so this number is the same across every
+# tokenizer system, keeping the comparison fair despite different vocab
+# sizes) at the standard ~20 tokens/param ratio: 679,552,512 * 20 =
+# 13,591,050,240 total tokens, / 107 languages = 127,019,161 tokens/language
+# (floor), so max_tokens below is that per-language figure times 107
+# exactly -- see tokens_per_language's own comment for why THAT, not this
+# global cap alone, is what actually equalizes each language's realized
+# share (round-robin drops an exhausted lower-resource language and keeps
+# filling the global budget from whichever higher-resource languages
+# remain -- exactly what left the original glot500 "large" run averaging
+# only ~73M tokens/language, heavily skewed toward high-resource languages).
+max_tokens: 13591050227
+tokens_per_language: 127019161
+use_wandb: true
+run_name: bpe_culturax_large_data_prep

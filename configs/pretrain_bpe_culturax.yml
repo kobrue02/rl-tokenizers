@@ -1,0 +1,24 @@
+# systems/pretraining/cli.py -- sbatch --gres=gpu:4 --partition=gpu_h100 jobs/train_pretraining.sh -c configs/pretrain_bpe_culturax.yml
+# --partition=gpu_h100 (NOT gpu_h100_il, the shared a100/h100 pool) is the
+# DEDICATED H100 queue -- AMD EPYC 9454 (96 cores, vs. gpu_h100_il's Ice
+# Lake 64), 94GiB/GPU (vs. 80GiB), 15.36TB local NVMe (vs. 6.4TB) -- see
+# bwUniCluster 3.0's own Hardware and Architecture wiki page.
+# Re-run of pretrain_bpe_large.yml on the corrected culturax data pipeline
+# (see configs/prep_bpe_culturax.yml's own comment) -- same "large"
+# architecture/shape as before (isolates the data-quality fix as the only
+# changed variable), same per-device batch shape (65,536 tokens/step at 4
+# GPUs), but total_steps is now DERIVED from the Chinchilla-per-language
+# budget (13,591,050,227 tokens / 65,536 tokens/step), not an ad hoc
+# "roughly double the Chinchilla floor" guess -- and is correspondingly
+# smaller than the original glot500 run's 450,000 steps (~30B tokens),
+# despite covering fewer, better-chosen languages with genuinely long
+# documents instead of single-sentence fragments.
+shard_dir: pretrain_data/culturax_bpe_large
+model_size: large
+seq_len: 1024
+per_device_batch_size: 16
+total_steps: 207383
+output_dir: checkpoints/pretrain_bpe_culturax_large
+use_wandb: true
+run_name: bpe_culturax_large_207k_steps
+resume_from: ""

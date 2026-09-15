@@ -33,11 +33,31 @@
 # No progress at all -> real failure, NOT resubmitted. Expect a new job id
 # in squeue roughly every 24h for a multi-day run -- that's normal.
 #
+# LOCAL-SSD STAGING: ShardedTokenDataset re-reads random windows from
+# shard_dir's own .bin files on every single training step for the entire
+# run (hundreds of thousands of steps) -- exactly the access pattern
+# bwUniCluster's own docs call out $TMPDIR (local node NVMe) for over the
+# parallel Lustre filesystem ("data which is read many times on a single
+# node... should be copied to $TMPDIR and read from there"), not just large
+# sequential throughput Lustre is tuned for. This copies shard_dir to
+# $TMPDIR once at job start and points --shard-dir at that local copy
+# instead -- re-paid on every AUTO-RESUBMIT too, since $TMPDIR is purged
+# between jobs (a fresh per-job directory, not a persistent cache), but at
+# this project's actual shard sizes (a uint16-dtype "large"-preset corpus is
+# tens of GB, not TBs) the one-time copy cost is trivial next to a
+# multi-day run's own read volume.
+#
 # Usage:
 #   sbatch jobs/train_pretraining.sh --shard-dir pretrain_data/glot500_bpe \
 #       --model-size small --total-steps 50000 --seq-len 1024 --per-device-batch-size 16
 #   sbatch --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_fanta_large.yml
 #   sbatch --gres=gpu:8 --cpus-per-task=32 jobs/train_pretraining.sh -c configs/pretrain_bpe_large.yml
+#   sbatch --partition=gpu_h100 --gres=gpu:4 jobs/train_pretraining.sh -c configs/pretrain_bpe_culturax.yml
+#   # gpu_h100 is bwUniCluster 3.0's DEDICATED H100 queue (AMD EPYC 9454,
+#   # 94GiB/GPU, 15.36TB local NVMe) -- distinct from the shared
+#   # gpu_a100_il/gpu_h100_il pool (Ice Lake, 80GiB/GPU, 6.4TB, either card
+#   # type). Overriding --partition is preserved across AUTO-RESUBMIT the
+#   # same way --gres/--time/--cpus-per-task already are (see below).
 
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
@@ -56,8 +76,9 @@ cd $PROJECT_ROOT
 uv sync
 mkdir -p logs checkpoints/pretrain
 
-# Resolve output_dir/total_steps from the exact args this job received --
-# reuses systems.pretraining.cli's own parsing so this can't drift from it.
+# Resolve output_dir/total_steps/shard_dir from the exact args this job
+# received -- reuses systems.pretraining.cli's own parsing so this can't
+# drift from it.
 CFG_INFO=$(python3 -c "
 import sys
 from systems.pretraining.cli import build_arg_parser, _config_from_args
@@ -66,10 +87,25 @@ args = parse_args_with_config(build_arg_parser(), sys.argv[1:])
 cfg = _config_from_args(args)
 print(cfg.output_dir)
 print(cfg.total_steps)
+print(cfg.shard_dir)
 " "$@")
 OUTPUT_DIR=$(echo "$CFG_INFO" | sed -n '1p')
 TOTAL_STEPS=$(echo "$CFG_INFO" | sed -n '2p')
-echo "Resolved output_dir=$OUTPUT_DIR total_steps=$TOTAL_STEPS"
+SHARD_DIR=$(echo "$CFG_INFO" | sed -n '3p')
+echo "Resolved output_dir=$OUTPUT_DIR total_steps=$TOTAL_STEPS shard_dir=$SHARD_DIR"
+
+# See LOCAL-SSD STAGING above. Falls back to the original (Lustre) SHARD_DIR
+# untouched if $TMPDIR isn't set for some reason (e.g. a manual non-sbatch
+# invocation while developing this script) rather than failing outright.
+if [ -n "$TMPDIR" ]; then
+    LOCAL_SHARD_DIR="$TMPDIR/shard_data"
+    echo "Staging shard_dir to local SSD: $SHARD_DIR -> $LOCAL_SHARD_DIR"
+    time cp -a "$SHARD_DIR" "$LOCAL_SHARD_DIR"
+    TRAIN_SHARD_DIR="$LOCAL_SHARD_DIR"
+else
+    echo "\$TMPDIR not set -- skipping local-SSD staging, reading shard_dir directly from $SHARD_DIR"
+    TRAIN_SHARD_DIR="$SHARD_DIR"
+fi
 
 latest_checkpoint() {
     ls "$1"/step_*.pt 2>/dev/null | sed -E 's#.*/step_([0-9]+)\.pt#\1 &#' | sort -n | tail -1 | cut -d' ' -f2-
@@ -82,13 +118,18 @@ else
     BEFORE_STEP=0
 fi
 
-# Single process for one GPU, torchrun for more than one.
+# Single process for one GPU, torchrun for more than one. --shard-dir is
+# appended AFTER "$@" so it wins over whatever the original args/config file
+# set (see configs/README.md's own "a flag passed explicitly on the command
+# line always overrides the same key in the YAML file" precedence rule) --
+# every rank reads from the same staged local copy, not the original
+# SHARD_DIR.
 NUM_GPUS="${SLURM_GPUS_ON_NODE:-1}"
-echo "Starting pretraining with $NUM_GPUS GPU(s), args: $@"
+echo "Starting pretraining with $NUM_GPUS GPU(s), args: $@ --shard-dir $TRAIN_SHARD_DIR"
 if [ "$NUM_GPUS" -gt 1 ]; then
-    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m systems.pretraining.cli "$@"
+    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m systems.pretraining.cli "$@" --shard-dir "$TRAIN_SHARD_DIR"
 else
-    python3 -m systems.pretraining.cli "$@"
+    python3 -m systems.pretraining.cli "$@" --shard-dir "$TRAIN_SHARD_DIR"
 fi
 TRAIN_EXIT=$?
 
@@ -120,13 +161,21 @@ TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
 # every resubmit after the first, silently reverting to 16 and risking an
 # OOM on the next checkpoint load.
 CPUS_PER_TASK=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'CPUs/Task=\K\S+')
+# Same reasoning for --partition: this script's own #SBATCH pragma defaults
+# to gpu_a100_il, so a run submitted with e.g. --partition=gpu_h100 would
+# otherwise silently fall back to gpu_a100_il on every resubmit after the
+# first -- a real correctness gap (H100-vs-A100 wall-clock/memory
+# differences and gpu_a100_il's own shared-pool node-type uncertainty are
+# exactly why a partition gets chosen deliberately in the first place),
+# not just a preference lost.
+PARTITION=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'Partition=\K\S+')
 
 echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."
-sbatch --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" --cpus-per-task="$CPUS_PER_TASK" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
+sbatch --partition="$PARTITION" --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" --cpus-per-task="$CPUS_PER_TASK" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
 SBATCH_EXIT=$?
 if [ "$SBATCH_EXIT" -ne 0 ]; then
     echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-    echo "  sbatch --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT --cpus-per-task=$CPUS_PER_TASK jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
+    echo "  sbatch --partition=$PARTITION --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT --cpus-per-task=$CPUS_PER_TASK jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
     exit 1
 fi
 echo "Resubmitted successfully."

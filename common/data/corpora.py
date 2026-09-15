@@ -90,7 +90,7 @@ from .synthetic import LANG_PROFILES, make_synthetic_parallel_groups
 from .oldi_data import LANG_SCRIPT, load_flores_plus, load_oldi_seed
 
 PARALLEL_SOURCES = {"oldi_seed", "flores_dev"}
-MONOLINGUAL_SOURCES = {"glot500", "fineweb_edu", "olmo_mix", "pile"}
+MONOLINGUAL_SOURCES = {"glot500", "fineweb_edu", "olmo_mix", "pile", "culturax"}
 BITEXT_SOURCES = {"smol", "ccmatrix", "un_pc", "europarl", "tatoeba_mt"}
 STREAMED_PARALLEL_SOURCES = {"bible_nlp"}
 LOCAL_BITEXT_SOURCES = {"indigenous_panel"}
@@ -125,6 +125,41 @@ EUROPARL_REPO = "Helsinki-NLP/europarl"
 TATOEBA_MT_REPO = "Helsinki-NLP/tatoeba_mt"
 BIBLE_NLP_REPO = "bible-nlp/biblenlp-corpus"
 PILE_REPO = "EleutherAI/the_pile_deduplicated"
+CULTURAX_REPO = "uonlp/CulturaX"  # GATED -- needs HF access approval at
+# https://huggingface.co/datasets/uonlp/CulturaX before it can be streamed
+# at all (by anyone, including via a cluster job's own HF_TOKEN).
+
+# The BOUQuET (facebook/bouquet, 259 languages) x CulturaX (167 languages)
+# language intersection, computed via each BOUQuET language's ISO 639-3
+# code standardized to its CulturaX-side alpha-2/alpha-3 config name
+# (langcodes.standardize_tag, with a small manual override table for
+# macrolanguage/individual-language pairs langcodes doesn't collapse on its
+# own -- e.g. "swh" (Swahili individual language) -> "sw" (its macrolanguage,
+# CulturaX's actual config name), "cmn"/"yue" (Mandarin/Cantonese) -> "zh").
+# 107 unique CulturaX codes (BOUQuET's cmn/yue collapse to one CulturaX "zh"
+# stream, and quz/quh collapse to one "qu" stream -- CulturaX doesn't
+# distinguish these varieties, so streaming the same config twice under two
+# different BOUQuET identities would just duplicate content, not add
+# diversity). Chosen so a downstream LM's training languages are exactly
+# the same set common.eval.cross_tokenizer's own BOUQuET-based tokenizer
+# eval already covers (minus BOUQuET's ~150 languages too low-resource for
+# ANY web-crawled corpus to have real document-level text for -- see
+# common.data.prepare_pile's neighboring rationale for the general
+# "web corpora don't reach the low-resource tail" point). All 21 XNLI+XCOPA
+# eval languages (see systems/pretraining/benchmarks.py's own XNLI_LANGS/
+# XCOPA_LANGS) are included natively -- confirmed directly, not by
+# construction.
+CULTURAX_LANGS = [
+    "af", "als", "am", "arz", "as", "az", "azb", "ba", "be", "bg", "bn", "bo",
+    "br", "bs", "ca", "ce", "ceb", "ckb", "cs", "cy", "da", "de", "diq", "dv",
+    "el", "en", "es", "et", "eu", "fi", "fr", "fy", "ga", "gd", "gl", "gom",
+    "gu", "he", "hi", "hr", "ht", "hu", "hy", "id", "ilo", "is", "it", "ja",
+    "jv", "ka", "kk", "km", "kn", "ko", "ky", "li", "lo", "lt", "lv", "mai",
+    "mg", "min", "mk", "ml", "mn", "mr", "ms", "mt", "my", "ne", "nl", "nn",
+    "or", "pa", "pl", "pt", "qu", "rm", "ro", "ru", "scn", "sd", "si", "sk",
+    "sl", "so", "sr", "su", "sv", "sw", "ta", "te", "tg", "th", "tl", "tr",
+    "tt", "ug", "uk", "ur", "uz", "vi", "war", "wuu", "yi", "yo", "zh",
+]
 
 # ccmatrix/un_pc/europarl configs live in card_data, discovered the same way
 # as Glot500's; tatoeba_mt has no card_data configs (plain per-pair TSV
@@ -250,6 +285,15 @@ def _stream_monolingual_single(source, config_or_lang):
                 # simplification, not a verified per-row claim -- OLMo-mix
                 # has no reliable per-row language field to check.
                 yield {"eng": row["text"]}
+    elif source == "culturax":
+        # config_or_lang here is one CULTURAX_LANGS code (its CulturaX-native
+        # config name, e.g. "sw", not a BOUQuET stem) -- see
+        # _stream_culturax_single, called directly by stream_groups's own
+        # culturax branch for the multi-language round-robin case; this
+        # single-language branch exists for interface symmetry with
+        # fineweb_edu/olmo_mix/pile above, matched the same way by
+        # data_prep.py callers that pass a bare `config`.
+        yield from _stream_culturax_single(config_or_lang)
     elif source == "pile":
         # Local parquet cache only, no live-HF fallback -- see
         # _stream_pile_local and PILE_LOCAL_DIR's own docstrings.
@@ -258,6 +302,18 @@ def _stream_monolingual_single(source, config_or_lang):
         yield from _stream_pile_local(output_dir=config_or_lang)
     else:
         raise ValueError(f"{source!r} is not a monolingual source")
+
+
+def _stream_culturax_single(lang):
+    """One CulturaX language's own row stream, normalized to {lang: text}
+    dicts. lang is a CULTURAX_LANGS code (CulturaX's own config name, e.g.
+    "sw") -- CulturaX is GATED (see CULTURAX_REPO's own docstring), so this
+    raises the HF Hub's own DatasetNotFoundError/access-request message if
+    the caller's HF_TOKEN account hasn't been granted access yet, same as
+    any other gated-dataset load_dataset call."""
+    for row in _stream_hf(CULTURAX_REPO, lang):
+        if row.get("text"):
+            yield {lang: row["text"]}
 
 
 def _stream_bitext_single(source, config):
@@ -571,6 +627,13 @@ def stream_groups(source, langs=None, config=None, seed=0, max_samples_per_pair=
         yield from _round_robin(
             iter(_stream_glot500_local_single(lang, output_dir=config)) for lang in lang_list
         )
+        return
+    if source == "culturax":
+        lang_list = CULTURAX_LANGS if langs in (None, "all") else list(langs)
+        if len(lang_list) == 1:
+            yield from _stream_culturax_single(lang_list[0])
+            return
+        yield from _round_robin(iter(_stream_culturax_single(lang)) for lang in lang_list)
         return
     if source in ("fineweb_edu", "olmo_mix", "pile"):
         yield from _stream_monolingual_single(source, config)

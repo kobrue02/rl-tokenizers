@@ -264,6 +264,7 @@ def prep_dataset(
     vocab_json_path=None,
     max_tokens=None,
     max_docs=None,
+    tokens_per_language=None,
     device="cpu",
     shard_size=SHARD_SIZE,
     dedup=True,
@@ -285,7 +286,38 @@ def prep_dataset(
     instead (unused by pile specifically -- it has no HF configs to select
     between, see common.data.corpora.stream_groups). max_tokens/max_docs:
     stop once either is reached (None disables); checked against KEPT
-    (post-dedup) counts. dedup/dedup_*: see common.data.dedup.Deduplicator
+    (post-dedup) counts.
+
+    tokens_per_language: None (default) disables -- every KEPT document is
+    tokenized and packed regardless of language, same as before this
+    parameter existed. Set to an int to cap EACH language's own realized
+    token count independently (via the SAME lang_counts accounting the
+    "LANGUAGE TRACKING" module docstring section already tracks) --
+    documents from a language that has already reached this quota are
+    dropped BEFORE tokenization (counted nowhere -- not dedup, not
+    truncation -- since they're never examined that closely), while
+    documents from every other still-under-quota language keep flowing
+    through stream_groups's own round-robin exactly as before. This is
+    what actually equalizes per-language token share for a multi-language
+    source like culturax with wildly uneven per-language corpus sizes --
+    a single global max_tokens alone does NOT: round-robin only balances
+    among languages that HAVEN'T yet run out of their own raw text, so
+    once a lower-resource language's stream is exhausted, round-robin
+    silently drops it and keeps filling the global budget from whichever
+    higher-resource languages remain, same imbalance
+    model_configs.py/pretrain_bpe_large.yml's own "30B tokens / 411
+    languages" comment describes. Checked with the same POOL-granularity
+    imprecision as max_tokens/max_docs (a document already sitting in
+    `pending`, not yet tokenized via process_pending, isn't reflected in
+    lang_counts yet -- see PERFORMANCE/BUCKETING docstring sections) --
+    a language can overshoot its quota by up to one pool's worth, same
+    acceptable slop as the existing global caps. Typically paired with
+    max_tokens = tokens_per_language * len(langs) as the overall stop
+    condition (set by the caller -- this parameter alone doesn't stop the
+    whole run once every language hits quota; the CLI's own
+    --tokens-per-language help text spells this out).
+
+    dedup/dedup_*: see common.data.dedup.Deduplicator
     and the module docstring's DEDUPLICATION section. max_doc_bytes: see
     MAX_DOC_BYTES section above; 0 or None disables truncation entirely.
     encode_batch_size/bucket_pool_multiplier: see PERFORMANCE and BUCKETING
@@ -379,6 +411,10 @@ def prep_dataset(
     dropped_dup_by_lang = defaultdict(
         lambda: {"docs": 0, "bytes": 0}, _ckpt["dropped_duplicates_by_lang"] if resume else {}
     )
+    dropped_quota_docs = _ckpt.get("dropped_quota_docs", 0) if resume else 0
+    dropped_quota_by_lang = defaultdict(
+        int, (_ckpt.get("dropped_quota_by_lang") or {}) if resume else {}
+    )
     num_truncated_docs = _ckpt["num_truncated_docs"] if resume else 0
     num_truncated_by_lang = defaultdict(
         int, _ckpt["num_truncated_by_lang"] if resume else {}
@@ -423,6 +459,8 @@ def prep_dataset(
             "dropped_duplicate_docs": dropped_dup_docs,
             "dropped_duplicate_bytes": dropped_dup_bytes,
             "dropped_duplicates_by_lang": dict(dropped_dup_by_lang),
+            "dropped_quota_docs": dropped_quota_docs,
+            "dropped_quota_by_lang": dict(dropped_quota_by_lang),
             "num_truncated_docs": num_truncated_docs,
             "num_truncated_by_lang": dict(num_truncated_by_lang),
         }
@@ -512,6 +550,16 @@ def prep_dataset(
                 dropped_dup_by_lang[lang]["bytes"] += raw_len
                 continue
             _, lang, encode_bytes, raw_len, was_truncated, stream_docs_consumed = record
+            if tokens_per_language and lang_counts[lang]["tokens"] >= tokens_per_language:
+                # Over quota -- dropped before tokenization, same as a
+                # duplicate, so round-robin's other still-under-quota
+                # languages keep flowing instead of this language
+                # monopolizing the rest of the run (see this function's own
+                # tokens_per_language docstring section for why a global
+                # max_tokens alone can't equalize this).
+                dropped_quota_docs += 1
+                dropped_quota_by_lang[lang] += 1
+                continue
             if was_truncated:
                 num_truncated_docs += 1
                 num_truncated_by_lang[lang] += 1
@@ -549,6 +597,22 @@ def prep_dataset(
         )
         for lang, counts in sorted(dropped_dup_by_lang.items(), key=lambda kv: -kv[1]["docs"]):
             print(f"    {lang:12s} dropped_docs={counts['docs']:8,d}  dropped_bytes={counts['bytes']:12,d}")
+
+    if tokens_per_language:
+        print(
+            f"\ntokens_per_language={tokens_per_language:,}: dropped {dropped_quota_docs:,} "
+            "documents from languages that had already reached quota"
+        )
+        for lang, count in sorted(dropped_quota_by_lang.items(), key=lambda kv: -kv[1]):
+            print(f"    {lang:12s} dropped_docs={count:,}")
+        under_quota = [
+            lang for lang in lang_counts if lang_counts[lang]["tokens"] < tokens_per_language
+        ]
+        if under_quota:
+            print(
+                f"    {len(under_quota)} language(s) never reached quota (ran out of raw "
+                f"text first): {sorted(under_quota)}"
+            )
 
     if max_doc_bytes:
         trunc_rate = num_truncated_docs / num_docs if num_docs else 0.0
@@ -589,6 +653,9 @@ def prep_dataset(
         "dropped_duplicate_docs": dropped_dup_docs,
         "dropped_duplicate_bytes": dropped_dup_bytes,
         "dropped_duplicates_by_lang": dict(dropped_dup_by_lang),
+        "tokens_per_language": tokens_per_language,
+        "dropped_quota_docs": dropped_quota_docs,
+        "dropped_quota_by_lang": dict(dropped_quota_by_lang),
         "max_doc_bytes": max_doc_bytes,
         "num_truncated_docs": num_truncated_docs,
         "num_truncated_by_lang": dict(num_truncated_by_lang),
@@ -618,8 +685,9 @@ def build_arg_parser():
         type=str,
         default=None,
         help="comma-separated language codes -- defaults to 'all' for oldi_seed/flores_dev/"
-        "glot500, arbitrary subset for bible_nlp; ignored for fineweb_edu/olmo_mix and "
-        "BITEXT_SOURCES (smol/ccmatrix/un_pc/europarl/tatoeba_mt), which use --dataset-config",
+        "glot500/culturax (all: common.data.corpora.CULTURAX_LANGS for culturax), arbitrary "
+        "subset for bible_nlp; ignored for fineweb_edu/olmo_mix/pile and BITEXT_SOURCES "
+        "(smol/ccmatrix/un_pc/europarl/tatoeba_mt), which use --dataset-config",
     )
     parser.add_argument(
         "--dataset-config",
@@ -646,6 +714,14 @@ def build_arg_parser():
     parser.add_argument("--output-dir", type=str, required=True)
     parser.add_argument("--max-tokens", type=int, default=None)
     parser.add_argument("--max-docs", type=int, default=None)
+    parser.add_argument(
+        "--tokens-per-language", type=int, default=None,
+        help="cap EACH language's own realized token count independently (see prep_dataset's "
+        "own tokens_per_language docstring section for why this, not --max-tokens alone, is "
+        "what actually equalizes per-language share for a source with uneven per-language "
+        "corpus sizes). Typically paired with --max-tokens set to this value times the number "
+        "of languages requested, as the overall stop condition",
+    )
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--shard-size", type=int, default=SHARD_SIZE)
     parser.add_argument(
@@ -702,7 +778,7 @@ def build_arg_parser():
 
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
-    if (args.dataset in MONOLINGUAL_SOURCES - {"glot500"} or args.dataset in BITEXT_SOURCES) and args.langs:
+    if (args.dataset in MONOLINGUAL_SOURCES - {"glot500", "culturax"} or args.dataset in BITEXT_SOURCES) and args.langs:
         print(
             f"warning: --langs is ignored for --dataset {args.dataset} "
             "(selected via --dataset-config instead)"
@@ -721,6 +797,7 @@ def main(argv=None):
         vocab_json_path=args.vocab_json,
         max_tokens=args.max_tokens,
         max_docs=args.max_docs,
+        tokens_per_language=args.tokens_per_language,
         device=args.device,
         shard_size=args.shard_size,
         dedup=args.dedup,
@@ -752,6 +829,7 @@ def main(argv=None):
                 "output_dir": args.output_dir,
                 "max_tokens": args.max_tokens,
                 "max_docs": args.max_docs,
+                "tokens_per_language": args.tokens_per_language,
                 "dedup": args.dedup,
                 "dedup_near_threshold": args.dedup_near_threshold,
                 "dedup_num_perm": args.dedup_num_perm,
