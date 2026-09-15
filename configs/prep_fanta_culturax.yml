@@ -23,5 +23,9 @@ output_dir: pretrain_data/culturax_fanta_large
 # params * 20 tokens/param / 106 languages = 128,217,455 tokens/language).
 max_tokens: 13591050230
 tokens_per_language: 128217455
+# See configs/prep_bpe_culturax.yml's own comment -- confirmed live that
+# holding all 106 CulturaX languages open simultaneously OOM's even at
+# ~125GB (a whole Ice Lake node); process 15 at a time instead.
+lang_batch_size: 15
 use_wandb: true
 run_name: fanta_culturax_large_data_prep

@@ -90,6 +90,7 @@ from common.config_file import parse_args_with_config
 from common.data.corpora import (
     ALL_SOURCES,
     BITEXT_SOURCES,
+    CULTURAX_LANGS,
     FINEWEB_EDU_CONFIGS,
     MONOLINGUAL_SOURCES,
     OLMO_MIX_CONFIGS,
@@ -265,6 +266,7 @@ def prep_dataset(
     max_tokens=None,
     max_docs=None,
     tokens_per_language=None,
+    lang_batch_size=None,
     device="cpu",
     shard_size=SHARD_SIZE,
     dedup=True,
@@ -317,6 +319,37 @@ def prep_dataset(
     whole run once every language hits quota; the CLI's own
     --tokens-per-language help text spells this out).
 
+    lang_batch_size: None (default) disables -- every requested language
+    round-robins concurrently via one stream_groups(...) call, same as
+    before this parameter existed. Set to an int to instead process a
+    LARGE multi-language request (culturax's 106-language "all", or an
+    explicit `langs` list longer than this) in sequential GROUPS of this
+    many languages, each group fully round-robining (to its own
+    tokens_per_language quota, or natural exhaustion) before the next
+    group starts. Exists because genuine round-robin interleaving needs
+    every language's own HF streaming dataset object held open
+    SIMULTANEOUSLY for the whole run -- there's no way to interleave N
+    streams without N open at once -- and this was confirmed live to OOM a
+    real culturax prep job even at ~125GB (bwUniCluster's entire Ice Lake
+    node), holding ~106 simultaneous uonlp/CulturaX streaming builders
+    open, well past what should be needed for a handful of open streams.
+    Batching trades perfectly balanced GLOBAL interleaving (every language
+    progressing together) for bounded peak memory (only lang_batch_size
+    streams open at once) -- harmless for ShardedTokenDataset's own
+    training access pattern (random windows over the whole shard file,
+    indifferent to what order the underlying documents were originally
+    written in), and every language still gets its own tokens_per_language
+    quota exactly as without batching, just filled by its own group's
+    round-robin instead of concurrently with every other language.
+    culturax's own "all" is resolved to common.data.corpora.CULTURAX_LANGS
+    here (not inside stream_groups) specifically so this function can see
+    the concrete list to split into groups; every other multi-language
+    source's own "all" resolution (e.g. glot500's) stays inside
+    stream_groups, unreachable for batching purposes -- acceptable since
+    glot500 already reads from a local disk cache (see its own PREREQUISITE
+    docstring elsewhere), not live HF streams, so it never hit this problem
+    to begin with.
+
     dedup/dedup_*: see common.data.dedup.Deduplicator
     and the module docstring's DEDUPLICATION section. max_doc_bytes: see
     MAX_DOC_BYTES section above; 0 or None disables truncation entirely.
@@ -338,15 +371,37 @@ def prep_dataset(
     if prep_checkpoint_path is None:
         prep_checkpoint_path = os.path.join(output_dir, "prep_checkpoint.json")
 
+    # lang_langs_for_batching: the concrete language LIST to split into
+    # groups, resolved here (not left to stream_groups's own internal "all"
+    # resolution) so this function can see it -- see lang_batch_size's own
+    # docstring section. None for every source that doesn't support/need
+    # batching (fineweb_edu/olmo_mix/pile/BITEXT_SOURCES's own single
+    # HF-config selection, or a multi-language source whose "all" isn't
+    # resolved here, e.g. glot500 -- see that same docstring section for why
+    # glot500 doesn't need this).
+    lang_batches = None
     if dataset_name in ("fineweb_edu", "olmo_mix", "pile") or dataset_name in BITEXT_SOURCES:
-        stream = stream_groups(dataset_name, config=dataset_config)
+        single_stream = stream_groups(dataset_name, config=dataset_config)
     else:
-        # `config` is also passed here (not just langs) even though most
-        # sources in this branch ignore it -- glot500 and bible_nlp both
-        # use it as a local disk cache directory override (see
-        # common.data.corpora.stream_groups's own docstring); omitting it
-        # made that override unreachable from this CLI entirely.
-        stream = stream_groups(dataset_name, langs=langs, config=dataset_config)
+        langs_for_batching = None
+        if lang_batch_size:
+            if dataset_name == "culturax" and langs in (None, "all"):
+                langs_for_batching = list(CULTURAX_LANGS)
+            elif isinstance(langs, list):
+                langs_for_batching = list(langs)
+        if langs_for_batching and len(langs_for_batching) > lang_batch_size:
+            lang_batches = [
+                langs_for_batching[i : i + lang_batch_size]
+                for i in range(0, len(langs_for_batching), lang_batch_size)
+            ]
+            single_stream = None
+        else:
+            # `config` is also passed here (not just langs) even though most
+            # sources in this branch ignore it -- glot500 and bible_nlp both
+            # use it as a local disk cache directory override (see
+            # common.data.corpora.stream_groups's own docstring); omitting it
+            # made that override unreachable from this CLI entirely.
+            single_stream = stream_groups(dataset_name, langs=langs, config=dataset_config)
 
     resume = os.path.exists(prep_checkpoint_path)
     if resume:
@@ -372,11 +427,19 @@ def prep_dataset(
     total_tokens = _ckpt["total_tokens"] if resume else 0
     num_docs = _ckpt["num_docs"] if resume else 0
     shard_idx = _ckpt["shard_idx"] if resume else 0
+    # start_batch_idx/batch_idx: only meaningful when lang_batches is not
+    # None (see lang_batch_size's own docstring section) -- 0/unused
+    # otherwise, since the single-stream path below never advances it.
+    start_batch_idx = _ckpt.get("batch_idx", 0) if resume else 0
+    batch_idx = start_batch_idx
     stream_docs_consumed = 0  # this RUN's own count of (lang, text) pairs
-    # pulled from a FRESH stream_groups(...) call above -- compared against
-    # skip_target below to fast-forward past whatever a prior run already
-    # consumed (see RESUME docstring section); unrelated to num_docs, which
-    # only counts KEPT (post-dedup) documents.
+    # pulled from a FRESH stream_groups(...) call for the CURRENT batch (see
+    # the batch loop below) -- compared against skip_target to fast-forward
+    # past whatever a prior run already consumed within that SAME batch
+    # (see RESUME docstring section); unrelated to num_docs, which only
+    # counts KEPT (post-dedup) documents. Reset to 0 for every batch past
+    # the first one this invocation touches -- only a genuinely interrupted
+    # batch (batch_idx == start_batch_idx) can have a nonzero skip_target.
     skip_target = _ckpt["stream_docs_consumed"] if resume else 0
     # {lang: {"docs": int, "tokens": int, "bytes": int}} -- the REALIZED
     # corpus makeup, not the requested `langs` (see module docstring's own
@@ -449,6 +512,7 @@ def prep_dataset(
         # persisted to a sibling .buffer.bin file rather than forcing an
         # early partial shard flush that would fragment shard files.
         ckpt = {
+            "batch_idx": batch_idx,
             "stream_docs_consumed": stream_docs_consumed,
             "total_tokens": total_tokens,
             "num_docs": num_docs,
@@ -529,51 +593,86 @@ def prep_dataset(
         desc=f"tokenizing {dataset_name}", unit="tok", unit_scale=True,
         initial=total_tokens if resume else 0,
     )
-    def build_records():
-        return _dedup_and_truncate(_document_source(stream, skip_target), deduper, max_doc_bytes)
 
-    if prefetch:
-        resolved_queue_size = prefetch_queue_size if prefetch_queue_size else 2 * pool_size
-        record_source = _prefetch(build_records, resolved_queue_size)
-    else:
-        record_source = build_records()
+    num_batches = len(lang_batches) if lang_batches is not None else 1
+    stop_all = False
+    while batch_idx < num_batches:
+        if lang_batches is not None:
+            stream = stream_groups(dataset_name, langs=lang_batches[batch_idx], config=dataset_config)
+            current_batch_langs = set(lang_batches[batch_idx])
+        else:
+            stream = single_stream
+            current_batch_langs = None
+        # Only the batch a crash actually interrupted (batch_idx ==
+        # start_batch_idx, restored from the checkpoint above) can have a
+        # nonzero skip_target -- every batch this invocation starts fresh
+        # (including start_batch_idx itself on a non-resumed run) begins
+        # its own brand-new stream at 0.
+        skip_target = _ckpt["stream_docs_consumed"] if (resume and batch_idx == start_batch_idx) else 0
+        stream_docs_consumed = 0
 
-    try:
-        for record in record_source:
-            if record[0] == "dup":
-                # Dropped before tokenization; still counted per language
-                # so the drop rate stays visible in reports.
-                _, lang, raw_len, stream_docs_consumed = record
-                dropped_dup_docs += 1
-                dropped_dup_bytes += raw_len
-                dropped_dup_by_lang[lang]["docs"] += 1
-                dropped_dup_by_lang[lang]["bytes"] += raw_len
-                continue
-            _, lang, encode_bytes, raw_len, was_truncated, stream_docs_consumed = record
-            if tokens_per_language and lang_counts[lang]["tokens"] >= tokens_per_language:
-                # Over quota -- dropped before tokenization, same as a
-                # duplicate, so round-robin's other still-under-quota
-                # languages keep flowing instead of this language
-                # monopolizing the rest of the run (see this function's own
-                # tokens_per_language docstring section for why a global
-                # max_tokens alone can't equalize this).
-                dropped_quota_docs += 1
-                dropped_quota_by_lang[lang] += 1
-                continue
-            if was_truncated:
-                num_truncated_docs += 1
-                num_truncated_by_lang[lang] += 1
-            pending.append((lang, encode_bytes, raw_len))
-            process_pending()  # no-op unless the pool has reached pool_size
+        def build_records():
+            return _dedup_and_truncate(_document_source(stream, skip_target), deduper, max_doc_bytes)
 
-            if (max_tokens and total_tokens >= max_tokens) or (max_docs and num_docs >= max_docs):
-                break
-    finally:
-        # For --prefetch, this signals the producer thread to stop and
-        # joins it (see _prefetch's own docstring) -- must happen BEFORE
-        # the final process_pending/flush below, not concurrently with
-        # them. A no-op for the plain build_records() generator.
-        record_source.close()
+        if prefetch:
+            resolved_queue_size = prefetch_queue_size if prefetch_queue_size else 2 * pool_size
+            record_source = _prefetch(build_records, resolved_queue_size)
+        else:
+            record_source = build_records()
+
+        try:
+            for record in record_source:
+                if record[0] == "dup":
+                    # Dropped before tokenization; still counted per language
+                    # so the drop rate stays visible in reports.
+                    _, lang, raw_len, stream_docs_consumed = record
+                    dropped_dup_docs += 1
+                    dropped_dup_bytes += raw_len
+                    dropped_dup_by_lang[lang]["docs"] += 1
+                    dropped_dup_by_lang[lang]["bytes"] += raw_len
+                    continue
+                _, lang, encode_bytes, raw_len, was_truncated, stream_docs_consumed = record
+                if tokens_per_language and lang_counts[lang]["tokens"] >= tokens_per_language:
+                    # Over quota -- dropped before tokenization, same as a
+                    # duplicate, so round-robin's other still-under-quota
+                    # languages keep flowing instead of this language
+                    # monopolizing the rest of the run (see this function's own
+                    # tokens_per_language docstring section for why a global
+                    # max_tokens alone can't equalize this).
+                    dropped_quota_docs += 1
+                    dropped_quota_by_lang[lang] += 1
+                    continue
+                if was_truncated:
+                    num_truncated_docs += 1
+                    num_truncated_by_lang[lang] += 1
+                pending.append((lang, encode_bytes, raw_len))
+                process_pending()  # no-op unless the pool has reached pool_size
+
+                if (max_tokens and total_tokens >= max_tokens) or (max_docs and num_docs >= max_docs):
+                    stop_all = True
+                    break
+                if (
+                    current_batch_langs is not None
+                    and tokens_per_language
+                    and all(lang_counts[l]["tokens"] >= tokens_per_language for l in current_batch_langs)
+                ):
+                    # Every language in THIS batch is at quota -- move on to
+                    # the next batch rather than waiting for the underlying
+                    # streams to naturally exhaust (they may never, for a
+                    # high-resource language with far more raw text than
+                    # any per-language quota needs).
+                    break
+        finally:
+            # For --prefetch, this signals the producer thread to stop and
+            # joins it (see _prefetch's own docstring) -- must happen BEFORE
+            # the final process_pending/flush below, not concurrently with
+            # them. A no-op for the plain build_records() generator.
+            record_source.close()
+
+        batch_idx += 1
+        if stop_all:
+            break
+
     process_pending(final=True)  # flush any partial pool smaller than pool_size
     flush()
     pbar.close()
@@ -722,6 +821,15 @@ def build_arg_parser():
         "corpus sizes). Typically paired with --max-tokens set to this value times the number "
         "of languages requested, as the overall stop condition",
     )
+    parser.add_argument(
+        "--lang-batch-size", type=int, default=None,
+        help="process a large multi-language request (e.g. --dataset culturax --langs all) in "
+        "sequential groups of this many languages instead of round-robining all of them at "
+        "once (see prep_dataset's own lang_batch_size docstring section) -- bounds peak memory "
+        "when the underlying source needs one live HF streaming connection held open per "
+        "language, at the cost of GLOBAL cross-language interleaving (each group is filled to "
+        "its own --tokens-per-language quota before the next group starts)",
+    )
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--shard-size", type=int, default=SHARD_SIZE)
     parser.add_argument(
@@ -798,6 +906,7 @@ def main(argv=None):
         max_tokens=args.max_tokens,
         max_docs=args.max_docs,
         tokens_per_language=args.tokens_per_language,
+        lang_batch_size=args.lang_batch_size,
         device=args.device,
         shard_size=args.shard_size,
         dedup=args.dedup,
@@ -830,6 +939,7 @@ def main(argv=None):
                 "max_tokens": args.max_tokens,
                 "max_docs": args.max_docs,
                 "tokens_per_language": args.tokens_per_language,
+                "lang_batch_size": args.lang_batch_size,
                 "dedup": args.dedup,
                 "dedup_near_threshold": args.dedup_near_threshold,
                 "dedup_num_perm": args.dedup_num_perm,

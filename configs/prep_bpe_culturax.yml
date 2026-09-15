@@ -36,5 +36,13 @@ output_dir: pretrain_data/culturax_bpe_large
 # only ~73M tokens/language, heavily skewed toward high-resource languages).
 max_tokens: 13591050230
 tokens_per_language: 128217455
+# Confirmed live: holding all 106 CulturaX languages' own HF streaming
+# connections open simultaneously (genuine round-robin needs every one
+# alive at once) OOM'd a real prep job even at ~125GB (bwUniCluster's
+# entire Ice Lake node) -- see lang_batch_size's own docstring in
+# data_prep.py for the full explanation. Processes 15 languages at a time
+# (~8 sequential groups) instead; each group still fills to its own
+# tokens_per_language quota above before the next starts.
+lang_batch_size: 15
 use_wandb: true
 run_name: bpe_culturax_large_data_prep
