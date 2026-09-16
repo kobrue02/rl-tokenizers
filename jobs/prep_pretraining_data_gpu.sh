@@ -6,6 +6,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gres=gpu:1
 #SBATCH --time=12:00:00
+#SBATCH --signal=B:TERM@120
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
@@ -16,7 +17,11 @@
 # induce_spans is a real torch forward pass per document. bpe/superbpe have
 # no use for a GPU here -- keep using the plain CPU script for those.
 # Only functional difference: loads CUDA + defaults --device to cuda.
-# AUTO-RESUBMIT: same as jobs/prep_pretraining_data.sh.
+# AUTO-RESUBMIT: same as jobs/prep_pretraining_data.sh, --signal=B:TERM@120
+# trap included -- see that script's own comment for why a plain
+# post-`wait` check alone silently never fires on a genuine SLURM TIMEOUT
+# (confirmed live on a real GPU prep job: 12h elapsed, zero resubmit
+# message in its own log).
 #
 # PREREQUISITE for --dataset glot500: reads from a one-time local disk cache
 # (common/data/prepare_glot500.py -- run jobs/prepare_glot500.sh first), not
@@ -75,31 +80,45 @@ except FileNotFoundError:
 }
 BEFORE_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
 
-echo "Starting GPU pretraining data prep with args: $@"
-python3 -m systems.pretraining.data_prep --device cuda "$@"
-PREP_EXIT=$?
+# See jobs/prep_pretraining_data.sh's own comment for the full rationale --
+# shared between the normal post-`wait` path and the SIGTERM trap below.
+check_and_resubmit() {
+    if [ -f "$OUTPUT_DIR/shards_meta.json" ]; then
+        echo "Data prep complete."
+        exit 0
+    fi
 
-if [ -f "$OUTPUT_DIR/shards_meta.json" ]; then
-    echo "Data prep complete."
+    echo "shards_meta.json not found in $OUTPUT_DIR -- checking for progress to resume from."
+    AFTER_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
+    if [ "$AFTER_TOKENS" -le "$BEFORE_TOKENS" ]; then
+        echo "No progress made this run (before=$BEFORE_TOKENS after=$AFTER_TOKENS tokens) -- NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+        exit 1
+    fi
+
+    TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
+
+    echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
+    sbatch --time="$TIME_LIMIT" jobs/prep_pretraining_data_gpu.sh "$@"
+    SBATCH_EXIT=$?
+    if [ "$SBATCH_EXIT" -ne 0 ]; then
+        echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
+        echo "  sbatch --time=$TIME_LIMIT jobs/prep_pretraining_data_gpu.sh $@" >&2
+        exit 1
+    fi
+    echo "Resubmitted successfully."
     exit 0
-fi
+}
 
-echo "shards_meta.json not found in $OUTPUT_DIR (exited with code $PREP_EXIT) -- checking for progress to resume from."
-AFTER_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
-if [ "$AFTER_TOKENS" -le "$BEFORE_TOKENS" ]; then
-    echo "No progress made this run (before=$BEFORE_TOKENS after=$AFTER_TOKENS tokens) -- NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
-    exit 1
-fi
+on_term() {
+    echo "Received SIGTERM (120s from --signal=B:TERM@120) -- stopping the tokenizer and resubmitting early."
+    kill -TERM "$CHILD_PID" 2>/dev/null
+    wait "$CHILD_PID" 2>/dev/null
+    check_and_resubmit
+}
+trap on_term TERM
 
-TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
-
-echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
-sbatch --time="$TIME_LIMIT" jobs/prep_pretraining_data_gpu.sh "$@"
-SBATCH_EXIT=$?
-if [ "$SBATCH_EXIT" -ne 0 ]; then
-    echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-    echo "  sbatch --time=$TIME_LIMIT jobs/prep_pretraining_data_gpu.sh $@" >&2
-    exit 1
-fi
-echo "Resubmitted successfully."
-exit 0
+echo "Starting GPU pretraining data prep with args: $@"
+python3 -m systems.pretraining.data_prep --device cuda "$@" &
+CHILD_PID=$!
+wait "$CHILD_PID"
+check_and_resubmit

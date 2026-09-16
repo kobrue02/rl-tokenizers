@@ -5,6 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time=12:00:00
+#SBATCH --signal=B:TERM@120
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
@@ -18,9 +19,20 @@
 # these to be much slower than bpe/superbpe at real scale.
 #
 # AUTO-RESUBMIT: mirrors jobs/train_pretraining.sh's own -- resumes
-# automatically from prep_checkpoint.json (no extra flag) if killed by the
-# time limit; NOT resubmitted if no progress was made since the last run
-# (real failure, not just a slow one).
+# automatically from prep_checkpoint.json (no extra flag) whenever the
+# underlying python process exits early -- an OOM/crash (this script's own
+# `wait` below returns normally, so the check-and-resubmit logic runs
+# directly), OR this job approaching its --time limit. These need
+# DIFFERENT handling: a genuine SLURM TIMEOUT kills the ENTIRE job -- this
+# wrapper script included, not just its python child -- the instant the
+# limit is reached, so code after a plain foreground `python3 ...` call
+# would never run at all (confirmed live: a real TIMEOUT exit's own log
+# showed no "checking for progress"/"Resubmitted successfully" message
+# whatsoever, unlike every OOM-kill case, which printed both).
+# --signal=B:TERM@120 asks SLURM to instead send SIGTERM to this SCRIPT
+# 120s before the hard limit -- caught by the trap below, which runs the
+# exact same check-and-resubmit logic early, inside that 120s grace
+# window, before SLURM's own kill actually lands.
 #
 # PREREQUISITE for --dataset glot500: reads from a one-time local disk cache
 # (common/data/prepare_glot500.py -- run jobs/prepare_glot500.sh first), not
@@ -106,31 +118,53 @@ except FileNotFoundError:
 }
 BEFORE_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
 
-echo "Starting pretraining data prep with args: $@"
-python3 -m systems.pretraining.data_prep "$@"
-PREP_EXIT=$?
+# Shared between the normal post-`wait` path below AND the SIGTERM trap
+# (see --signal=B:TERM@120 above) -- identical logic either way, just
+# invoked from two different places depending on WHY the python process
+# stopped (a genuine finish/crash vs. an imminent time-limit kill).
+check_and_resubmit() {
+    if [ -f "$OUTPUT_DIR/shards_meta.json" ]; then
+        echo "Data prep complete."
+        exit 0
+    fi
 
-if [ -f "$OUTPUT_DIR/shards_meta.json" ]; then
-    echo "Data prep complete."
+    echo "shards_meta.json not found in $OUTPUT_DIR -- checking for progress to resume from."
+    AFTER_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
+    if [ "$AFTER_TOKENS" -le "$BEFORE_TOKENS" ]; then
+        echo "No progress made this run (before=$BEFORE_TOKENS after=$AFTER_TOKENS tokens) -- NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+        exit 1
+    fi
+
+    TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
+
+    echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
+    sbatch --time="$TIME_LIMIT" jobs/prep_pretraining_data.sh "$@"
+    SBATCH_EXIT=$?
+    if [ "$SBATCH_EXIT" -ne 0 ]; then
+        echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
+        echo "  sbatch --time=$TIME_LIMIT jobs/prep_pretraining_data.sh $@" >&2
+        exit 1
+    fi
+    echo "Resubmitted successfully."
     exit 0
-fi
+}
 
-echo "shards_meta.json not found in $OUTPUT_DIR (exited with code $PREP_EXIT) -- checking for progress to resume from."
-AFTER_TOKENS=$(checkpoint_tokens "$CKPT_PATH")
-if [ "$AFTER_TOKENS" -le "$BEFORE_TOKENS" ]; then
-    echo "No progress made this run (before=$BEFORE_TOKENS after=$AFTER_TOKENS tokens) -- NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
-    exit 1
-fi
+# See --signal=B:TERM@120 / AUTO-RESUBMIT above: SIGTERM here means SLURM's
+# hard kill is ~120s away. Forward it to the actual python process (SLURM's
+# "B:" signal flag targets only this wrapper script, not children it
+# spawned directly) so it stops promptly, then run the exact same
+# check-and-resubmit this script would run on a normal exit -- inside the
+# grace window, before the real kill lands.
+on_term() {
+    echo "Received SIGTERM ($((120))s from --signal=B:TERM@120) -- stopping the tokenizer and resubmitting early."
+    kill -TERM "$CHILD_PID" 2>/dev/null
+    wait "$CHILD_PID" 2>/dev/null
+    check_and_resubmit
+}
+trap on_term TERM
 
-TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
-
-echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
-sbatch --time="$TIME_LIMIT" jobs/prep_pretraining_data.sh "$@"
-SBATCH_EXIT=$?
-if [ "$SBATCH_EXIT" -ne 0 ]; then
-    echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-    echo "  sbatch --time=$TIME_LIMIT jobs/prep_pretraining_data.sh $@" >&2
-    exit 1
-fi
-echo "Resubmitted successfully."
-exit 0
+echo "Starting pretraining data prep with args: $@"
+python3 -m systems.pretraining.data_prep "$@" &
+CHILD_PID=$!
+wait "$CHILD_PID"
+check_and_resubmit

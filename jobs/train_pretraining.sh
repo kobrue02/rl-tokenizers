@@ -6,6 +6,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
 #SBATCH --time=24:00:00
+#SBATCH --signal=B:TERM@180
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --error=logs/%x_%j.err
 #SBATCH --mail-type=ALL
@@ -25,13 +26,26 @@
 # isn't recorded anywhere in this repo) -- e.g. `sinfo -p gpu_a100_il -o "%n %G"`.
 #
 # AUTO-RESUBMIT: a run whose budget exceeds this job's --time limit gets
-# killed mid-loop before final.pt is written. This script checks after exit:
-# final.pt present -> done, exit 0. No final.pt but a newer step_*.pt than
-# when this run started -> real progress, resubmit with --resume-from
-# (preserving this run's own --gres/--time/--cpus-per-task, which a bare
-# resubmit wouldn't).
-# No progress at all -> real failure, NOT resubmitted. Expect a new job id
-# in squeue roughly every 24h for a multi-day run -- that's normal.
+# killed mid-loop before final.pt is written. This script checks: final.pt
+# present -> done, exit 0. No final.pt but a newer step_*.pt than when this
+# run started -> real progress, resubmit with --resume-from (preserving
+# this run's own --gres/--time/--cpus-per-task/--partition, which a bare
+# resubmit wouldn't). No progress at all -> real failure, NOT resubmitted.
+#
+# --signal=B:TERM@180 + the trap below is WHY this can actually fire on a
+# real time-limit exit, not just an OOM/crash: a genuine SLURM TIMEOUT
+# kills the ENTIRE job -- this wrapper script included, not just its
+# python/torchrun child -- the instant the limit is reached, so code after
+# a plain foreground command would never run at all (confirmed live on a
+# real 12h data-prep TIMEOUT: its own log showed no "checking for
+# progress"/"Resubmitted successfully" message whatsoever, unlike every
+# OOM-kill case, which printed both -- the exact same risk applies here,
+# just on a 24h cadence instead of 12h). --signal=B:TERM@180 asks SLURM to
+# send SIGTERM to this SCRIPT 180s before the hard limit instead, caught
+# by the trap below, which runs the exact same check-and-resubmit logic
+# early, inside that 180s grace window, before SLURM's own kill lands.
+# Expect a new job id in squeue roughly every 24h for a multi-day run --
+# that's normal.
 #
 # LOCAL-SSD STAGING: ShardedTokenDataset re-reads random windows from
 # shard_dir's own .bin files on every single training step for the entire
@@ -125,58 +139,83 @@ fi
 # every rank reads from the same staged local copy, not the original
 # SHARD_DIR.
 NUM_GPUS="${SLURM_GPUS_ON_NODE:-1}"
+
+# Shared between the normal post-`wait` path below and the SIGTERM trap
+# (see --signal=B:TERM@180 above) -- identical logic either way, just
+# invoked from two different places depending on WHY training stopped (a
+# genuine finish/crash vs. an imminent time-limit kill). See AUTO-RESUBMIT
+# above for why the trap path exists at all.
+check_and_resubmit() {
+    if [ -f "$OUTPUT_DIR/final.pt" ]; then
+        echo "Training complete -- reached total_steps=$TOTAL_STEPS, final.pt written."
+        exit 0
+    fi
+
+    echo "final.pt not found in $OUTPUT_DIR -- checking for progress to resume from."
+    AFTER_CKPT=$(latest_checkpoint "$OUTPUT_DIR")
+    if [ -z "$AFTER_CKPT" ]; then
+        echo "No checkpoint found in $OUTPUT_DIR at all -- treating this as a real failure, NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+        exit 1
+    fi
+    AFTER_STEP=$(basename "$AFTER_CKPT" | sed -E 's/step_([0-9]+)\.pt/\1/')
+    if [ "$AFTER_STEP" -le "$BEFORE_STEP" ]; then
+        echo "Latest checkpoint step ($AFTER_STEP) did not advance past this run's own starting point ($BEFORE_STEP) -- no real progress was made, NOT resubmitting (likely a persistent crash). Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
+        exit 1
+    fi
+
+    TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
+    # Preserve THIS job's own --cpus-per-task too, not just --gres/--time --
+    # this cluster ties memory to cpus-per-task at ~1.95GB/core (see
+    # jobs/train_parity_bpe.sh's own comment), and a multi-GPU run needs more
+    # than the script's #SBATCH --cpus-per-task=16 default (8 GPUs x
+    # TrainConfig.num_workers=4 DataLoader workers = 32 processes alone).
+    # Without this, a run launched with an explicit --cpus-per-task override
+    # loses it on every resubmit after the first, silently reverting to 16
+    # and risking an OOM on the next checkpoint load.
+    CPUS_PER_TASK=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'CPUs/Task=\K\S+')
+    # Same reasoning for --partition: this script's own #SBATCH pragma
+    # defaults to gpu_a100_il, so a run submitted with e.g.
+    # --partition=gpu_h100 would otherwise silently fall back to
+    # gpu_a100_il on every resubmit after the first -- a real correctness
+    # gap (H100-vs-A100 wall-clock/memory differences and gpu_a100_il's own
+    # shared-pool node-type uncertainty are exactly why a partition gets
+    # chosen deliberately in the first place), not just a preference lost.
+    PARTITION=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'Partition=\K\S+')
+
+    echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."
+    sbatch --partition="$PARTITION" --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" --cpus-per-task="$CPUS_PER_TASK" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
+    SBATCH_EXIT=$?
+    if [ "$SBATCH_EXIT" -ne 0 ]; then
+        echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
+        echo "  sbatch --partition=$PARTITION --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT --cpus-per-task=$CPUS_PER_TASK jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
+        exit 1
+    fi
+    echo "Resubmitted successfully."
+    exit 0
+}
+
+# See --signal=B:TERM@180 / AUTO-RESUBMIT above: SIGTERM here means SLURM's
+# hard kill is ~180s away. Forward it to the actual training process
+# (SLURM's "B:" signal flag targets only this wrapper script, not children
+# it spawned directly) so it stops promptly -- torchrun propagates SIGTERM
+# to its own worker processes on receiving one, same as a plain single-GPU
+# python process stopping directly -- then run the exact same
+# check-and-resubmit this script would run on a normal exit, inside the
+# grace window, before the real kill lands.
+on_term() {
+    echo "Received SIGTERM ($((180))s from --signal=B:TERM@180) -- stopping training and resubmitting early."
+    kill -TERM "$CHILD_PID" 2>/dev/null
+    wait "$CHILD_PID" 2>/dev/null
+    check_and_resubmit
+}
+trap on_term TERM
+
 echo "Starting pretraining with $NUM_GPUS GPU(s), args: $@ --shard-dir $TRAIN_SHARD_DIR"
 if [ "$NUM_GPUS" -gt 1 ]; then
-    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m systems.pretraining.cli "$@" --shard-dir "$TRAIN_SHARD_DIR"
+    torchrun --standalone --nproc_per_node="$NUM_GPUS" -m systems.pretraining.cli "$@" --shard-dir "$TRAIN_SHARD_DIR" &
 else
-    python3 -m systems.pretraining.cli "$@" --shard-dir "$TRAIN_SHARD_DIR"
+    python3 -m systems.pretraining.cli "$@" --shard-dir "$TRAIN_SHARD_DIR" &
 fi
-TRAIN_EXIT=$?
-
-# Done, or resubmit? See AUTO-RESUBMIT above.
-if [ -f "$OUTPUT_DIR/final.pt" ]; then
-    echo "Training complete -- reached total_steps=$TOTAL_STEPS, final.pt written."
-    exit 0
-fi
-
-echo "final.pt not found in $OUTPUT_DIR (training exited with code $TRAIN_EXIT) -- checking for progress to resume from."
-AFTER_CKPT=$(latest_checkpoint "$OUTPUT_DIR")
-if [ -z "$AFTER_CKPT" ]; then
-    echo "No checkpoint found in $OUTPUT_DIR at all -- treating this as a real failure, NOT resubmitting. Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
-    exit 1
-fi
-AFTER_STEP=$(basename "$AFTER_CKPT" | sed -E 's/step_([0-9]+)\.pt/\1/')
-if [ "$AFTER_STEP" -le "$BEFORE_STEP" ]; then
-    echo "Latest checkpoint step ($AFTER_STEP) did not advance past this run's own starting point ($BEFORE_STEP) -- no real progress was made, NOT resubmitting (likely a persistent crash). Check logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}.err." >&2
-    exit 1
-fi
-
-TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
-# Preserve THIS job's own --cpus-per-task too, not just --gres/--time -- this
-# cluster ties memory to cpus-per-task at ~1.95GB/core (see
-# jobs/train_parity_bpe.sh's own comment), and a multi-GPU run needs more
-# than the script's #SBATCH --cpus-per-task=16 default (8 GPUs x
-# TrainConfig.num_workers=4 DataLoader workers = 32 processes alone). Without
-# this, a run launched with an explicit --cpus-per-task override loses it on
-# every resubmit after the first, silently reverting to 16 and risking an
-# OOM on the next checkpoint load.
-CPUS_PER_TASK=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'CPUs/Task=\K\S+')
-# Same reasoning for --partition: this script's own #SBATCH pragma defaults
-# to gpu_a100_il, so a run submitted with e.g. --partition=gpu_h100 would
-# otherwise silently fall back to gpu_a100_il on every resubmit after the
-# first -- a real correctness gap (H100-vs-A100 wall-clock/memory
-# differences and gpu_a100_il's own shared-pool node-type uncertainty are
-# exactly why a partition gets chosen deliberately in the first place),
-# not just a preference lost.
-PARTITION=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'Partition=\K\S+')
-
-echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."
-sbatch --partition="$PARTITION" --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" --cpus-per-task="$CPUS_PER_TASK" jobs/train_pretraining.sh "$@" --resume-from "$AFTER_CKPT"
-SBATCH_EXIT=$?
-if [ "$SBATCH_EXIT" -ne 0 ]; then
-    echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-    echo "  sbatch --partition=$PARTITION --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT --cpus-per-task=$CPUS_PER_TASK jobs/train_pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
-    exit 1
-fi
-echo "Resubmitted successfully."
-exit 0
+CHILD_PID=$!
+wait "$CHILD_PID"
+check_and_resubmit
