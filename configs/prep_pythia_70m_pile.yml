@@ -29,5 +29,22 @@ output_dir: pretrain_data/pile_bpe_pythia_70m
 # random windows per step regardless of total_steps, so it can revisit this
 # same pool across multiple effective epochs -- the pool itself doesn't need
 # to match any particular training step/token budget 1:1).
+# Confirmed live: an earlier attempt at this job showed 0.00% CPU
+# efficiency while holding ~98.8% of its memory for the FULL 12h time
+# limit -- effectively a hang, not just slow processing. common/data/
+# dedup.py's near-dup MinHash/LSH pass runs on each document's FULL,
+# UNTRUNCATED text (see data_prep.py's own _dedup_and_truncate: dedup
+# happens BEFORE max_doc_bytes truncation, by design, so a truncated
+# document's dedup identity still matches its real content) -- the same
+# mechanism that OOM'd configs/prep_bpe_culturax.yml on CulturaX's merely
+# long (median ~2KB) documents would be far worse here: the Pile's raw
+# source mix (GitHub, Books3, ArXiv, ...) includes genuinely enormous
+# individual documents (full repos/books, sometimes megabytes), and
+# computing MinHash shingles over one such outlier plausibly explains both
+# symptoms (memory pressure -> swapping -> near-zero effective CPU).
+# Disabled here for the same reason it's redundant on CulturaX, only more
+# so: this dataset is literally named "the_pile_deduplicated" -- it's
+# already deduplicated at the source.
+dedup: false
 use_wandb: true
 run_name: pythia_70m_pile_data_prep_full
