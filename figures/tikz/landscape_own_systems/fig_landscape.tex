@@ -1,0 +1,26 @@
+\documentclass{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\definecolor{oursCol}{RGB}{34,139,74}
+\definecolor{reproCol}{RGB}{191,148,39}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+    width=12cm, height=9cm,
+    xlabel={Average byte-per-token compression (higher = more compact)},
+    ylabel={Token-parity spread (anchor-invariant; lower = more equitable)},
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
+    grid=both, grid style={gray!15},
+    axis lines=left,
+    enlarge x limits={abs=0.15}, enlarge y limits={abs=0.6},
+]
+\addplot+[only marks, mark=*, mark size=2pt, color=oursCol] table [x=avg_compression, y=spread] {figures/tikz/landscape_own_systems/scatter_This_work.dat};
+\addlegendentry{This work}
+\addplot+[only marks, mark=*, mark size=2pt, color=reproCol] table [x=avg_compression, y=spread] {figures/tikz/landscape_own_systems/scatter_Reproduced_baselines.dat};
+\addlegendentry{Reproduced baselines}
+\node[font=\scriptsize, anchor=south west] at (axis cs:3.354,4.356) {magnet};
+\node[font=\scriptsize, anchor=south west] at (axis cs:3.042,8.358) {bpe};
+\node[font=\scriptsize, anchor=north east] at (axis cs:5.967,7.902) {fanta};
+\end{axis}
+\end{tikzpicture}
+\end{document}

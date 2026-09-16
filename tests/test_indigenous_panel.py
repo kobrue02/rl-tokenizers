@@ -293,6 +293,83 @@ def test_generate_indigenous_panel_figures(tmp_path):
             assert (anchor_dir / f"bar_indigenous_panel_parity_vs_{anchor}_{fam.replace('/', '_').replace(' ', '_')}.dat").exists()
 
 
+def test_generate_indigenous_panel_figures_respects_exclude(tmp_path):
+    """Ch.~tokentax's own indigenous-panel figures must not show fanta before
+    it's introduced later in the thesis -- same narrative-ordering rule as
+    the main pipeline's own --exclude (2026-09-16: this parameter didn't
+    exist yet when those figures were first generated, which is exactly why
+    they still showed fanta lumped into "This work" alongside the other
+    tokenizers this project trained, a leak this exclude support fixes)."""
+    from scripts.generate_tikz_figures import generate_indigenous_panel_figures, load_indigenous_panel_rows
+
+    def fake_model_result(fertility_spread):
+        return {
+            "combined": {
+                "avg_compression": 2.5, "gini": 0.1,
+                "fertility": {}, "per_lang_compression": {}, "renyi": {},
+            },
+            "token_parity_by_anchor": {
+                "en": {"token_parity": {"crk": 1.2, "iu": 0.9}, "token_parity_gm": {}},
+                "es": {"token_parity": {}, "token_parity_gm": {}},
+            },
+            "morphology_spread": {"fertility_spread": fertility_spread, "compression_spread": 1.5},
+        }
+
+    fake_results = {"fanta": fake_model_result(2.0), "bpe": fake_model_result(3.0)}
+    results_path = tmp_path / "results.json"
+    with open(results_path, "w") as f:
+        json.dump(fake_results, f)
+
+    rows, _models = load_indigenous_panel_rows(str(results_path), exclude={"fanta"})
+    assert {r["name"] for r in rows} == {"bpe"}
+
+    out_dir = tmp_path / "figures"
+    rows, _families, _written = generate_indigenous_panel_figures(
+        str(results_path), str(out_dir), exclude={"fanta"},
+    )
+    assert {r["name"] for r in rows} == {"bpe"}
+    tex = (out_dir / "parity_vs_en" / "fig_indigenous_panel_parity_vs_en_body.tex").read_text()
+    assert "This_work" not in tex  # fanta excluded -> no "This work" family left at all
+    assert "Reproduced_baselines" in tex  # bpe still present, correctly bucketed
+
+
+def test_generate_indigenous_panel_figures_clears_stale_files(tmp_path):
+    """A changed --exclude between two runs (e.g. adding fanta once it's no
+    longer wanted) must not leave the PRIOR run's now-unreferenced .dat files
+    sitting in parity_vs_<anchor>/ forever -- same bug class generate()'s own
+    subdir() helper was fixed for, confirmed live here too since
+    generate_indigenous_panel_figures has its own separate directory-handling
+    code path."""
+    from scripts.generate_tikz_figures import generate_indigenous_panel_figures
+
+    def fake_model_result(fertility_spread):
+        return {
+            "combined": {
+                "avg_compression": 2.5, "gini": 0.1,
+                "fertility": {}, "per_lang_compression": {}, "renyi": {},
+            },
+            "token_parity_by_anchor": {
+                "en": {"token_parity": {"crk": 1.2, "iu": 0.9}, "token_parity_gm": {}},
+                "es": {"token_parity": {}, "token_parity_gm": {}},
+            },
+            "morphology_spread": {"fertility_spread": fertility_spread, "compression_spread": 1.5},
+        }
+
+    fake_results = {"fanta": fake_model_result(2.0), "bpe": fake_model_result(3.0)}
+    results_path = tmp_path / "results.json"
+    with open(results_path, "w") as f:
+        json.dump(fake_results, f)
+
+    out_dir = tmp_path / "figures"
+    generate_indigenous_panel_figures(str(results_path), str(out_dir))  # fanta included first
+    anchor_dir = out_dir / "parity_vs_en"
+    stale_path = anchor_dir / "bar_indigenous_panel_parity_vs_en_This_work.dat"
+    assert stale_path.exists()
+
+    generate_indigenous_panel_figures(str(results_path), str(out_dir), exclude={"fanta"})
+    assert not stale_path.exists()
+
+
 def test_gen_indigenous_panel_parity_bars_omits_family_with_no_data(tmp_path):
     """Regression test: a family with ZERO data points for an anchor group must
     have its \\addplot/\\addlegendentry pair skipped, not emitted against an

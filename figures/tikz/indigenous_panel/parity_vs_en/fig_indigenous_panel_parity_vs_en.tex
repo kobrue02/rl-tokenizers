@@ -6,7 +6,7 @@
 \definecolor{metaCol}{RGB}{74,111,227}
 \definecolor{encCol}{RGB}{140,140,140}
 \definecolor{anthropicCol}{RGB}{180,60,60}
-\definecolor{oursCol}{RGB}{34,139,74}
+\definecolor{reproCol}{RGB}{191,148,39}
 \definecolor{otherCol}{RGB}{163,79,168}
 \begin{document}
 \begin{tikzpicture}
@@ -36,8 +36,8 @@
 \addlegendentry{Encoder-only}
 \addplot+[ybar, fill=anthropicCol, draw=anthropicCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_Anthropic.dat};
 \addlegendentry{Anthropic}
-\addplot+[ybar, fill=oursCol, draw=oursCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_This_work.dat};
-\addlegendentry{This work}
+\addplot+[ybar, fill=reproCol, draw=reproCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_Reproduced_baselines.dat};
+\addlegendentry{Reproduced baselines}
 \addplot+[ybar, fill=otherCol, draw=otherCol] table [x=lang, y=parity] {figures/tikz/indigenous_panel/parity_vs_en/bar_indigenous_panel_parity_vs_en_Other.dat};
 \addlegendentry{Other}
 \end{axis}

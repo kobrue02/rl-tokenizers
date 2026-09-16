@@ -13,6 +13,7 @@ import pytest
 from scripts.generate_scoped_leaderboards import (
     generate_hf_frontier_leaderboard,
     generate_our_work_vs_other_approaches_leaderboard,
+    generate_own_systems_landscape,
 )
 from scripts.generate_tikz_figures import compute_families, gen_spread_leaderboard_tex
 
@@ -156,3 +157,39 @@ def test_generate_our_work_vs_other_approaches_excludes_dropped_flexitokens(tmp_
     out_dir = tmp_path / "out"
     rows, _families = generate_our_work_vs_other_approaches_leaderboard(str(all_results), str(out_dir))
     assert {r["name"] for r in rows} == {"fanta", "manta", "magnet", "parity_bpe"}
+
+
+def test_generate_own_systems_landscape_includes_all_6_trained_tokenizers(tmp_path):
+    """Unlike our_work_vs_other_approaches (fanta vs. the 3 OTHER published
+    fairness-aware methods only), this figure includes bpe/superbpe too --
+    every one of this project's own 6 trained tokenizers, so the reader can
+    see fanta against the plain baselines as well, not just the closest
+    published alternatives."""
+    all_results = tmp_path / "all.json"
+    _write_json(all_results, {
+        "fanta": _fake_model_entry(2.0),
+        "bpe": _fake_model_entry(3.0),
+        "superbpe": _fake_model_entry(2.5),
+        "magnet": _fake_model_entry(4.0),
+        "manta": _fake_model_entry(5.0),
+        "parity_bpe": _fake_model_entry(5.5),
+        "openai-community/gpt2": _fake_model_entry(8.0),  # NOT one of our 6 -- must be excluded
+    })
+    out_dir = tmp_path / "out"
+    rows, families = generate_own_systems_landscape(str(all_results), str(out_dir))
+    assert {r["name"] for r in rows} == {"fanta", "bpe", "superbpe", "magnet", "manta", "parity_bpe"}
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["fanta"]["family"] == "This work"
+    for name in ("bpe", "superbpe", "magnet", "manta", "parity_bpe"):
+        assert by_name[name]["family"] == "Reproduced baselines"
+    assert set(families) == {"This work", "Reproduced baselines"}
+    tex_path = out_dir / "fig_landscape.tex"
+    assert tex_path.exists()
+    assert tex_path.read_text().count(r"\begin{tikzpicture}") == 1
+
+
+def test_generate_own_systems_landscape_raises_on_missing_tokenizer(tmp_path):
+    all_results = tmp_path / "all.json"
+    _write_json(all_results, {"fanta": _fake_model_entry(2.0)})  # missing the other 5
+    with pytest.raises(ValueError, match="missing expected key"):
+        generate_own_systems_landscape(str(all_results), str(tmp_path / "out"))

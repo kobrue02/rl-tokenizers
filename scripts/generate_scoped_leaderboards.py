@@ -27,10 +27,20 @@ produces:
      excluded -- dropped from the project 2026-09-16 (see
      generate_tikz_figures.py's _REPO_TOKENIZER_NAMES comment for the same
      decision).
+  3. own_systems_landscape: a ZOOMED compression/spread scatter restricted to
+     this project's own 6 trained tokenizers (fanta + the 5 reproduced
+     baselines from #2, PLUS bpe/superbpe this time -- every tokenizer
+     trained on the SAME infra/data, not just the "published fairness-aware
+     methods" subset #2 uses). Ch.~tokentax's own fig:fairness-landscape
+     plots all 30 tokenizers together, where byt5/canine/BLT's extreme
+     compression/spread values compress this directly-comparable cluster
+     into one corner -- this figure exists specifically so that cluster is
+     legible on its own axis scale, for Ch.~fantaeval.
 
-Both reuse gen_spread_leaderboard_tex/compute_families/write_bar_data
+Figures #1/#2 reuse gen_spread_leaderboard_tex/compute_families/write_bar_data
 directly (no new figure logic) -- only the INPUT ROW SET and (for #2) the
-row-level family assignment differ from the main comparison.
+row-level family assignment differ from the main comparison. #3 reuses
+gen_landscape_tex/write_scatter_data the same way.
 
 Usage:
     python3 -m scripts.generate_scoped_leaderboards \\
@@ -45,11 +55,14 @@ import os
 
 from scripts.generate_tikz_figures import (
     MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD,
+    _REPO_TOKENIZER_NAMES,
     _assert_well_formed,
     compute_families,
+    gen_landscape_tex,
     gen_spread_leaderboard_tex,
     load_rows,
     write_bar_data,
+    write_scatter_data,
 )
 
 
@@ -150,6 +163,29 @@ def generate_our_work_vs_other_approaches_leaderboard(all_results_path, out_dir,
     return rows, families
 
 
+def generate_own_systems_landscape(all_results_path, out_dir, data_prefix=None):
+    """Figure #3 -- see module docstring. Unlike #2 (fanta vs. the 3 OTHER
+    published fairness-aware methods), this includes bpe/superbpe too --
+    every one of this project's own 6 trained tokenizers, zoomed in on their
+    own axis scale away from the full landscape's extreme outliers."""
+    os.makedirs(out_dir, exist_ok=True)
+    tmp_json = os.path.join(out_dir, "_filtered_own_systems.json")
+    n = _write_filtered_json(all_results_path, sorted(_REPO_TOKENIZER_NAMES), tmp_json)
+
+    base_prefix = out_dir.replace(os.sep, "/") if data_prefix is None else data_prefix
+    if base_prefix and not base_prefix.endswith("/"):
+        base_prefix += "/"
+
+    rows, _models = load_rows(tmp_json)
+    families = compute_families(rows)
+    write_scatter_data(rows, families, out_dir)
+    tex = gen_landscape_tex(rows, families, out_dir, data_prefix=base_prefix)
+    _assert_well_formed(tex, "fig_landscape.tex")
+    os.remove(tmp_json)
+    print(f"wrote own-systems landscape ({n} models) to {out_dir}")
+    return rows, families
+
+
 def build_arg_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=str, default="results/all_tokenizers_comparison.json")
@@ -170,6 +206,11 @@ def main(argv=None):
         args.input,
         os.path.join(args.output_dir, "spread_leaderboard_our_work_vs_other_approaches"),
         data_prefix=f"{args.data_prefix}/spread_leaderboard_our_work_vs_other_approaches" if args.data_prefix else None,
+    )
+    generate_own_systems_landscape(
+        args.input,
+        os.path.join(args.output_dir, "landscape_own_systems"),
+        data_prefix=f"{args.data_prefix}/landscape_own_systems" if args.data_prefix else None,
     )
 
 

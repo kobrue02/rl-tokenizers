@@ -745,17 +745,28 @@ def gen_heatmap_tex(rows, models, families, out_dir, n_langs=20, n_buckets=40, c
     return full_tex, top_langs
 
 
-def load_indigenous_panel_rows(results_path):
+def load_indigenous_panel_rows(results_path, exclude=None):
     """Loads a systems/*/evaluate.py --eval-data-source indigenous_panel --output JSON
     (see evaluate_on_indigenous_panel for the per-model result shape) into the same row
     shape load_rows produces, so compute_families/_grouped_positions work unchanged.
     "spread" = morphology_spread["fertility_spread"], used only to order rows within
     each family -- no figure displays it directly; the mixed-anchor panel is better
     read as two separate anchor-specific token_parity figures instead (see
-    gen_indigenous_panel_parity_bars_tex)."""
+    gen_indigenous_panel_parity_bars_tex).
+
+    exclude: see load_rows's own docstring -- e.g. exclude={"fanta"} for
+    Ch.~tokentax's own indigenous-panel figures, same narrative-ordering
+    reason as the main pipeline (2026-09-16: this parameter didn't exist yet
+    when those figures were first generated, which is exactly why they still
+    show fanta lumped into "This work" alongside the OTHER tokenizers this
+    project trained -- a leak fixed by regenerating with this exclude set)."""
+    exclude = set(exclude) if exclude else set()
     with open(results_path, encoding="utf-8") as f:
         data = json.load(f)
-    models = {k: v for k, v in data.items() if k != "_failed" and isinstance(v, dict)}
+    models = {
+        k: v for k, v in data.items()
+        if k != "_failed" and isinstance(v, dict) and k not in exclude
+    }
     missing = [k for k, m in models.items() if "morphology_spread" not in m]
     if missing:
         plural = len(missing) != 1
@@ -872,12 +883,14 @@ def gen_indigenous_panel_parity_bars_tex(rows, models, families, langs, anchor, 
     return full_tex
 
 
-def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
+def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None, exclude=None):
     """Sibling to generate() (see module docstring) for a --eval-data-source
     indigenous_panel --output JSON instead -- this mixed-anchor panel has no single
     global token_parity, so it needs dedicated loading/figure logic (see
     common.data.indigenous_panel). Two figures, one per anchor language present in
-    PAIRS (currently "en": crk/iu, "es": ten AmericasNLP languages)."""
+    PAIRS (currently "en": crk/iu, "es": ten AmericasNLP languages).
+
+    exclude: see load_indigenous_panel_rows's own docstring."""
     from common.data.indigenous_panel import PAIRS
 
     os.makedirs(out_dir, exist_ok=True)
@@ -885,7 +898,7 @@ def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
     if base_prefix and not base_prefix.endswith("/"):
         base_prefix += "/"
 
-    rows, models = load_indigenous_panel_rows(results_path)
+    rows, models = load_indigenous_panel_rows(results_path, exclude=exclude)
     families = compute_families(rows)
 
     langs_by_anchor = defaultdict(list)
@@ -897,6 +910,16 @@ def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
     written = {}
     for anchor, langs in sorted(langs_by_anchor.items()):
         anchor_dir = os.path.join(out_dir, f"parity_vs_{anchor}")
+        # Clear stale files from a PRIOR run first -- same reasoning as
+        # generate()'s own subdir() helper: a changed tokenizer set (e.g.
+        # excluding fanta) otherwise leaves the previous run's now-unreferenced
+        # bar_..._<family>.dat files (and an empty-looking but still-present
+        # "This work" one) sitting here forever.
+        if os.path.isdir(anchor_dir):
+            for fname in os.listdir(anchor_dir):
+                fpath = os.path.join(anchor_dir, fname)
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
         os.makedirs(anchor_dir, exist_ok=True)
         fig_name = f"indigenous_panel_parity_vs_{anchor}"
         tex = gen_indigenous_panel_parity_bars_tex(
@@ -1487,11 +1510,11 @@ def build_arg_parser():
     )
     parser.add_argument(
         "--exclude", type=str, default=None,
-        help="comma-separated tokenizer name(s) to drop from the main 5-figure pipeline "
-        "(ignored with --indigenous-panel) -- e.g. --exclude fanta for Ch.~tokentax's "
-        "pooled figures, which must not show fanta before it's introduced later in the "
-        "thesis (see scripts/generate_scoped_leaderboards.py and scripts/"
-        "generate_fanta_eval_figures.py for where fanta belongs instead)",
+        help="comma-separated tokenizer name(s) to drop -- applies to both the main "
+        "5-figure pipeline AND --indigenous-panel's two figures -- e.g. --exclude fanta "
+        "for Ch.~tokentax's pooled figures, which must not show fanta before it's "
+        "introduced later in the thesis (see scripts/generate_scoped_leaderboards.py and "
+        "scripts/generate_fanta_eval_figures.py for where fanta belongs instead)",
     )
     parser.add_argument(
         "--csv-out", type=str, default=None,
@@ -1505,10 +1528,12 @@ def build_arg_parser():
 
 def main(argv=None):
     args = parse_args_with_config(build_arg_parser(), argv)
+    exclude = [n.strip() for n in args.exclude.split(",")] if args.exclude else None
     if args.indigenous_panel:
-        generate_indigenous_panel_figures(args.input, args.output_dir, data_prefix=args.data_prefix)
+        generate_indigenous_panel_figures(
+            args.input, args.output_dir, data_prefix=args.data_prefix, exclude=exclude,
+        )
     else:
-        exclude = [n.strip() for n in args.exclude.split(",")] if args.exclude else None
         generate(
             args.input, args.output_dir, data_prefix=args.data_prefix, exclude=exclude,
             csv_out=args.csv_out,
