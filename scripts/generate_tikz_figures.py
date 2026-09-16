@@ -13,15 +13,26 @@ Five figures (a raw 33-tokenizer x 259-language dump isn't legible in print):
      in Python (ColorBrewer YlOrRd -- pale=parity, deep red=worst, so "worse" reads as
      darker, unlike a directionless colormap like viridis) and baked in as literal \\fill
      commands rather than left to a pgfplots colormap.
-  4. Resource-level trend: mean token_parity per tokenizer grouped by Joshi et al. 2020's
-     6-level resource taxonomy (see common.data.lang2tax; ~85% of languages resolve against
-     it). One thin line per tokenizer, colored by family, full per-language data (not the
-     heatmap's worst-20 subset).
+  4. Resource-level trend: mean token_parity grouped by Joshi et al. 2020's 6-level resource
+     taxonomy (see common.data.lang2tax; ~85% of languages resolve against it), full
+     per-language data (not the heatmap's worst-20 subset). Every baseline family collapses
+     to one bold mean line + a shaded min-max band across that family's own tokenizers
+     (matching figs. 4.7/4.8's own family-aggregated bars); "This work" tokenizers still plot
+     individually, same green hue disambiguated by marker shape (_OWN_SYSTEM_MARKS), since
+     comparing our own systems against each other is the point. Full per-tokenizer detail for
+     every OTHER family lives in table 7 instead (see gen_resource_level_table_tex).
   5. Real API cost by provider: 4 subplots (DeepSeek/GPT/Claude/Kimi, see _PROVIDER_PANELS),
      each 6 real Tukey box plots (one per resource level) from each language's own dollar
      cost. Claude renders as a "pending" placeholder until merged into the input. Pricing is
      real, live-fetched (platform.claude.com, developers.openai.com, deepseek.ai; Kimi's
      rate supplied by the user).
+
+Two summary tables (exact-value reference companions, not meant to be legible-at-a-glance
+the way the figures above are):
+  6. Tokenizer summary: every tokenizer's compression/fertility/gini/spread, sorted by
+     spread -- the full ranked list figure 2's scatter only labels 3 points of.
+  7. Resource-level detail: every tokenizer's mean token_parity per resource level -- the
+     per-tokenizer detail figure 4 no longer shows once baseline families aggregate.
 
 Usage:
     python3 -m scripts.generate_tikz_figures --input results/hf_frontier_comparison.json --output-dir figures/tikz
@@ -84,14 +95,27 @@ _FAMILY_RGB = {
     "Meta/Llama": (74, 111, 227),
     "Encoder-only": (140, 140, 140),
     "Anthropic": (180, 60, 60),
-    "This work": (34, 139, 74),  # distinct green so our own 7 tokenizers stand out from "Other"
+    "This work": (34, 139, 74),  # distinct green so our own 6 tokenizers stand out from "Other"
     "Other": (163, 79, 168),
     "Other approaches": (163, 79, 168),
 }
 # Exact system_label strings evaluate.py's TOKENIZERS dict uses for this repo's
-# 7 trained tokenizers (scripts/combine_eval_results.py keys entries by --result-key,
+# 6 trained tokenizers (scripts/combine_eval_results.py keys entries by --result-key,
 # which defaults to this) -- exact-match, not the prefix heuristic below.
-_REPO_TOKENIZER_NAMES = {"fairtok", "magnet", "flexitokens", "manta", "fanta", "superbpe", "bpe", "parity_bpe"}
+# fairtok/flexitokens deliberately excluded (dropped from the project 2026-09-16 --
+# fairtok was never successfully trained, flexitokens is no longer pursued).
+_REPO_TOKENIZER_NAMES = {"magnet", "manta", "fanta", "superbpe", "bpe", "parity_bpe"}
+# Per-system marker shape (not color -- all six share "This work"'s green so the
+# whole family still reads as one group) for gen_resource_level_tex's individual
+# own-system lines, so they stay distinguishable from each other in grayscale too.
+_OWN_SYSTEM_MARKS = {
+    "bpe": "*",
+    "superbpe": "square*",
+    "fanta": "triangle*",
+    "magnet": "diamond*",
+    "manta": "pentagon*",
+    "parity_bpe": "otimes*",
+}
 # Single source of truth for gen_spread_leaderboard_tex's own default -- also
 # referenced by scripts/generate_scoped_leaderboards.py to know, without
 # duplicating the number, whether a given row count will render as one
@@ -503,7 +527,17 @@ def gen_landscape_tex(rows, families, out_dir, data_prefix=""):
     best_spread = min(rows, key=lambda r: r["spread"])
     worst_spread = max(rows, key=lambda r: r["spread"])
     best_compression = max(rows, key=lambda r: r["avg_compression"])
-    labeled = [best_spread, worst_spread, best_compression]
+    # A single tokenizer can legitimately win two of these three superlatives
+    # at once (e.g. highest spread AND highest compression) -- deduping by
+    # name here is required, not cosmetic: without it the same point got
+    # rendered (and _label_anchor_offsets ranked) twice, producing two
+    # overlapping copies of its label offset in opposite directions.
+    seen_names = set()
+    labeled = []
+    for r in (best_spread, worst_spread, best_compression):
+        if r["name"] not in seen_names:
+            seen_names.add(r["name"])
+            labeled.append(r)
     anchors = _label_anchor_offsets(labeled, [r["avg_compression"] for r in rows])
 
     preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
@@ -855,14 +889,12 @@ def generate_indigenous_panel_figures(results_path, out_dir, data_prefix=None):
     return rows, families, written
 
 
-def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
-    """Mean token_parity per tokenizer, grouped by Joshi et al. 2020's 6-level
-    resource taxonomy (see common.data.lang2tax; ~85% of languages resolve against it,
-    the rest are a genuine gap in that external resource). Uses each model's full
-    per-language token_parity dict, not the heatmap's worst-20 subset.
-
-    One thin line per tokenizer, colored by family, `forget plot` so it doesn't spam
-    the legend, plus one legend entry per family added manually via `\\addlegendimage`."""
+def _resource_levels_and_means(rows, models):
+    """Shared by gen_resource_level_tex and gen_resource_level_table_tex: resolves
+    every language's Joshi et al. 2020 resource level, then each row's mean
+    token_parity per level. Returns (levels, unresolved, present_levels, counts,
+    row_level_means) where row_level_means[row["idx"]][level] = mean parity
+    (level absent from the dict if that row has no data for it)."""
     all_codes = set()
     for m in models.values():
         all_codes.update(m["token_parity"].keys())
@@ -870,6 +902,7 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
     counts = Counter(levels.values())
     present_levels = sorted(counts)
 
+    row_level_means = {}
     for r in rows:
         tp = models[r["name"]]["token_parity"]
         by_level = defaultdict(list)
@@ -877,15 +910,58 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
             v = tp.get(lang)
             if v is not None:
                 by_level[lvl].append(v)
+        row_level_means[r["idx"]] = {
+            lvl: sum(vals) / len(vals) for lvl, vals in by_level.items() if vals
+        }
+    return levels, unresolved, present_levels, counts, row_level_means
+
+
+def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
+    """Mean token_parity per tokenizer, grouped by Joshi et al. 2020's 6-level
+    resource taxonomy (see common.data.lang2tax; ~85% of languages resolve against it,
+    the rest are a genuine gap in that external resource). Uses each model's full
+    per-language token_parity dict, not the heatmap's worst-20 subset.
+
+    Every baseline family (everything except "This work") collapses to one bold
+    mean line + a shaded min-max band across that family's own tokenizers -- one
+    thin line per tokenizer at full tokenizer count was an unreadable ~30-line
+    spaghetti plot, and figs. gen_indigenous_panel_parity_bars_tex/AmericasNLP
+    already aggregate to family level, so this now matches that convention.
+    "This work" tokenizers still plot individually (same green family hue,
+    disambiguated by marker shape via _OWN_SYSTEM_MARKS) since comparing this
+    project's own systems against each other IS this figure's point -- full
+    per-tokenizer detail for every OTHER family lives in
+    gen_resource_level_table_tex instead."""
+    levels, unresolved, present_levels, counts, row_level_means = _resource_levels_and_means(rows, models)
+
+    own_rows = [r for r in rows if r["family"] == "This work"]
+    baseline_families = [f for f in families if f != "This work"]
+
+    for r in own_rows:
         path = os.path.join(out_dir, f"resourcelevel_{r['idx']}.dat")
         with open(path, "w", encoding="utf-8") as f:
             f.write("level parity\n")
             for lvl in present_levels:
-                vals = by_level.get(lvl)
-                if vals:
-                    f.write(f"{lvl} {sum(vals) / len(vals):.4f}\n")
+                v = row_level_means[r["idx"]].get(lvl)
+                if v is not None:
+                    f.write(f"{lvl} {v:.4f}\n")
 
-    preamble = [r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}"]
+    for fam in baseline_families:
+        fam_rows = [r for r in rows if r["family"] == fam]
+        path = os.path.join(out_dir, f"resourcelevel_family_{fam_key(fam)}.dat")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("level mean lo hi\n")
+            for lvl in present_levels:
+                vals = [
+                    row_level_means[r["idx"]][lvl] for r in fam_rows if lvl in row_level_means[r["idx"]]
+                ]
+                if vals:
+                    f.write(f"{lvl} {sum(vals) / len(vals):.4f} {min(vals):.4f} {max(vals):.4f}\n")
+
+    preamble = [
+        r"\documentclass{standalone}", r"\usepackage{pgfplots}", r"\pgfplotsset{compat=1.18}",
+        r"\usepgfplotslibrary{fillbetween}",
+    ]
     for fam in families:
         r_, g_, b_ = _FAMILY_RGB.get(fam, _FAMILY_RGB["Other"])
         preamble.append(r"\definecolor{%s}{RGB}{%d,%d,%d}" % (_FAMILY_COLORS.get(fam, "otherCol"), r_, g_, b_))
@@ -905,19 +981,83 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
         r"    axis lines=left,",
         r"]",
     ]
-    for r in rows:
-        col = _FAMILY_COLORS.get(r["family"], "otherCol")
-        body.append(
-            r"\addplot+[color=%s, mark=*, mark size=1pt, mark options={fill=%s}, line width=0.5pt, forget plot] "
-            r"table [x=level, y=parity] {%sresourcelevel_%d.dat};" % (col, col, data_prefix, r["idx"])
-        )
-    for fam in families:
+    for fam in baseline_families:
         col = _FAMILY_COLORS.get(fam, "otherCol")
-        body.append(r"\addlegendimage{color=%s, mark=*}" % col)
+        fname = f"{data_prefix}resourcelevel_family_{fam_key(fam)}.dat"
+        upper_id = f"upper_{fam_key(fam)}"
+        lower_id = f"lower_{fam_key(fam)}"
+        body.append(
+            r"\addplot [name path=%s, draw=none, forget plot] table [x=level, y=hi] {%s};" % (upper_id, fname)
+        )
+        body.append(
+            r"\addplot [name path=%s, draw=none, forget plot] table [x=level, y=lo] {%s};" % (lower_id, fname)
+        )
+        body.append(r"\addplot [%s!25, forget plot] fill between [of=%s and %s];" % (col, upper_id, lower_id))
+        body.append(
+            r"\addplot+[color=%s, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {%s};" % (col, fname)
+        )
         body.append(r"\addlegendentry{%s}" % fam)
+    for r in own_rows:
+        col = _FAMILY_COLORS["This work"]
+        mark = _OWN_SYSTEM_MARKS.get(r["name"], "*")
+        body.append(
+            r"\addplot+[color=%s, thick, mark=%s, mark size=1.8pt, mark options={fill=%s}] "
+            r"table [x=level, y=parity] {%sresourcelevel_%d.dat};" % (col, mark, col, data_prefix, r["idx"])
+        )
+        body.append(r"\addlegendentry{%s}" % esc(r["short"]))
     body += [r"\end{axis}", r"\end{tikzpicture}"]
     full_tex, _ = _write_standalone_and_body("resource_level", preamble, body, out_dir)
     return full_tex, dict(counts), unresolved
+
+
+def gen_tokenizer_summary_table_tex(rows, models, out_dir):
+    """Full ranked tokenizer summary (name, family, avg_compression, fertility,
+    gini, spread) -- the exact-value reference companion to gen_landscape_tex's
+    scatter, which only labels 3 of the ~30+ points. Sorted by spread ascending
+    (most equitable first), matching `rows`' own existing sort order from
+    load_rows."""
+    preamble = [r"\documentclass{standalone}", r"\usepackage{booktabs}"]
+    body = [
+        r"\begin{tabular}{llrrrr}",
+        r"\toprule",
+        r"Tokenizer & Family & Compression & Fertility & Gini & Spread \\",
+        r"\midrule",
+    ]
+    for r in rows:
+        fertility_by_lang = models[r["name"]]["fertility"]  # per-language dict, like token_parity
+        mean_fertility = sum(fertility_by_lang.values()) / len(fertility_by_lang)
+        body.append(
+            r"%s & %s & %.2f & %.2f & %.3f & %.2f \\"
+            % (esc(r["short"]), esc(r["family"]), r["avg_compression"], mean_fertility, r["gini"], r["spread"])
+        )
+    body += [r"\bottomrule", r"\end{tabular}"]
+    full_tex, _ = _write_standalone_and_body("tokenizer_summary_table", preamble, body, out_dir)
+    return full_tex
+
+
+def gen_resource_level_table_tex(rows, models, out_dir):
+    """Full per-tokenizer x resource-level mean token_parity table -- the detail
+    gen_resource_level_tex's figure no longer shows for baseline families once
+    they collapse to one mean+band line each (see that function's own
+    docstring)."""
+    _levels, _unresolved, present_levels, _counts, row_level_means = _resource_levels_and_means(rows, models)
+
+    preamble = [r"\documentclass{standalone}", r"\usepackage{booktabs}"]
+    col_spec = "ll" + "r" * len(present_levels)
+    header = " & ".join(str(lvl) for lvl in present_levels)
+    body = [
+        r"\begin{tabular}{%s}" % col_spec,
+        r"\toprule",
+        r"Tokenizer & Family & %s \\" % header,
+        r"\midrule",
+    ]
+    for r in rows:
+        means = row_level_means[r["idx"]]
+        cells = [f"{means[lvl]:.2f}" if lvl in means else "--" for lvl in present_levels]
+        body.append(r"%s & %s & %s \\" % (esc(r["short"]), esc(r["family"]), " & ".join(cells)))
+    body += [r"\bottomrule", r"\end{tabular}"]
+    full_tex, _ = _write_standalone_and_body("resource_level_table", preamble, body, out_dir)
+    return full_tex
 
 
 def _panel_title(panel, models):
@@ -1118,6 +1258,8 @@ _FIGURE_SUBDIRS = {
     "heatmap": "heatmap",
     "resource_level": "resource_level",
     "api_cost": "api_cost",
+    "tokenizer_summary_table": "tokenizer_summary_table",
+    "resource_level_table": "resource_level_table",
 }
 
 
@@ -1147,6 +1289,8 @@ def generate(results_path, out_dir, data_prefix=None, exclude=None):
     heatmap_dir, _heatmap_prefix = subdir("heatmap")
     resource_level_dir, resource_level_prefix = subdir("resource_level")
     api_cost_dir, _api_cost_prefix = subdir("api_cost")  # no external .dat files -- prefix unused
+    summary_table_dir, _summary_table_prefix = subdir("tokenizer_summary_table")
+    resource_level_table_dir, _resource_level_table_prefix = subdir("resource_level_table")
 
     rows, models = load_rows(results_path, exclude=exclude)
     families = compute_families(rows)
@@ -1160,12 +1304,16 @@ def generate(results_path, out_dir, data_prefix=None, exclude=None):
         rows, models, families, resource_level_dir, data_prefix=resource_level_prefix
     )
     tex5, _unresolved_cost_langs = gen_api_cost_boxplot_tex(models, api_cost_dir)
+    tex6 = gen_tokenizer_summary_table_tex(rows, models, summary_table_dir)
+    tex7 = gen_resource_level_table_tex(rows, models, resource_level_table_dir)
 
     _assert_well_formed(tex1, "fig_spread_leaderboard.tex", expected_tikzpictures=2)
     _assert_well_formed(tex2, "fig_landscape.tex")
     _assert_well_formed(tex3, "fig_heatmap.tex")
     _assert_well_formed(tex4, "fig_resource_level.tex")
     _assert_well_formed(tex5, "fig_api_cost.tex", expected_tikzpictures=4)
+    _assert_well_formed(tex6, "fig_tokenizer_summary_table.tex", expected_tikzpictures=0)
+    _assert_well_formed(tex7, "fig_resource_level_table.tex", expected_tikzpictures=0)
 
     print(f"{len(rows)} models, {len(families)} families, heatmap languages: {top_langs}")
     print(f"resource-level coverage: {sum(level_counts.values())} resolved {dict(sorted(level_counts.items()))}, "

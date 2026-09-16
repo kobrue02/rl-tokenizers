@@ -29,11 +29,21 @@ figures/tikz/
 ├── resource_level/
 │   ├── fig_resource_level.tex
 │   ├── fig_resource_level_body.tex
-│   └── resourcelevel_*.dat               (33 files, one per tokenizer)
-└── api_cost/
-    ├── fig_api_cost.tex
-    └── fig_api_cost_body.tex             (self-contained -- 4 subplots, no .dat needed)
+│   ├── resourcelevel_family_*.dat        (one per BASELINE family -- mean+min+max band)
+│   └── resourcelevel_*.dat               (one per "This work" tokenizer only -- individual lines)
+├── api_cost/
+│   ├── fig_api_cost.tex
+│   └── fig_api_cost_body.tex             (self-contained -- 4 subplots, no .dat needed)
+├── tokenizer_summary_table/
+│   ├── fig_tokenizer_summary_table.tex
+│   └── fig_tokenizer_summary_table_body.tex   (plain LaTeX tabular, no .dat needed)
+└── resource_level_table/
+    ├── fig_resource_level_table.tex
+    └── fig_resource_level_table_body.tex      (plain LaTeX tabular, no .dat needed)
 ```
+
+The last two are TABLES, not TikZ figures -- exact-value reference companions for
+data the figures above compress away (see "Design notes" below).
 
 ## Compiling to test
 
@@ -50,6 +60,8 @@ pdflatex figures/tikz/landscape/fig_landscape.tex
 pdflatex figures/tikz/heatmap/fig_heatmap.tex
 pdflatex figures/tikz/resource_level/fig_resource_level.tex
 pdflatex figures/tikz/api_cost/fig_api_cost.tex
+pdflatex figures/tikz/tokenizer_summary_table/fig_tokenizer_summary_table.tex
+pdflatex figures/tikz/resource_level_table/fig_resource_level_table.tex
 ```
 
 (running e.g. `pdflatex fig_spread_leaderboard.tex` from *inside*
@@ -108,6 +120,26 @@ Each figure comes in two forms:
   \caption{...}
   \label{fig:api-cost-by-resource-level}
 \end{figure}
+```
+
+The two tables embed the same way, via `table` (not `figure`) environments --
+their body files are plain `tabular` content, no `\pgfplotsset`/colors needed,
+just `\usepackage{booktabs}` once in your preamble:
+
+```latex
+\begin{table}[htbp]
+  \centering
+  \input{figures/tikz/tokenizer_summary_table/fig_tokenizer_summary_table_body.tex}
+  \caption{...}
+  \label{tab:tokenizer-summary}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \input{figures/tikz/resource_level_table/fig_resource_level_table_body.tex}
+  \caption{...}
+  \label{tab:resource-level-detail}
+\end{table}
 ```
 
 The heatmap is oriented with models down the ROWS (family-grouped, same
@@ -188,15 +220,24 @@ for it beyond `tikz`/`xcolor`.)
 - **Family coloring** is a rough grouping by name prefix (see `family_of()`
   in the script) for visual scanning, not a rigorous taxonomy -- edit it if
   you want different groupings.
-- **Resource-level trend**: mean token_parity per tokenizer across Joshi et
-  al. 2020's 6-level linguistic resource taxonomy (see `common/data/lang2tax.py`
-  for the code->level mapping). Uses ALL of each model's language coverage
-  that resolves against that taxonomy (~85% of this project's languages --
-  the script prints exactly which codes don't resolve, and why, each run),
-  not just the heatmap's worst-20 subset. 33 thin lines, colored by family,
-  with only 5 legend entries (one per family, added manually via
-  `\addlegendimage` -- the 33 real `\addplot` calls use `forget plot` so
-  they don't each spam their own legend row).
+- **Resource-level trend**: mean token_parity across Joshi et al. 2020's
+  6-level linguistic resource taxonomy (see `common/data/lang2tax.py` for the
+  code->level mapping). Uses ALL of each model's language coverage that
+  resolves against that taxonomy (~85% of this project's languages -- the
+  script prints exactly which codes don't resolve, and why, each run), not
+  just the heatmap's worst-20 subset. A per-tokenizer thin line for every
+  baseline model was an unreadable spaghetti plot at full tokenizer count, so
+  every family EXCEPT "This work" now collapses to one bold mean line + a
+  shaded min-max band across that family's own tokenizers (uses pgfplots'
+  `fillbetween` library -- `\usepgfplotslibrary{fillbetween}` is required,
+  printed at the top of `fig_resource_level.tex` alongside the usual
+  `pgfplots`/`compat` lines). "This work" tokenizers still plot individually
+  (own systems compared against each other IS this figure's point), same
+  green family hue as everywhere else, disambiguated from one another by
+  marker shape (`_OWN_SYSTEM_MARKS` in the script) rather than a second color
+  palette, so the figure still reads correctly in grayscale. Full
+  per-tokenizer detail for every baseline family that the aggregation now
+  hides lives in `resource_level_table/` instead (see below).
 - **Real API cost by provider**: 4 subplots (DeepSeek, GPT, Claude, Kimi K3 --
   see `_PROVIDER_PANELS`'s own comment in the script for exact pricing
   source/date and why each was chosen, including why OpenAI collapses to a
@@ -215,5 +256,18 @@ for it beyond `tikz`/`xcolor`.)
   compile-test a new one against.
 - **Color scale matches the online dashboard** (`sqrt(v-1)` normalization),
   so the same visual intuition carries over between the two.
+- **Tokenizer summary table**: every tokenizer's compression/fertility/gini/
+  spread, one row each, sorted by spread ascending -- the exact-value
+  reference the landscape scatter can't provide on its own, since that figure
+  only labels its 3 most informative points (best/worst spread, best
+  compression) to stay legible.
+- **Resource-level detail table**: every tokenizer's mean token_parity per
+  resource level, one row per tokenizer x one column per level -- the
+  per-tokenizer detail the resource-level trend figure no longer shows for
+  baseline families once they aggregate to a family-level band (own "This
+  work" systems already have individual figure lines, but are included here
+  too for a single complete reference).
+- Both tables use `booktabs` (`\toprule`/`\midrule`/`\bottomrule`), no other
+  package needed beyond that.
 - No LaTeX was available to compile-test when this was written -- verify with
   a real compiler before trusting the output.
