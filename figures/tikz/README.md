@@ -8,6 +8,49 @@ script instead:
 python3 -m scripts.generate_tikz_figures --input results/hf_frontier_comparison.json --output-dir figures/tikz
 ```
 
+## fanta is EXCLUDED from this directory's main pipeline, deliberately
+
+This is Ch.~tokentax's own figure set: it establishes the token-tax problem
+across the EXISTING tokenizer landscape, before fanta (this thesis's own
+contribution) is introduced as a method in a later chapter. Showing fanta
+here would spoil/pre-empt that narrative ordering, so the main 5-figure +
+3-table pipeline is regenerated with fanta in `--exclude` alongside the
+niche/redundant HF repos this project's own tokenizer trim already drops
+(see `configs/eval/hf_frontier.yml`'s own comment for that list) and
+flexitokens (dropped from the project entirely):
+
+```
+python3 -m scripts.generate_tikz_figures \
+    --input results/all_tokenizers_comparison.json --output-dir figures/tikz \
+    --exclude "Jarbas/m2v-256-bge-reranker-v2-m3,Jarbas/m2v-256-multilingual-e5-small,Yoonyoul/fine-tuned-e5-small-drugproduct,answerdotai/ModernBERT-base,antebe/token_punct_dilute,bert-base-cased,bluexmas/mbart50_ko_vi,distilbert-base-uncased,google/electra-base-discriminator,microsoft/deberta-base,microsoft/deberta-v3-base,roberta-base,slone/mbart-large-51-myv-mul-v1,tiktoken:gpt2,tiktoken:o200k_harmony,tiktoken:p50k_base,tiktoken:p50k_edit,tiktoken:r50k_base,flexitokens,fanta" \
+    --csv-out results/full_per_language_detail.csv
+```
+
+`family_of()`'s "This work" bucket simply doesn't appear in this directory's
+output at all as a result -- there's no other own-trained tokenizer left to
+occupy it once fanta is excluded (the other 5 own-trained tokenizers are
+"Reproduced baselines", not "This work" -- see `family_of()`'s own
+docstring).
+
+The full landscape WITH fanta included (for the Results chapter, comparing
+fanta against everything from this chapter) lives in a sibling directory,
+`figures/tikz_with_fanta/` -- same 8 figure/table subdirectory names, same
+generator, just a different `--exclude` list (fanta kept in) and
+`--output-dir`. See that directory's own README.
+
+The other subdirectories that already coexist here belong to a separate
+concern each -- own their own chapters' content, not part of the token-tax
+pipeline above, and were unaffected by the exclusion above:
+`fanta_eval_parity_vs_eng/`, `fanta_eval_parity_vs_spa/`,
+`spread_leaderboard_our_work_vs_other_approaches/` (fanta vs. the other
+published fairness-aware methods -- see `scripts/generate_fanta_eval_figures.py`/
+`scripts/generate_scoped_leaderboards.py`), `fanta_architecture/`,
+`fanta_frontier_predictor/` (fanta's own method figures), `indigenous_panel/`
+(includes fanta -- see `common.data.indigenous_panel`), and
+`spread_leaderboard_hf_frontier/` (external frontier models only, isolated
+from every one of this project's own tokenizers including fanta -- neutral
+either way).
+
 ## Layout
 
 One subdirectory per figure -- each figure's `.tex` + `.dat` files sit

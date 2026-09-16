@@ -1,0 +1,65 @@
+\documentclass{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepgfplotslibrary{fillbetween}
+\definecolor{openaiCol}{RGB}{16,110,118}
+\definecolor{chinaCol}{RGB}{214,96,42}
+\definecolor{metaCol}{RGB}{74,111,227}
+\definecolor{encCol}{RGB}{140,140,140}
+\definecolor{anthropicCol}{RGB}{180,60,60}
+\definecolor{oursCol}{RGB}{34,139,74}
+\definecolor{reproCol}{RGB}{191,148,39}
+\definecolor{otherCol}{RGB}{163,79,168}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+    width=13cm, height=8cm,
+    xlabel={Linguistic resource level (Joshi et al. 2020)},
+    ylabel={Mean token parity vs English},
+    xtick={0,1,2,3,4,5},
+    xticklabels={{0: Left-Behinds}, {1: Scraping-Bys}, {2: Hopefuls}, {3: Rising Stars}, {4: Underdogs}, {5: Winners}},
+    x tick label style={font=\scriptsize},
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
+    grid=both, grid style={gray!15},
+    axis lines=left,
+]
+\addplot [name path=upper_OpenAI_tiktoken, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_OpenAI_tiktoken.dat};
+\addplot [name path=lower_OpenAI_tiktoken, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_OpenAI_tiktoken.dat};
+\addplot [openaiCol!25, forget plot] fill between [of=upper_OpenAI_tiktoken and lower_OpenAI_tiktoken];
+\addplot+[color=openaiCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_OpenAI_tiktoken.dat};
+\addlegendentry{OpenAI/tiktoken}
+\addplot [name path=upper_Chinese_labs, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Chinese_labs.dat};
+\addplot [name path=lower_Chinese_labs, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Chinese_labs.dat};
+\addplot [chinaCol!25, forget plot] fill between [of=upper_Chinese_labs and lower_Chinese_labs];
+\addplot+[color=chinaCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Chinese_labs.dat};
+\addlegendentry{Chinese labs}
+\addplot [name path=upper_Meta_Llama, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Meta_Llama.dat};
+\addplot [name path=lower_Meta_Llama, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Meta_Llama.dat};
+\addplot [metaCol!25, forget plot] fill between [of=upper_Meta_Llama and lower_Meta_Llama];
+\addplot+[color=metaCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Meta_Llama.dat};
+\addlegendentry{Meta/Llama}
+\addplot [name path=upper_Encoder-only, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Encoder-only.dat};
+\addplot [name path=lower_Encoder-only, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Encoder-only.dat};
+\addplot [encCol!25, forget plot] fill between [of=upper_Encoder-only and lower_Encoder-only];
+\addplot+[color=encCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Encoder-only.dat};
+\addlegendentry{Encoder-only}
+\addplot [name path=upper_Anthropic, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Anthropic.dat};
+\addplot [name path=lower_Anthropic, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Anthropic.dat};
+\addplot [anthropicCol!25, forget plot] fill between [of=upper_Anthropic and lower_Anthropic];
+\addplot+[color=anthropicCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Anthropic.dat};
+\addlegendentry{Anthropic}
+\addplot [name path=upper_Reproduced_baselines, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Reproduced_baselines.dat};
+\addplot [name path=lower_Reproduced_baselines, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Reproduced_baselines.dat};
+\addplot [reproCol!25, forget plot] fill between [of=upper_Reproduced_baselines and lower_Reproduced_baselines];
+\addplot+[color=reproCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Reproduced_baselines.dat};
+\addlegendentry{Reproduced baselines}
+\addplot [name path=upper_Other, draw=none, forget plot] table [x=level, y=hi] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Other.dat};
+\addplot [name path=lower_Other, draw=none, forget plot] table [x=level, y=lo] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Other.dat};
+\addplot [otherCol!25, forget plot] fill between [of=upper_Other and lower_Other];
+\addplot+[color=otherCol, thick, mark=*, mark size=1.5pt] table [x=level, y=mean] {figures/tikz_with_fanta/resource_level/resourcelevel_family_Other.dat};
+\addlegendentry{Other}
+\addplot+[color=oursCol, ultra thick, mark=star, mark size=3pt, mark options={fill=oursCol}] table [x=level, y=parity] {figures/tikz_with_fanta/resource_level/resourcelevel_7.dat};
+\addlegendentry{fanta}
+\end{axis}
+\end{tikzpicture}
+\end{document}
