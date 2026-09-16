@@ -17,7 +17,7 @@ shape of the pipeline and the gotchas worth knowing before you run it.
 ## 1. Pretraining
 
 ```bash
-sbatch jobs/train_encoder_pretraining.sh \
+sbatch jobs/pretrain/encoder_pretraining.sh \
     --shard-dir pretrain_data/glot500_bpe \
     --output-dir checkpoints/encoder_pretrain_bpe \
     --encoder-size base --total-steps 50000 --seq-len 512 --per-device-batch-size 16
@@ -48,21 +48,21 @@ separate). These need the actual tokenizer (to encode real text), unlike
 training:
 
 ```bash
-sbatch jobs/evaluate_encoder.sh --checkpoint checkpoints/encoder_pretrain_bpe/final.pt \
+sbatch jobs/eval/encoder.sh --checkpoint checkpoints/encoder_pretrain_bpe/final.pt \
     --system bpe --tokenizer-checkpoint checkpoints/bpe_50k.json \
     --benchmark retrieval --dataset tatoeba_mt --pair deu-eng --split test
 
-sbatch jobs/evaluate_encoder.sh --checkpoint ... --system bpe --tokenizer-checkpoint ... \
+sbatch jobs/eval/encoder.sh --checkpoint ... --system bpe --tokenizer-checkpoint ... \
     --benchmark roundtrip --cycle-langs eng,fra,deu,eng
 
-sbatch jobs/evaluate_encoder.sh --checkpoint ... --system bpe --tokenizer-checkpoint ... \
+sbatch jobs/eval/encoder.sh --checkpoint ... --system bpe --tokenizer-checkpoint ... \
     --benchmark pppl --dataset tatoeba_mt --pair deu-eng --split test --lang deu
 ```
 
 - Span-family tokenizers (`fairtok`/`magnet`/`flexitokens`/`manta`/`fanta`)
   need `--vocab-json` too, same requirement as everywhere else in this repo.
 - `--benchmark roundtrip` (and any `--dataset bible_nlp` run) needs
-  `bible_nlp` prepared locally FIRST — `sbatch jobs/prepare_bible_nlp.sh` —
+  `bible_nlp` prepared locally FIRST — `sbatch jobs/prep/bible_nlp.sh` —
   it has no live-streaming fallback.
 
 ## 3. Finetuning: NER / POS / Taxi1500 / SIB-200
@@ -79,7 +79,7 @@ different language-code convention, unfortunately not a choice made here:
 | `taxi1500` | (English-only auto-download; see below) | — | — |
 
 ```bash
-sbatch jobs/finetune_encoder.sh --checkpoint checkpoints/encoder_pretrain_bpe/final.pt \
+sbatch jobs/finetune/encoder.sh --checkpoint checkpoints/encoder_pretrain_bpe/final.pt \
     --system bpe --tokenizer-checkpoint checkpoints/bpe_50k.json \
     --task ner --train-lang en --eval-lang de --output-dir finetune_out/ner_de
 ```
@@ -90,7 +90,7 @@ language's own test set via `Trainer`'s native multi-dataset support
 (`ner`/`pos`/`sib200` only; not a per-language resubmit):
 
 ```bash
-sbatch jobs/finetune_encoder.sh --checkpoint ... --system bpe --tokenizer-checkpoint ... \
+sbatch jobs/finetune/encoder.sh --checkpoint ... --system bpe --tokenizer-checkpoint ... \
     --task sib200 --train-lang-script eng_Latn --eval-lang-scripts all \
     --output-dir finetune_out/sib200_full
     # --eval-langs / --eval-configs work the same way for ner / pos
@@ -146,20 +146,20 @@ breakdown from an `all` sweep). Missing cells render as `--`, never `0`.
 
 ## 6. Running the whole suite at once
 
-`jobs/run_encoder_eval_suite.sh` submits all 7 benchmarks/tasks above
+`jobs/eval/run_encoder_eval_suite.sh` submits all 7 benchmarks/tasks above
 (pppl, retrieval, roundtrip, ner, pos, taxi1500, sib200) for every
 tokenizer listed in its own `ENCODER_CHECKPOINTS`/`TOKENIZER_SYSTEMS`/
 `TOKENIZER_CHECKPOINTS`/`TOKENIZER_VOCAB_JSONS` arrays, then chains
-`jobs/combine_encoder_results.sh` to regenerate `results/encoder_comparison.{json,md}`
+`jobs/combine/encoder_results.sh` to regenerate `results/encoder_comparison.{json,md}`
 automatically once everything finishes (`--dependency=afterany`, so one
 benchmark failing doesn't block combining what did succeed):
 
 ```bash
-bash jobs/run_encoder_eval_suite.sh   # run directly on the login node, NOT via sbatch
+bash jobs/eval/run_encoder_eval_suite.sh   # run directly on the login node, NOT via sbatch
 ```
 
 Separate jobs per benchmark, not one chained job — mirrors
-`jobs/evaluate_latest_checkpoints.sh`'s own reasoning (one benchmark's own
+`jobs/eval/latest_checkpoints.sh`'s own reasoning (one benchmark's own
 budget could exceed any single time limit with no way to resume partway).
 Edit the four arrays at the top of the script to add more tokenizers; edit
 the language-setting variables below them (`RETRIEVAL_PAIR`, `TRAIN_LANG`,

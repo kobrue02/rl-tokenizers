@@ -51,7 +51,7 @@ calls with no pause/resume hook of any kind -- a real operational risk for
 a long real-vocab-scale fit that times out mid-run, with no principled way
 to add one without modifying this vendored code (which would undercut the
 point of reusing it verbatim). See ../model.py's own module docstring for
-how this project's job script (jobs/train_parity_bpe.sh) currently handles
+how this project's job script (jobs/train_tokenizer/parity_bpe.sh) currently handles
 that risk (short answer: it doesn't, yet -- flagged there for visibility).
 """
 

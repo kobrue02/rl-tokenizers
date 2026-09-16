@@ -39,6 +39,19 @@ Usage:
         # scripts.combine_decoder_results can group multiple runs' files
         # under distinct keys for scripts.generate_eval_comparison_figures.
 
+    python3 -m systems.pretraining.cli_eval --checkpoint checkpoints/pretrain/final.pt \\
+        --system bpe --tokenizer-checkpoint checkpoints/bpe_12345.json \\
+        --benchmark xnli,xcopa --langs sw,tr,zh --num-fewshot 8 \\
+        --output results/fewshot_bpe.json
+        # --num-fewshot (xnli/xcopa only) prepends k in-context
+        # demonstrations before every example -- see benchmarks.py's own
+        # FEWSHOT docstring section for why this is the standard lever at
+        # this model scale. --length-normalize/--pmi-calibrate (see
+        # eval_harness.evaluate_multiple_choice) are BOTH ON by default
+        # already (use --no-length-normalize/--no-pmi-calibrate to revert
+        # to the earlier raw zero-shot scoring); --n-bootstrap controls the
+        # per-language accuracy confidence interval's resample count.
+
 Infrastructure only -- verified via run_smoke_test below against a tiny
 freshly-initialized model, not a real pretrained checkpoint.
 """
@@ -66,6 +79,13 @@ _MULTIPLE_CHOICE_LANGS = {
     # _resolve_multiple_choice_langs's filter/warn/raise logic unchanged.
     "blimp": benchmarks.BLIMP_PARADIGMS,
 }
+# xnli/xcopa's own loaders accept num_fewshot/fewshot_seed (see their own
+# docstrings); load_blimp's signature has no such param -- BLiMP's paired
+# minimal-sentence shape has no natural "k solved examples" framing the way
+# a classification task does, so it isn't part of this convention. Gates
+# _run_single_benchmark's kwargs construction below so passing --num-fewshot
+# alongside --benchmark blimp doesn't raise a TypeError for an unexpected kwarg.
+_FEWSHOT_BENCHMARKS = {"xnli", "xcopa"}
 _ACCEPTABILITY_BENCHMARKS = {"cola"}
 _QA_BENCHMARKS = {"squad"}
 
@@ -119,19 +139,24 @@ def load_pretrained_model(checkpoint_path, device="cpu"):
 def _wandb_log_dict(results, wandb):
     """Flattens run_evaluation's {benchmark_name: results} into a single
     dict wandb.log can take -- scalar metrics per benchmark (top-level +
-    per-language for xnli/xcopa/blimp, top-level + per-pair for flores_mt,
-    mcc/threshold for cola, exact_match/f1 for squad), plus a wandb.Table of
-    raw generated/scored samples for flores_mt/squad (already capped by
-    evaluate_translation/evaluate_qa) so generated text is browsable in the
-    wandb UI, not just an aggregate number."""
+    per-language accuracy AND bootstrap ci_low/ci_high for xnli/xcopa/blimp,
+    top-level + per-pair for flores_mt, mcc/threshold for cola, exact_match/
+    f1 for squad), plus a wandb.Table of raw generated/scored samples for
+    flores_mt/squad (already capped by evaluate_translation/evaluate_qa) so
+    generated text is browsable in the wandb UI, not just an aggregate
+    number."""
     log_dict = {}
     for name, result in results.items():
         if "accuracy" in result and "per_language" in result:  # xnli/xcopa/blimp shape
             log_dict[f"{name}/accuracy"] = result["accuracy"]
             log_dict[f"{name}/n"] = result["n"]
+            log_dict[f"{name}/ci_low"] = result["ci_low"]
+            log_dict[f"{name}/ci_high"] = result["ci_high"]
             for lang, stats in result["per_language"].items():
                 log_dict[f"{name}/{lang}/accuracy"] = stats["accuracy"]
                 log_dict[f"{name}/{lang}/n"] = stats["n"]
+                log_dict[f"{name}/{lang}/ci_low"] = stats["ci_low"]
+                log_dict[f"{name}/{lang}/ci_high"] = stats["ci_high"]
         elif "bleu" in result:  # flores_mt shape
             log_dict[f"{name}/bleu"] = result["bleu"]
             log_dict[f"{name}/chrf"] = result["chrf"]
@@ -190,7 +215,11 @@ def _run_single_benchmark(
     split=None,
     max_examples=None,
     device="cpu",
-    length_normalize=False,
+    length_normalize=True,
+    pmi_calibrate=True,
+    n_bootstrap=1000,
+    num_fewshot=0,
+    fewshot_seed=0,
     max_new_tokens=128,
     temperature=1.0,
 ):
@@ -202,10 +231,21 @@ def _run_single_benchmark(
         kwargs = {"langs": _resolve_multiple_choice_langs(benchmark, langs)}
         if split is not None:
             kwargs["split"] = split
+        if benchmark in _FEWSHOT_BENCHMARKS:
+            kwargs["num_fewshot"] = num_fewshot
+            kwargs["fewshot_seed"] = fewshot_seed
         examples = loader(**kwargs)
         if max_examples is not None:
             examples = itertools.islice(examples, max_examples)
-        return evaluate_multiple_choice(model, adapter, examples, device=device, length_normalize=length_normalize)
+        return evaluate_multiple_choice(
+            model,
+            adapter,
+            examples,
+            device=device,
+            length_normalize=length_normalize,
+            pmi_calibrate=pmi_calibrate,
+            n_bootstrap=n_bootstrap,
+        )
 
     if benchmark in _TRANSLATION_BENCHMARKS:
         if not lang_pairs:
@@ -253,15 +293,24 @@ def run_evaluation(
     split=None,
     max_examples=None,
     device="cpu",
-    length_normalize=False,
+    length_normalize=True,
+    pmi_calibrate=True,
+    n_bootstrap=1000,
+    num_fewshot=0,
+    fewshot_seed=0,
     max_new_tokens=128,
     temperature=1.0,
 ):
     """benchmark: a single name (str) or a list of names. Every requested
     benchmark is scored against the same model/adapter/max_examples/etc
     (langs feeds xnli/xcopa/blimp, lang_pairs feeds flores_mt, max_new_tokens/
-    temperature feed flores_mt/squad; each benchmark ignores the flags it has
+    temperature feed flores_mt/squad, num_fewshot/fewshot_seed feed xnli/xcopa
+    only -- see _FEWSHOT_BENCHMARKS; each benchmark ignores the flags it has
     no use for, so passing all of them for a mixed list is normal).
+
+    length_normalize/pmi_calibrate/n_bootstrap: forwarded to
+    eval_harness.evaluate_multiple_choice for xnli/xcopa/blimp -- see its
+    own docstring for why the first two default to True.
 
     Returns {benchmark_name: <results dict>} always in this shape, even
     for a single benchmark, so callers never branch on single-vs-list input.
@@ -282,6 +331,10 @@ def run_evaluation(
             max_examples=max_examples,
             device=device,
             length_normalize=length_normalize,
+            pmi_calibrate=pmi_calibrate,
+            n_bootstrap=n_bootstrap,
+            num_fewshot=num_fewshot,
+            fewshot_seed=fewshot_seed,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         )
@@ -315,8 +368,33 @@ def build_arg_parser():
     parser.add_argument("--split", type=str, default=None, help="dataset split override (loader-specific default otherwise)")
     parser.add_argument("--max-examples", type=int, default=None, help="cap examples scored (None = full split)")
     parser.add_argument(
-        "--length-normalize", action="store_true",
-        help="xnli/xcopa/blimp only -- see evaluate_multiple_choice",
+        "--length-normalize", action=argparse.BooleanOptionalAction, default=True,
+        help="xnli/xcopa/blimp only -- divide each candidate's loglikelihood by its token count before "
+        "ranking (lm-evaluation-harness convention for this task shape). ON by default; "
+        "--no-length-normalize reverts to raw sum-loglikelihood. See evaluate_multiple_choice",
+    )
+    parser.add_argument(
+        "--pmi-calibrate", action=argparse.BooleanOptionalAction, default=True,
+        help="xnli/xcopa/blimp only -- subtract each candidate's own UNCONDITIONAL (empty-context) "
+        "log-likelihood before ranking (Holtzman et al. 2021 domain-conditional PMI correction). ON "
+        "by default (roughly doubles per-example cost for xcopa's per-example-unique choices; cached "
+        "per language for xnli's fixed candidate set, so near-free there); --no-pmi-calibrate disables. "
+        "See evaluate_multiple_choice",
+    )
+    parser.add_argument(
+        "--n-bootstrap", type=int, default=1000,
+        help="xnli/xcopa/blimp only -- percentile-bootstrap resamples for each accuracy's confidence "
+        "interval (see eval_harness.bootstrap_ci); lower for a faster/noisier CI on a quick smoke run",
+    )
+    parser.add_argument(
+        "--num-fewshot", type=int, default=0,
+        help="xnli/xcopa only (blimp has no natural k-shot framing -- see benchmarks.py's own FEWSHOT "
+        "docstring section) -- prepend this many in-context demonstrations before every example, drawn "
+        "from a split disjoint from whatever's being scored. 0 (default) is pure zero-shot",
+    )
+    parser.add_argument(
+        "--fewshot-seed", type=int, default=0,
+        help="seed for the (fixed, per-language) few-shot exemplar sample when --num-fewshot > 0",
     )
     parser.add_argument("--max-new-tokens", type=int, default=128, help="flores_mt/squad only")
     parser.add_argument("--temperature", type=float, default=1.0, help="flores_mt/squad only")
@@ -359,6 +437,10 @@ def main(argv=None):
         max_examples=args.max_examples,
         device=args.device,
         length_normalize=args.length_normalize,
+        pmi_calibrate=args.pmi_calibrate,
+        n_bootstrap=args.n_bootstrap,
+        num_fewshot=args.num_fewshot,
+        fewshot_seed=args.fewshot_seed,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
     )
@@ -394,6 +476,10 @@ def main(argv=None):
                 "lang_pairs": lang_pairs,
                 "max_examples": args.max_examples,
                 "length_normalize": args.length_normalize,
+                "pmi_calibrate": args.pmi_calibrate,
+                "n_bootstrap": args.n_bootstrap,
+                "num_fewshot": args.num_fewshot,
+                "fewshot_seed": args.fewshot_seed,
             },
         )
         run.log(_wandb_log_dict(results, wandb))
@@ -430,10 +516,15 @@ def run_smoke_test():
         MultipleChoiceExample(lang="en", context="The cat sat on the mat", choices=[" happily", " because"], label=0),
         MultipleChoiceExample(lang="de", context="Die Katze saß auf der Matte", choices=[" glücklich", " weil"], label=1),
     ]
+    # No explicit length_normalize/pmi_calibrate -- exercises both new
+    # defaults (True, True), not just the legacy raw-zero-shot path.
     mc_results = evaluate_multiple_choice(model, adapter, mc_examples, device="cpu")
     assert 0.0 <= mc_results["accuracy"] <= 1.0
     assert mc_results["n"] == len(mc_examples)
+    assert mc_results["ci_low"] <= mc_results["accuracy"] <= mc_results["ci_high"]
     assert set(mc_results["per_language"]) == {"en", "de"}
+    for stats in mc_results["per_language"].values():
+        assert stats["ci_low"] <= stats["accuracy"] <= stats["ci_high"]
 
     mt_examples = [
         TranslationExample(source_lang="en", target_lang="de", source_text="The cat sat.", reference_text="Die Katze saß."),
@@ -469,8 +560,15 @@ def run_smoke_test():
     # via monkeypatching, restored in a finally so it doesn't leak.
     original_benchmarks = dict(benchmarks.BENCHMARKS)
     try:
-        benchmarks.BENCHMARKS["xnli"] = lambda langs=None, split="test": iter(mc_examples)
-        benchmarks.BENCHMARKS["xcopa"] = lambda langs=None, split="test": iter(mc_examples)
+        # xnli/xcopa fakes accept (and ignore) num_fewshot/fewshot_seed --
+        # _run_single_benchmark always passes both for benchmarks in
+        # _FEWSHOT_BENCHMARKS, real value or not (0 reproduces zero-shot).
+        benchmarks.BENCHMARKS["xnli"] = (
+            lambda langs=None, split="test", num_fewshot=0, fewshot_seed=0: iter(mc_examples)
+        )
+        benchmarks.BENCHMARKS["xcopa"] = (
+            lambda langs=None, split="test", num_fewshot=0, fewshot_seed=0: iter(mc_examples)
+        )
         benchmarks.BENCHMARKS["blimp"] = lambda langs=None, split="train": iter(mc_examples)
         multi_results = run_evaluation(model, adapter, ["xnli", "xcopa", "blimp"], device="cpu")
         assert set(multi_results) == {"xnli", "xcopa", "blimp"}

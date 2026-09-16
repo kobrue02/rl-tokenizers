@@ -15,7 +15,7 @@ Three usages:
   - Interactive, but pointed at a specific checkpoint (skips the browse step):
         python3 -m systems.pretraining.cli_generate --checkpoint checkpoints/pretrain/final.pt
   - Batch/scripted, exactly as before (full manual control, no prompts) --
-    as part of a SLURM pipeline (see jobs/generate_samples.sh), chained via
+    as part of a SLURM pipeline (see jobs/generate/samples.sh), chained via
     --dependency=afterok after a training job. --prompt can be repeated for
     multiple prompts in one invocation. Passing --system/--tokenizer-checkpoint/
     --prompt is what selects this mode over the interactive ones above.

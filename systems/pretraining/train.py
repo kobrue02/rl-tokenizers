@@ -229,7 +229,7 @@ def _existing_checkpoints(output_dir):
     starting it empty every process restart: rotation that resets on every
     resume can only ever delete checkpoints saved within ITS OWN lifetime,
     letting every PRIOR segment's checkpoints accumulate on disk forever
-    across a long multi-resubmit run (jobs/train_pretraining.sh's own
+    across a long multi-resubmit run (jobs/pretrain/pretraining.sh's own
     auto-resubmit convention means a real "large"-preset run spans roughly
     10 such segments) -- the exact same failure mode that already caused a
     real disk-quota crash once (see keep_last_n_checkpoints's own comment),

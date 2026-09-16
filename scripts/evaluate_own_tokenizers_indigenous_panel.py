@@ -2,7 +2,7 @@
 project's own trained tokenizers in ONE process, driven by a YAML config
 listing each system's checkpoint -- evaluate.py's own dispatcher only
 handles one system per invocation (see its module docstring), and
-jobs/evaluate.sh mirrors that one-system-per-sbatch shape; this exists so a
+jobs/eval/evaluate.sh mirrors that one-system-per-sbatch shape; this exists so a
 single SLURM job can cover all 5 rather than five separate submissions,
 since each is a cheap CPU-only eval anyway. Calling evaluate.py's main()
 repeatedly in one process is safe: run_eval_cli's own wandb.init()/
@@ -18,7 +18,7 @@ Writes one results/<system>_indigenous_panel.json per system (the same
 writes) plus one combined file via scripts.combine_eval_results -- safe
 here since all 5 outputs share that identical shape with disjoint
 top-level keys (unlike combining indigenous_panel with a bouquet-shaped
-file, see jobs/combine_and_generate_figures.sh's own warning about that).
+file, see jobs/combine/combine_and_generate_figures.sh's own warning about that).
 
 MAGNET CAVEAT (see run_eval_cli's own docstring): magnet resolves each
 language to a script via eval_lang_to_script before looking up a boundary
@@ -42,7 +42,7 @@ stage1_result.json.
 
 Usage:
     python -m scripts.evaluate_own_tokenizers_indigenous_panel \\
-        -c configs/eval_own_tokenizers_indigenous_panel.yml
+        -c configs/eval/own_tokenizers_indigenous_panel.yml
 """
 
 import argparse

@@ -13,6 +13,7 @@ dependencies = [
     "huggingface-hub>=1.27.0",
     "ijson>=3.5.1",
     "langcodes[data]>=3.5.1",
+    "lm-eval>=0.4.13",
     "morfessor>=2.0.6",
     "numpy>=2.5.1",
     "pyarrow>=25.0.0",

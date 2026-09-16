@@ -4,7 +4,17 @@ TokenizerAdapter.
 
 Four example shapes, four evaluators:
   - MultipleChoiceExample (XNLI, XCOPA, BLiMP) -> evaluate_multiple_choice,
-    scored via loglikelihood (a forward pass, no sampling -- exact and cheap).
+    scored via loglikelihood (a forward pass, no sampling -- exact and
+    cheap), by default length-normalized, PMI-calibrated against each
+    candidate's own unconditional likelihood, and reported with a
+    bootstrap accuracy confidence interval -- see that function's own
+    docstring for why each of these three is on by default (a small,
+    non-instruction-tuned base LM's raw zero-shot accuracy on these tasks
+    is otherwise notoriously close to chance and highly scoring-method-
+    sensitive). Few-shot in-context prompting (the other standard lever at
+    this model scale) is built into benchmarks.load_xnli/load_xcopa's own
+    `num_fewshot`, not here -- this function scores whatever context each
+    MultipleChoiceExample already carries, few-shot prefix or not.
   - TranslationExample (FLORES MT) -> evaluate_translation, scored via
     TransformerLM.generate (sampling) + sacrebleu BLEU/chrF.
   - CoLAExample (CoLA) -> evaluate_cola, scored via loglikelihood +
@@ -21,6 +31,7 @@ once an actual pretraining run exists.
 """
 
 import collections
+import random
 import re
 import string
 
@@ -42,9 +53,19 @@ def _common_prefix_len(a, b):
     return n
 
 
-def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"):
-    """Sum log P(continuation token | context, earlier continuation tokens)
-    under `model`, in one forward pass. Returns (sum_logprob, num_tokens).
+def _loglikelihood_full(model, adapter, context, continuation, lang=None, device="cpu"):
+    """Does the actual work for loglikelihood() below, returning one extra
+    piece its own callers (evaluate_multiple_choice/evaluate_cola) never
+    needed: is_greedy, whether EVERY continuation token equals that
+    position's own argmax logit (i.e. exactly what greedy decoding would
+    have produced) -- the systems.pretraining.lm_eval_adapter.ThesisLM wrapper
+    needs this to satisfy lm_eval.api.model.LM.loglikelihood's own
+    (logprob, is_greedy) return contract, matching HFLM's own
+    self-consistency-check convention. Split out into its own function
+    (rather than adding an opt-in flag to the public loglikelihood()) so
+    the extra argmax computation isn't paid by callers that never need
+    it, and so loglikelihood()'s own long-standing 2-tuple return type
+    stays completely unchanged for its existing callers.
 
     context/continuation are encoded jointly (encode(context+continuation)),
     not as two separately-encoded id lists, since a token can straddle the
@@ -57,6 +78,8 @@ def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"
     can get folded into the scored region. Still a coherent likelihood,
     just not guaranteed to isolate exactly the continuation's own bytes --
     accepted rather than building a byte-span re-alignment.
+
+    Returns (sum_logprob, num_tokens, is_greedy).
     """
     context_ids, _ = _encode_tensor(adapter, context, lang, device)
     full_ids, _ = _encode_tensor(adapter, context + continuation, lang, device)
@@ -97,46 +120,149 @@ def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"
     ids_tensor = torch.tensor([full_ids], dtype=torch.long, device=device)
     with torch.no_grad():
         logits, _ = model(ids_tensor)
-    logprobs = F.log_softmax(logits[0, split - 1 : -1].float(), dim=-1)
+    scored_logits = logits[0, split - 1 : -1].float()
+    logprobs = F.log_softmax(scored_logits, dim=-1)
     target = ids_tensor[0, split:]
     token_logprobs = logprobs.gather(1, target.unsqueeze(1)).squeeze(1)
-    return token_logprobs.sum().item(), target.numel()
+    is_greedy = bool((scored_logits.argmax(dim=-1) == target).all().item())
+    return token_logprobs.sum().item(), target.numel(), is_greedy
 
 
-def evaluate_multiple_choice(model, adapter, examples, device="cpu", length_normalize=False):
+def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"):
+    """Sum log P(continuation token | context, earlier continuation tokens)
+    under `model`, in one forward pass. Returns (sum_logprob, num_tokens).
+    See _loglikelihood_full's own docstring for the full encoding/splitting
+    rationale -- this just discards the is_greedy value it also computes,
+    keeping this function's return shape exactly as every existing caller
+    (evaluate_multiple_choice, evaluate_cola) already expects."""
+    total_lp, n_tok, _ = _loglikelihood_full(model, adapter, context, continuation, lang, device)
+    return total_lp, n_tok
+
+
+def bootstrap_ci(outcomes, n_resamples=1000, ci=0.95, seed=0):
+    """Percentile bootstrap confidence interval for the MEAN of `outcomes`
+    (e.g. a 0/1 correctness list -> accuracy's own CI). Resamples the RAW
+    per-example values with replacement n_resamples times -- a genuine
+    bootstrap over the underlying trials, not a closed-form approximation
+    over pre-aggregated counts -- so the same helper generalizes to any
+    per-example statistic later (e.g. a paired accuracy DIFFERENCE between
+    two systems scored on the same items, which has no simple closed form),
+    not just a binomial proportion.
+
+    Exists because a raw percentage-point gap between two systems whose
+    accuracy both sit near chance isn't meaningful on its own at typical
+    per-language eval sizes here (267-364 examples for XNLI/XCOPA) --
+    reporting a CI alongside the point estimate is standard practice for
+    exactly this reason.
+
+    Returns (point_estimate, ci_low, ci_high). (0.0, 0.0, 0.0) for empty
+    input rather than raising -- matches this module's existing "n==0 ->
+    accuracy 0.0" convention elsewhere.
+
+    rng.choices(outcomes, k=n) (a single C-level call) rather than a
+    Python-level per-element randrange loop -- resampling 1000x at typical
+    aggregate eval sizes (thousands of examples) would otherwise dominate
+    runtime; this keeps the added cost negligible next to the per-example
+    forward passes evaluate_multiple_choice itself already pays.
+    """
+    n = len(outcomes)
+    if n == 0:
+        return 0.0, 0.0, 0.0
+    point = sum(outcomes) / n
+    rng = random.Random(seed)
+    resampled_means = [sum(rng.choices(outcomes, k=n)) / n for _ in range(n_resamples)]
+    resampled_means.sort()
+    alpha = (1 - ci) / 2
+    low_idx = int(alpha * n_resamples)
+    high_idx = min(n_resamples - 1, int((1 - alpha) * n_resamples))
+    return point, resampled_means[low_idx], resampled_means[high_idx]
+
+
+def evaluate_multiple_choice(
+    model,
+    adapter,
+    examples,
+    device="cpu",
+    length_normalize=True,
+    pmi_calibrate=True,
+    n_bootstrap=1000,
+    bootstrap_seed=0,
+):
     """examples: iterable of benchmarks.MultipleChoiceExample. Scores every
     candidate in ex.choices via loglikelihood, predicts argmax, compares to
-    ex.label. length_normalize divides each candidate's score by its token
-    count -- off by default (raw sum-loglikelihood, the standard "loglikelihood"
-    request type); on trades exact ranking for robustness to candidates of
-    very different lengths.
+    ex.label.
 
-    Returns {"accuracy": float, "n": int, "per_language": {lang: {"accuracy":
-    float, "n": int}}}.
+    length_normalize: divides each candidate's raw sum-loglikelihood by its
+    token count before ranking -- ON by default, matching EleutherAI's
+    lm-evaluation-harness convention for exactly this task shape: XCOPA's
+    two candidate completions routinely differ in length, and raw
+    sum-loglikelihood biases toward the shorter one regardless of actual
+    fit. Pass False to revert to the earlier raw-sum behavior.
+
+    pmi_calibrate: ALSO scores each candidate's UNCONDITIONAL (empty-
+    context) log-likelihood and subtracts it from the conditional score
+    before ranking -- log P(choice|context) - log P(choice), the
+    "domain-conditional PMI" correction (Holtzman et al. 2021, "Surface
+    Form Competition") for candidates with very different base
+    frequencies, a known failure mode of raw conditional scoring. ON by
+    default. Skipped per-example whenever ex.context == "" (BLiMP's own
+    natural shape): conditional and unconditional would be the IDENTICAL
+    call there, forcing every candidate's calibrated score to exactly 0
+    and silently defaulting the prediction to index 0 regardless of actual
+    fit -- corrupting BLiMP's own accuracy rather than calibrating it.
+    Unconditional scores are cached per (lang, choice) WITHIN this one
+    call -- XNLI's fixed 3-candidate-per-language template collapses what
+    would otherwise be one extra forward pass per EXAMPLE into one extra
+    forward pass per LANGUAGE.
+
+    n_bootstrap/bootstrap_seed: percentile-bootstrap resamples for the
+    accuracy confidence interval (see bootstrap_ci), computed over both
+    the overall and each per-language accuracy.
+
+    Returns {"accuracy": float, "n": int, "ci_low": float, "ci_high": float,
+    "per_language": {lang: {"accuracy": float, "n": int, "ci_low": float,
+    "ci_high": float}}}.
     """
     model.eval()
-    correct = 0
-    total = 0
-    per_lang = collections.defaultdict(lambda: [0, 0])  # lang -> [correct, n]
+    outcomes = []  # overall 0/1 correctness, for the aggregate bootstrap CI
+    per_lang_outcomes = collections.defaultdict(list)
+    uncond_cache = {}
+
+    def _unconditional(lang, choice):
+        key = (lang, choice)
+        if key not in uncond_cache:
+            uncond_cache[key] = loglikelihood(model, adapter, "", choice, lang, device)
+        return uncond_cache[key]
 
     for ex in examples:
         scores = []
         for choice in ex.choices:
-            total_lp, n_tok = loglikelihood(model, adapter, ex.context, choice, ex.lang, device)
-            scores.append(total_lp / n_tok if length_normalize and n_tok else total_lp)
+            cond_lp, cond_tok = loglikelihood(model, adapter, ex.context, choice, ex.lang, device)
+            score = cond_lp / cond_tok if length_normalize and cond_tok else cond_lp
+            if pmi_calibrate and ex.context:
+                uncond_lp, uncond_tok = _unconditional(ex.lang, choice)
+                uncond_score = uncond_lp / uncond_tok if length_normalize and uncond_tok else uncond_lp
+                score -= uncond_score
+            scores.append(score)
         pred = max(range(len(scores)), key=lambda i: scores[i])
         is_correct = int(pred == ex.label)
-        correct += is_correct
-        total += 1
-        per_lang[ex.lang][0] += is_correct
-        per_lang[ex.lang][1] += 1
+        outcomes.append(is_correct)
+        per_lang_outcomes[ex.lang].append(is_correct)
+
+    accuracy, ci_low, ci_high = bootstrap_ci(outcomes, n_resamples=n_bootstrap, seed=bootstrap_seed)
+    per_language = {}
+    for lang, lang_outcomes in per_lang_outcomes.items():
+        lang_acc, lang_low, lang_high = bootstrap_ci(lang_outcomes, n_resamples=n_bootstrap, seed=bootstrap_seed)
+        per_language[lang] = {
+            "accuracy": lang_acc, "n": len(lang_outcomes), "ci_low": lang_low, "ci_high": lang_high,
+        }
 
     return {
-        "accuracy": correct / total if total else 0.0,
-        "n": total,
-        "per_language": {
-            lang: {"accuracy": c / n if n else 0.0, "n": n} for lang, (c, n) in per_lang.items()
-        },
+        "accuracy": accuracy,
+        "n": len(outcomes),
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "per_language": per_language,
     }
 
 

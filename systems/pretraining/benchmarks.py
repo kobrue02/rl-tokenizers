@@ -40,15 +40,27 @@ Schemas confirmed against each source directly:
     reference answer strings per question; official scoring (see
     eval_harness.evaluate_qa) takes the best match over all of them.
 
-PROMPTING: XNLI/XCOPA's natural zero-shot templates use English scaffolding
-words ("because", "Question:", "True, False, or Neither?"). Properly
-localizing that per language would need verified translations this project
-doesn't have. PROMPT_OVERRIDES lets a caller supply a per-language
-template; languages without one fall back to the English template applied
-to that language's own text -- linguistically imperfect but an honest
-default, not a claim of faithful multilingual prompting. BLiMP/CoLA/SQuAD
-are English-only benchmarks (general LM-quality checks, not part of this
-project's own cross-lingual fairness comparison), so this doesn't apply to them.
+PROMPTING: XNLI/XCOPA's templates match EleutherAI's lm-evaluation-harness
+own canonical form for each task (the field's de facto standard, chosen so
+results here are comparable to published baselines and avoid the
+well-documented 5-15 point swings a one-off custom template can cause at
+small model scale) -- XNLI's "True, False, or Neither?" and XCOPA's
+"because"/"so" causal-connective form. Both use English scaffolding words;
+properly localizing that per language would need verified translations
+this project doesn't have. PROMPT_OVERRIDES lets a caller supply a
+per-language template; languages without one fall back to the English
+template applied to that language's own text -- linguistically imperfect
+but an honest default, not a claim of faithful multilingual prompting.
+BLiMP/CoLA/SQuAD are English-only benchmarks (general LM-quality checks,
+not part of this project's own cross-lingual fairness comparison), so this
+doesn't apply to them.
+
+FEW-SHOT: load_xnli/load_xcopa's own `num_fewshot` prepends k in-context
+demonstrations before every example (see their own docstrings) -- the
+other standard lever (alongside length-normalization/PMI-calibration in
+eval_harness.evaluate_multiple_choice) for making a non-instruction-tuned
+base LM's accuracy on these tasks informative rather than near-chance
+noise at this model scale.
 
 CONTAMINATION: checked via systems.pretraining.cli_contamination -- an n-gram
 overlap scan between any common.data.corpora source and these benchmarks'
@@ -60,6 +72,7 @@ an unrun or --max-corpus-docs-capped scan tells you nothing either way.
 """
 
 import dataclasses
+import itertools
 
 import datasets as hf_datasets
 
@@ -158,12 +171,21 @@ PROMPT_OVERRIDES = {}
 
 
 def _xnli_template(lang, premise, hypothesis):
+    """The lm-evaluation-harness canonical XNLI template (EleutherAI) --
+    "True, False, or Neither?" with the SAME [entailment, neutral,
+    contradiction] index alignment facebook/xnli's own ClassLabel declares
+    (confirmed directly against the dataset's own features, not assumed).
+    CONFIRMED BUG FIX: this previously returned choices in the order
+    [" True", " False", " Neither"], which maps neutral (index 1) to
+    "False" and contradiction (index 2) to "Neither" -- backwards for both.
+    The correct field-standard mapping is entailment->True, neutral->
+    Neither, contradiction->False."""
     override = PROMPT_OVERRIDES.get(lang, {}).get("xnli")
     if override:
         return override(premise, hypothesis)
     return (
         f"{premise}\nQuestion: {hypothesis} True, False, or Neither?\nAnswer:",
-        [" True", " False", " Neither"],  # index-aligned with XNLI_LABEL_NAMES
+        [" True", " Neither", " False"],  # index-aligned with XNLI_LABEL_NAMES
     )
 
 
@@ -200,32 +222,114 @@ def _round_robin(iterables):
                 active.remove(it)
 
 
-def load_xnli(langs=None, split="test"):
+_XNLI_FEWSHOT_BUFFER = 10000  # safely larger than any per-language XNLI
+# validation/train split here, so IterableDataset.shuffle's buffer covers
+# the whole split -- an effectively exact shuffle, not an approximate
+# buffer-limited one, at this project's actual split sizes.
+
+
+def _fewshot_prefix(pool, template_fn, num_fewshot, fewshot_seed):
+    """pool: a streaming HF dataset (already selected to a specific
+    language/config, on a split DISJOINT from whatever's being scored --
+    see load_xnli/load_xcopa's own callers for why). template_fn(row) ->
+    (context, choices) using the SAME zero-shot template the real scored
+    examples use. Draws num_fewshot rows (via a seeded shuffle over a
+    buffer sized to cover the whole pool -- see _XNLI_FEWSHOT_BUFFER),
+    formats each as "{context}{choices[row['label']]}" -- a demonstration
+    COMPLETED with its own gold answer, the standard k-shot in-context
+    format (GPT-3/XGLM/BLOOM-eval convention: condition on k solved
+    examples, then score the real one, no additional training needed).
+    Returns "" if num_fewshot is 0 -- exactly reproduces prior zero-shot
+    behavior in that case."""
+    if not num_fewshot:
+        return ""
+    shuffled = pool.shuffle(seed=fewshot_seed, buffer_size=_XNLI_FEWSHOT_BUFFER)
+    demos = []
+    for row in itertools.islice(shuffled, num_fewshot):
+        context, choices = template_fn(row)
+        demos.append(f"{context}{choices[row['label']]}")
+    return "\n\n".join(demos) + "\n\n" if demos else ""
+
+
+def load_xnli(langs=None, split="test", num_fewshot=0, fewshot_seed=0):
     """langs: list of XNLI_LANGS codes, defaults to all 15. Yields
     MultipleChoiceExample, per-language configs loaded one at a time,
-    interleaved round-robin across languages (see _round_robin)."""
+    interleaved round-robin across languages (see _round_robin).
+
+    num_fewshot: prepends this many k-shot demonstrations (see
+    _fewshot_prefix) before every example's own context -- the standard
+    in-context-few-shot convention essentially every published
+    multilingual base-LM eval (XGLM, BLOOM, mGPT) reports at this model
+    scale, since a non-instruction-tuned base LM's TRUE zero-shot accuracy
+    on a task like this is notoriously close to chance and highly
+    scoring-method-sensitive. ONE FIXED set of exemplars is built PER
+    LANGUAGE (not resampled per test item -- the simpler, original
+    GPT-3-paper-style convention), drawn from XNLI's own "validation"
+    split via fewshot_seed -- NEVER the split actually being scored
+    (defaults to "test"), so a test item can never leak into its own
+    few-shot context. If `split` is itself "validation" (unusual), falls
+    back to "train" instead. 0 (default) reproduces the exact prior
+    zero-shot behavior byte-for-byte."""
+    fewshot_split = "train" if split == "validation" else "validation"
 
     def _one_lang(lang):
+        # num_fewshot's own truthiness check gates the load_dataset call
+        # ITSELF, not just what _fewshot_prefix does with it -- opening a
+        # second streaming dataset (the fewshot split) whenever num_fewshot
+        # is 0 (the default, zero-shot case) would be pure overhead for no
+        # benefit, and would change zero-shot's own observable behavior
+        # (an extra HF Hub connection/request) even though its output is
+        # unaffected either way.
+        prefix = (
+            _fewshot_prefix(
+                hf_datasets.load_dataset("facebook/xnli", name=lang, split=fewshot_split, streaming=True),
+                lambda row: _xnli_template(lang, row["premise"], row["hypothesis"]),
+                num_fewshot,
+                fewshot_seed,
+            )
+            if num_fewshot
+            else ""
+        )
         ds = hf_datasets.load_dataset("facebook/xnli", name=lang, split=split, streaming=True)
         for row in ds:
             context, choices = _xnli_template(lang, row["premise"], row["hypothesis"])
-            yield MultipleChoiceExample(lang=lang, context=context, choices=choices, label=row["label"])
+            yield MultipleChoiceExample(lang=lang, context=prefix + context, choices=choices, label=row["label"])
 
     yield from _round_robin(_one_lang(lang) for lang in (langs or XNLI_LANGS))
 
 
-def load_xcopa(langs=None, split="test"):
+def load_xcopa(langs=None, split="test", num_fewshot=0, fewshot_seed=0):
     """langs: list of XCOPA_LANGS codes, defaults to all 11. Yields
     MultipleChoiceExample, interleaved round-robin across languages (see
-    _round_robin)."""
+    _round_robin).
+
+    num_fewshot/fewshot_seed: see load_xnli's own docstring for the full
+    rationale -- identical convention here. XCOPA has only "validation"
+    and "test" splits (no "train"), so exemplars are drawn from
+    "validation" when scoring the default "test" split; if `split` is
+    itself "validation", falls back to "test" instead (an unusual case in
+    practice -- every real call here scores "test")."""
+    fewshot_split = "test" if split == "validation" else "validation"
 
     def _one_lang(lang):
+        # See load_xnli's own identical guard for why this is gated here,
+        # not just inside _fewshot_prefix.
+        prefix = (
+            _fewshot_prefix(
+                hf_datasets.load_dataset("cambridgeltl/xcopa", name=lang, split=fewshot_split, streaming=True),
+                lambda row: _xcopa_template(lang, row["premise"], row["choice1"], row["choice2"], row["question"]),
+                num_fewshot,
+                fewshot_seed,
+            )
+            if num_fewshot
+            else ""
+        )
         ds = hf_datasets.load_dataset("cambridgeltl/xcopa", name=lang, split=split, streaming=True)
         for row in ds:
             context, choices = _xcopa_template(
                 lang, row["premise"], row["choice1"], row["choice2"], row["question"]
             )
-            yield MultipleChoiceExample(lang=lang, context=context, choices=choices, label=row["label"])
+            yield MultipleChoiceExample(lang=lang, context=prefix + context, choices=choices, label=row["label"])
 
     yield from _round_robin(_one_lang(lang) for lang in (langs or XCOPA_LANGS))
 
