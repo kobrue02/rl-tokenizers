@@ -1,0 +1,68 @@
+# systems/pretraining/data_prep.py -- sbatch jobs/prep/pretraining_data.sh -c configs/prep/bpe_culturax.yml
+# CPU-only job (jobs/prep/pretraining_data.sh, NOT the _gpu variant -- bpe's
+# induce_spans is plain CPU BPE, no torch forward pass, same rationale as
+# configs/prep/bpe_large.yml).
+#
+# Replaces configs/prep/bpe_large.yml's glot500 source: Glot500 documents
+# were confirmed live to be single sentences/short fragments (median
+# 60-110 chars across eng/deu/spa/swh), not real documents -- the model
+# never saw genuinely long, coherent context during that run. culturax
+# (uonlp/CulturaX, GATED -- request access at
+# https://huggingface.co/datasets/uonlp/CulturaX before this will stream)
+# is document-level web text instead.
+dataset: culturax
+langs: all
+# "all" resolves to common.data.corpora.CULTURAX_LANGS -- the 106-language
+# BOUQuET (facebook/bouquet, 259 langs) x CulturaX (167 langs) intersection,
+# so this LM's training languages exactly match the language set
+# common.eval.cross_tokenizer's own BOUQuET-based tokenizer eval already
+# covers (minus BOUQuET's ~150 languages too low-resource for ANY
+# web-crawled corpus to have real document-level text for). All 21
+# XNLI+XCOPA eval languages are included natively.
+system: bpe
+checkpoint: checkpoints/bpe_50k.json
+output_dir: pretrain_data/culturax_bpe_large
+# Chinchilla-optimal for the "large" preset's 679,552,512 NON-EMBEDDING
+# params (vocab-independent, so this number is the same across every
+# tokenizer system, keeping the comparison fair despite different vocab
+# sizes) at the standard ~20 tokens/param ratio: 679,552,512 * 20 =
+# 13,591,050,240 total tokens, / 106 languages = 128,217,455 tokens/language
+# (floor), so max_tokens below is that per-language figure times 106
+# exactly -- see tokens_per_language's own comment for why THAT, not this
+# global cap alone, is what actually equalizes each language's realized
+# share (round-robin drops an exhausted lower-resource language and keeps
+# filling the global budget from whichever higher-resource languages
+# remain -- exactly what left the original glot500 "large" run averaging
+# only ~73M tokens/language, heavily skewed toward high-resource languages).
+max_tokens: 13591050230
+tokens_per_language: 128217455
+# Confirmed live (3 rounds of debugging a real prep job): (1) holding all
+# 106 CulturaX streams open at once OOM'd even at ~125GB, fixed by
+# batching; (2) the dedup near-dup LSH index OOM'd separately on CulturaX's
+# long documents, fixed by disabling it below; (3) EVEN with both of those
+# fixed, a genuine memory leak in the underlying datasets/parquet streaming
+# implementation itself -- confirmed directly (see data_prep.py's own
+# lang_batch_size docstring): ~3.5KB retained per document pulled, NEVER
+# freed, for the lifetime of one stream. At ~120-135K documents needed per
+# language to reach its own 128M-token quota, lang_batch_size=15
+# concurrently open streams accumulates ~15 * 120K * 3.5KB =~ 6.3GB of pure
+# leak before that batch's languages finish -- confirmed to OOM in
+# practice. 5 concurrent streams instead (~22 sequential groups) keeps the
+# same leak at ~2.1GB, a real safety margin -- starting a new batch opens
+# entirely fresh stream objects, resetting the leak to ~0 each time.
+lang_batch_size: 5
+# Confirmed live: even with lang_batch_size, prep still OOM'd after only
+# 5.53M tokens (a tiny fraction of even one batch's own target) -- pointing
+# at common/data/dedup.py's own documented limitation, not the round-robin
+# concurrency lang_batch_size already fixed: "the LSH index holds one
+# MinHash sketch per document ever indexed... a corpus of long documents
+# would need [a disk/database-backed index]" (CulturaX's median ~2050-char
+# documents vs. Glot500's ~60-110-char single sentences the dedup module
+# was actually validated against). Disabled here rather than built out an
+# external index: CulturaX is already deduplicated at construction (it's
+# built by deduplicating mC4+OSCAR together -- that's what distinguishes it
+# from raw mC4), so a local near-dup pass is far less load-bearing for this
+# source than it was for Glot500's messier construction.
+dedup: false
+use_wandb: true
+run_name: bpe_culturax_large_data_prep

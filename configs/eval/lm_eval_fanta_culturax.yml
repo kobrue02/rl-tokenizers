@@ -1,0 +1,17 @@
+# systems/pretraining/cli_lm_eval.py -- sbatch jobs/eval/lm_eval.sh -c configs/eval/lm_eval_fanta_culturax.yml
+# See configs/eval/lm_eval_bpe_culturax.yml's own comment for the full
+# rationale -- identical here, just fanta's own checkpoint/tokenizer.
+checkpoint: checkpoints/pretrain_fanta_culturax_large/final.pt
+system: fanta
+# same tokenizer as every other fanta run in this project -- see
+# configs/prep/fanta_50k.yml's own comment for why these are the real
+# checkpoint/vocab paths (job 6284655).
+tokenizer_checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
+tasks: "xnli,xcopa,blimp,xstorycloze,lambada_multilingual,global_piqa_nonparallel_cloze"
+num_fewshot: 8
+bootstrap_iters: 1000
+label: fanta
+output: results/lm_eval_fanta_culturax.json
+use_wandb: true
+run_name: fanta_culturax_lm_eval

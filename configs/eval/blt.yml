@@ -1,0 +1,19 @@
+# systems/tokenization/blt/evaluate.py -- sbatch jobs/eval/blt.sh -c configs/eval/blt.yml
+#
+# facebook/blt-1b's entropy model, run for real (see systems/tokenization/blt/
+# model.py's module docstring for the clean-room reimplementation, verified
+# via a zero-missing/zero-unexpected-keys state_dict load against the real
+# checkpoint, and segment.py for the exact entropy-threshold patching rule
+# traced from bytelatent/data/patcher.py). NOT tokenizer-only like
+# hf_frontier -- this is a real ~100M-param transformer forward pass per
+# sentence, measured at ~54s/BOUQuET-group (~16 hours for the full
+# bouquet_test split) on this project's own dev machine -- see
+# jobs/eval/blt.sh's own comment before running the full set.
+#
+# Requires HF_TOKEN with GATED ACCESS APPROVED for facebook/blt-1b
+# (huggingface.co/facebook/blt-1b) -- a personal license acceptance, done
+# once via the web UI, not scriptable.
+eval_data_source: bouquet_test
+output: results/blt_comparison.json
+use_wandb: true
+run_name: blt_v1

@@ -28,13 +28,13 @@ Six benchmarks, all zero-shot/likelihood-scored against
 | `flores_mt` | machine translation (BLEU/chrF) | — | yes |
 
 ```bash
-sbatch jobs/evaluate_pretrained.sh --checkpoint checkpoints/pretrain/final.pt \
+sbatch jobs/eval/pretrained.sh --checkpoint checkpoints/pretrain/final.pt \
     --system bpe --tokenizer-checkpoint checkpoints/bpe_50k.json \
     --benchmark xnli --langs en,de,fr,ar,zh --max-examples 1000 \
     --output results/xnli_bpe.json
 
 # --benchmark takes a comma-separated list -- one combined results file, one job
-sbatch jobs/evaluate_pretrained.sh --checkpoint checkpoints/pretrain/final.pt \
+sbatch jobs/eval/pretrained.sh --checkpoint checkpoints/pretrain/final.pt \
     --system bpe --tokenizer-checkpoint checkpoints/bpe_50k.json \
     --benchmark xnli,xcopa,flores_mt --langs en,de,fr --lang-pairs eng:spa,eng:arz \
     --max-examples 500 --output results/all_bpe.json --use-wandb --run-name eval_bpe_50k
@@ -93,12 +93,12 @@ python3 -m systems.pretraining.cli_contamination \
 ```
 
 - No SLURM job wraps this by convention — it's a text-only, no-GPU,
-  on-demand scan a user runs and inspects (though `jobs/check_contamination.sh`
+  on-demand scan a user runs and inspects (though `jobs/eval/check_contamination.sh`
   exists for a long/unattended scan; see its own comments for why it has
   **no resume**: a killed run restarts the corpus scan from document 0, so
   size `--max-corpus-docs`/`--time` together so one run actually finishes).
 - `--corpus-dataset glot500` needs the same local cache
-  `prep_pretraining_data.sh` does (`prepare_glot500.sh` run first) — but
+  `jobs/prep/pretraining_data.sh` does (`jobs/prep/glot500.sh` run first) — but
   the benchmark side (xnli/xcopa/flores_mt/blimp/cola/squad) still loads
   live from the HF Hub regardless, so `HF_TOKEN` is still needed even for
   an otherwise fully-local corpus scan.

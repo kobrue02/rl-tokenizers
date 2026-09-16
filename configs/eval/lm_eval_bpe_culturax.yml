@@ -1,0 +1,29 @@
+# systems/pretraining/cli_lm_eval.py -- sbatch jobs/eval/lm_eval.sh -c configs/eval/lm_eval_bpe_culturax.yml
+# EleutherAI/lm-evaluation-harness eval for the bpe CulturaX "large" run --
+# see configs/pretrain/bpe_culturax.yml for the training run this points
+# at (checkpoint below won't exist until that run reaches final.pt).
+checkpoint: checkpoints/pretrain_bpe_culturax_large/final.pt
+system: bpe
+tokenizer_checkpoint: checkpoints/bpe_50k.json
+# The full set of tasks confirmed usable here -- see
+# systems/pretraining/lm_eval_adapter.py's own module docstring for what
+# each one is and why. Bare group names ("xnli", not "xnli_sw") expand to
+# every one of their own per-language/per-paradigm subtasks automatically.
+tasks: "xnli,xcopa,blimp,xstorycloze,lambada_multilingual,global_piqa_nonparallel_cloze"
+# 8-shot -- see this project's own "make downstream evals more meaningful"
+# rationale (eval_harness.evaluate_multiple_choice's own docstring):
+# zero-shot accuracy for a non-instruction-tuned base LM this size is
+# notoriously close to chance; few-shot is where real signal shows up,
+# matching XGLM/BLOOM/mGPT's own published eval convention.
+num_fewshot: 8
+# UNBATCHED (see lm_eval_adapter.py) -- global_piqa alone spans ~130+
+# configs. Start with a small --limit override (e.g. `--limit 200` on the
+# sbatch command line, which wins over this file's own unset default -- see
+# jobs/eval/lm_eval.sh's own comment) to sanity-check timing before a
+# full uncapped run; leaving `limit` unset here means "score every example"
+# once you're ready for the real run.
+bootstrap_iters: 1000
+label: bpe
+output: results/lm_eval_bpe_culturax.json
+use_wandb: true
+run_name: bpe_culturax_lm_eval

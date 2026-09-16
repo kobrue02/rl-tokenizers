@@ -15,8 +15,8 @@ tokenizer-*intrinsic* metrics (fertility/compression/parity from
   "system", "tokenizer_checkpoint", "results": {<benchmark>: ...}}` instead
   of a bare `{benchmark: result}` dict, so a result file records which
   tokenizer it belongs to.
-- `configs/eval_bpe_large.yml`, `eval_fanta_large.yml`, `eval_bpe_50k.yml`,
-  `eval_fanta_50k.yml` — added explicit `label:` (`bpe`/`fanta`/`bpe_50k`/
+- `configs/eval/bpe_large.yml`, `fanta_large.yml`, `bpe_50k.yml`,
+  `fanta_50k.yml` — added explicit `label:` (`bpe`/`fanta`/`bpe_50k`/
   `fanta_50k`) so the large and 50k runs don't collide if ever compared
   together.
 - `systems/pretraining/EVALS.md` — documents the same pipeline from the

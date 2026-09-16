@@ -307,7 +307,7 @@ def prep_dataset(
     once a lower-resource language's stream is exhausted, round-robin
     silently drops it and keeps filling the global budget from whichever
     higher-resource languages remain, same imbalance
-    model_configs.py/pretrain_bpe_large.yml's own "30B tokens / 411
+    model_configs.py/configs/pretrain/bpe_large.yml's own "30B tokens / 411
     languages" comment describes. Checked with the same POOL-granularity
     imprecision as max_tokens/max_docs (a document already sitting in
     `pending`, not yet tokenized via process_pending, isn't reflected in

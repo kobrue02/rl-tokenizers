@@ -26,19 +26,19 @@ pipeline that shares this same tokenizer/data-prep stage.
 ## 1. Data prep: corpus → packed token shards
 
 ```bash
-sbatch jobs/prep_pretraining_data.sh --dataset glot500 --langs all \
+sbatch jobs/prep/pretraining_data.sh --dataset glot500 --langs all \
     --dataset-config "$WORK_ROOT/data/glot500" \
     --system bpe --checkpoint checkpoints/bpe_50k.json \
     --output-dir pretrain_data/glot500_bpe --max-tokens 5000000000
 ```
 
 - **`--dataset glot500`/`bible_nlp`** need a one-time local disk cache
-  first (`sbatch jobs/prepare_glot500.sh` / `prepare_bible_nlp.sh`) — no
+  first (`sbatch jobs/prep/glot500.sh` / `jobs/prep/bible_nlp.sh`) — no
   live-streaming fallback, since re-streaming a ~300GB/~411-config corpus
   on every resume was a real measured bottleneck.
-- **CPU vs GPU job**: `prep_pretraining_data.sh` (CPU) is fine for
+- **CPU vs GPU job**: `jobs/prep/pretraining_data.sh` (CPU) is fine for
   bpe/superbpe. The five neural/span-family systems (`fanta`, `magnet`,
-  `manta`, `flexitokens`, `fairtok`) need `prep_pretraining_data_gpu.sh`
+  `manta`, `flexitokens`, `fairtok`) need `jobs/prep/pretraining_data_gpu.sh`
   instead — their `induce_spans` is a real forward pass per document, far
   slower on CPU — and need `--vocab-json` too (bpe/superbpe don't).
 - **Resumable**: rerunning the same command against the same
@@ -53,7 +53,7 @@ sbatch jobs/prep_pretraining_data.sh --dataset glot500 --langs all \
 ## 2. Pretraining
 
 ```bash
-sbatch jobs/train_pretraining.sh --shard-dir pretrain_data/glot500_bpe \
+sbatch jobs/pretrain/pretraining.sh --shard-dir pretrain_data/glot500_bpe \
     --model-size small --total-steps 50000 --seq-len 1024 --per-device-batch-size 16
 ```
 
@@ -93,7 +93,7 @@ python3 -m systems.pretraining.cli_generate
 python3 -m systems.pretraining.cli_generate --checkpoint checkpoints/pretrain/final.pt
 
 # Batch/scripted (as part of a SLURM pipeline) -- --prompt is repeatable
-sbatch --dependency=afterok:$train_id jobs/generate_samples.sh \
+sbatch --dependency=afterok:$train_id jobs/generate/samples.sh \
     --checkpoint checkpoints/pretrain/final.pt \
     --system bpe --tokenizer-checkpoint checkpoints/bpe_50k.json \
     --prompt "The quick brown fox" --prompt "Once upon a time" \
