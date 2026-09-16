@@ -1,0 +1,10 @@
+# systems/pretraining/data_prep.py -- sbatch jobs/prep/pretraining_data.sh -c configs/prep/superbpe_50k.yml
+dataset: glot500
+langs: all
+dataset_config: /pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers/data/glot500
+system: superbpe
+checkpoint: checkpoints/superbpe_6351128.pt
+output_dir: pretrain_data/glot500_superbpe
+max_tokens: 5000000000
+use_wandb: true
+run_name: superbpe_50k_data_prep

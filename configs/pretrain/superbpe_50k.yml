@@ -1,0 +1,9 @@
+# systems/pretraining/cli.py -- sbatch jobs/pretrain/pretraining.sh -c configs/pretrain/superbpe_50k.yml
+shard_dir: pretrain_data/glot500_superbpe
+model_size: small
+total_steps: 250000
+seq_len: 1024
+per_device_batch_size: 16
+output_dir: checkpoints/pretrain_superbpe
+use_wandb: true
+run_name: superbpe_50k_250k_steps

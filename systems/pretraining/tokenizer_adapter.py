@@ -1,4 +1,4 @@
-"""Unified encode/decode interface over any of the seven systems/ tokenizers,
+"""Unified encode/decode interface over any of the eight systems/ tokenizers,
 for use by the pretraining pipeline (data_prep.py builds shards with it,
 train.py's generation/eval helpers decode with it).
 
@@ -6,9 +6,12 @@ Every system's induce_spans turns raw bytes into a byte-level segmentation
 (list[bytes]); this wraps that into stable integer ids for an embedding
 table. Two families, handled differently:
 
-  - bpe/superbpe ("native"): their checkpoint already is a complete int-id
-    vocabulary (every byte 0-255 is a valid symbol by construction), so
-    this calls straight through to encode_ids/tokenizer.encode.
+  - bpe/superbpe/parity_bpe ("native"): their checkpoint already is a
+    complete int-id vocabulary (every byte 0-255 is a valid symbol by
+    construction), so this calls straight through to encode_ids/
+    tokenizer.encode. parity_bpe's ParityBPEModel is structurally
+    identical to bpe's BPEModel (same `.tokenizer` attribute, same
+    `tokenizers.Tokenizer` backing), so it shares bpe's encode() branch.
 
   - fairtok/magnet/flexitokens/manta/fanta ("span"): these only produce a
     byte-span segmentation, and their vocab.json (harvested from a small
@@ -32,7 +35,7 @@ from common.vocab import BYTE_TO_UNICODE
 
 _UNICODE_TO_BYTE = {v: k for k, v in BYTE_TO_UNICODE.items()}
 
-_NATIVE_SYSTEMS = {"bpe", "superbpe"}
+_NATIVE_SYSTEMS = {"bpe", "superbpe", "parity_bpe"}
 _SPAN_SYSTEMS = {"fairtok", "magnet", "flexitokens", "manta", "fanta"}
 ALL_SYSTEMS = sorted(_NATIVE_SYSTEMS | _SPAN_SYSTEMS)
 
@@ -48,6 +51,10 @@ def _to_bytes(text):
 def _load_model(system, checkpoint_path, device):
     if system == "bpe":
         from systems.tokenization.bpe.inference import load_checkpoint
+
+        return load_checkpoint(checkpoint_path, device=device)
+    if system == "parity_bpe":
+        from systems.tokenization.parity_bpe.inference import load_checkpoint
 
         return load_checkpoint(checkpoint_path, device=device)
     if system == "superbpe":
@@ -238,8 +245,8 @@ class TokenizerAdapter:
     def _native_id_to_bytes(system, model):
         if system == "superbpe":
             return [model.id_to_bytes[i] for i in range(len(model.id_to_bytes))]
-        # bpe: ask the underlying tokenizers.Tokenizer for each id's token
-        # string, then invert the byte<->unicode mapping.
+        # bpe/parity_bpe: ask the underlying tokenizers.Tokenizer for each
+        # id's token string, then invert the byte<->unicode mapping.
         tok = model.tokenizer
         return [
             _token_string_to_bytes(tok.id_to_token(i)) for i in range(tok.get_vocab_size())
@@ -271,7 +278,7 @@ class TokenizerAdapter:
 
     def encode(self, text, lang=None):
         raw = _to_bytes(text)
-        if self.system == "bpe":
+        if self.system in ("bpe", "parity_bpe"):
             return self.model.tokenizer.encode(
                 raw.decode("utf-8", errors="replace"), add_special_tokens=False
             ).ids
