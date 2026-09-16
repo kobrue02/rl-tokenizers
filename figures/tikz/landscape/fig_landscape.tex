@@ -7,6 +7,7 @@
 \definecolor{encCol}{RGB}{140,140,140}
 \definecolor{anthropicCol}{RGB}{180,60,60}
 \definecolor{oursCol}{RGB}{34,139,74}
+\definecolor{reproCol}{RGB}{191,148,39}
 \definecolor{otherCol}{RGB}{163,79,168}
 \begin{document}
 \begin{tikzpicture}
@@ -31,11 +32,13 @@
 \addlegendentry{Anthropic}
 \addplot+[only marks, mark=*, mark size=2pt, color=oursCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_This_work.dat};
 \addlegendentry{This work}
+\addplot+[only marks, mark=*, mark size=2pt, color=reproCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Reproduced_baselines.dat};
+\addlegendentry{Reproduced baselines}
 \addplot+[only marks, mark=*, mark size=2pt, color=otherCol] table [x=avg_compression, y=spread] {figures/tikz/landscape/scatter_Other.dat};
 \addlegendentry{Other}
 \node[font=\scriptsize, anchor=south west] at (axis cs:3.354,4.356) {magnet};
-\node[font=\scriptsize, anchor=north east] at (axis cs:27.031,22.831) {flexitokens};
-\node[font=\scriptsize, anchor=south east] at (axis cs:27.031,22.951) {flexitokens};
+\node[font=\scriptsize, anchor=south west] at (axis cs:3.018,15.382) {Qwen3.8-2.4T-A95B};
+\node[font=\scriptsize, anchor=north east] at (axis cs:5.967,7.902) {fanta};
 \end{axis}
 \end{tikzpicture}
 \end{document}

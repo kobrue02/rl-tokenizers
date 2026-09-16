@@ -137,6 +137,17 @@ def test_gen_tokenizer_summary_table_tex(tmp_path):
     assert "modelA & Chinese labs & 4.00 & 1.80 & 0.500 & 10.00" in tex
 
 
+def test_gen_tokenizer_summary_table_tex_handles_none_gini(tmp_path):
+    """claude-opus-5's real results have gini=None (Anthropic doesn't expose
+    the vocabulary internals needed to compute it) -- must render "--", not
+    crash %-formatting on None."""
+    row = _row("claude-opus-5", "Anthropic", spread=8.2, avg_compression=1.8, idx=0)
+    row["gini"] = None
+    models = {"claude-opus-5": {"fertility": {"lang_a": 2.0, "lang_b": 3.0}}}
+    tex = tikz.gen_tokenizer_summary_table_tex([row], models, str(tmp_path))
+    assert "claude-opus-5 & Anthropic & 1.80 & 2.50 & -- & 8.20" in tex
+
+
 def test_gen_resource_level_table_tex_marks_missing_levels(tmp_path, monkeypatch):
     monkeypatch.setattr(
         tikz, "load_resource_levels", lambda codes: ({"lang_a": 0, "lang_b": 3}, []),
@@ -255,3 +266,29 @@ def test_generate_writes_csv_when_requested(tmp_path):
     with open(csv_path, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     assert {r["language"] for r in rows} == {"en", "de"}
+
+
+def test_generate_clears_stale_files_from_a_prior_run(tmp_path):
+    """A changed tokenizer set (e.g. this project's own 41->23 HF-model trim)
+    or a script redesign (e.g. gen_resource_level_tex's 2026-09-16 change from
+    one .dat per tokenizer to far fewer) must not leave a PRIOR run's
+    now-unreferenced files sitting in the output directory forever --
+    confirmed live that nothing here used to delete anything, ever."""
+    out_dir = tmp_path / "out"
+    data = {"fanta": {
+        "avg_compression": 3.0, "fertility": {"en": 1.1}, "gini": 0.3,
+        "token_parity": {"en": 1.0}, "token_parity_spread": 1.0,
+    }}
+    input_path = tmp_path / "in.json"
+    input_path.write_text(json.dumps(data))
+    tikz.generate(str(input_path), str(out_dir))
+
+    resource_dir = out_dir / "resource_level"
+    stale_path = resource_dir / "resourcelevel_99.dat"
+    stale_path.write_text("level parity\n0 1.0\n")  # simulates an orphaned file a prior run left behind
+    assert stale_path.exists()
+
+    tikz.generate(str(input_path), str(out_dir))
+    assert not stale_path.exists()
+    remaining = {p.name for p in resource_dir.glob("*.dat")}
+    assert remaining == {"resourcelevel_0.dat"}  # fanta's own individual line, nothing stale

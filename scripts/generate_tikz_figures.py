@@ -1041,7 +1041,12 @@ def gen_tokenizer_summary_table_tex(rows, models, out_dir):
     gini, spread) -- the exact-value reference companion to gen_landscape_tex's
     scatter, which only labels 3 of the ~30+ points. Sorted by spread ascending
     (most equitable first), matching `rows`' own existing sort order from
-    load_rows."""
+    load_rows.
+
+    gini is None for any tokenizer whose own source genuinely can't compute it
+    (confirmed for claude-opus-5 -- Anthropic doesn't expose the vocabulary
+    internals needed -- see combine_eval_results.py's own "missing renyi/gini"
+    check), rendered as "--" rather than crashing %-formatting on None."""
     preamble = [r"\documentclass{standalone}", r"\usepackage{booktabs}"]
     body = [
         r"\begin{tabular}{llrrrr}",
@@ -1052,9 +1057,10 @@ def gen_tokenizer_summary_table_tex(rows, models, out_dir):
     for r in rows:
         fertility_by_lang = models[r["name"]]["fertility"]  # per-language dict, like token_parity
         mean_fertility = sum(fertility_by_lang.values()) / len(fertility_by_lang)
+        gini_str = f"{r['gini']:.3f}" if r["gini"] is not None else "--"
         body.append(
-            r"%s & %s & %.2f & %.2f & %.3f & %.2f \\"
-            % (esc(r["short"]), esc(r["family"]), r["avg_compression"], mean_fertility, r["gini"], r["spread"])
+            r"%s & %s & %.2f & %.2f & %s & %.2f \\"
+            % (esc(r["short"]), esc(r["family"]), r["avg_compression"], mean_fertility, gini_str, r["spread"])
         )
     body += [r"\bottomrule", r"\end{tabular}"]
     full_tex, _ = _write_standalone_and_body("tokenizer_summary_table", preamble, body, out_dir)
@@ -1378,6 +1384,20 @@ def generate(results_path, out_dir, data_prefix=None, exclude=None, csv_out=None
 
     def subdir(key):
         path = os.path.join(out_dir, _FIGURE_SUBDIRS[key])
+        # Clear stale files from a PRIOR run before writing this one's --
+        # confirmed live that a changed tokenizer set otherwise leaves old
+        # per-tokenizer .dat files orphaned forever (e.g. gen_resource_level_tex
+        # used to write one resourcelevel_N.dat per tokenizer; after the
+        # 2026-09-16 redesign it writes far fewer, and the previous run's
+        # extra ~48 files just sat there unreferenced since nothing here ever
+        # deleted anything). Only removes FILES, never recurses into
+        # subdirectories, so it can't touch anything outside this one figure's
+        # own directory.
+        if os.path.isdir(path):
+            for fname in os.listdir(path):
+                fpath = os.path.join(path, fname)
+                if os.path.isfile(fpath):
+                    os.remove(fpath)
         os.makedirs(path, exist_ok=True)
         return path, f"{base_prefix}{_FIGURE_SUBDIRS[key]}/"
 
