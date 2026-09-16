@@ -26,7 +26,7 @@ from common.eval.reporting import word_count
 from common.eval.stability import sequences_by_lang_from_groups
 
 
-def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
+def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng", vocab_size=None):
     """induce_spans_fn_by_lang: dict[lang -> (bytes -> list[bytes] spans)] callable.
     eval_groups: list[dict[lang -> text]] (e.g. load_bouquet_dev()'s return value).
 
@@ -51,11 +51,25 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     common.eval.parity._find_anchor_key (so "eng_Latn" still matches
     anchor_lang="eng"); a language never paired with the anchor gets ratio 1.0.
 
+    vocab_size: this tokenizer's TRUE designed vocabulary size, passed straight
+    through to renyi_efficiency's own normalization denominator (see that
+    function's docstring for why this matters: omitting it silently falls back
+    to counting distinct token TYPES that happened to appear in this eval
+    sample, which cannot detect a vocabulary padded with tokens too rare to
+    ever be learned -- exactly the failure mode Zouhar et al.'s efficiency
+    metric is meant to catch). Pass the tokenizer's real vocab_size whenever
+    it's known.
+
     Returns {"token_freq": {lang: Counter}, "renyi": {lang: float}, "gini": float,
     "per_lang_compression": {lang: float}, "avg_compression": float,
     "fertility": {lang: float}, "token_parity": {lang: float},
     "token_parity_anchor": str, "token_parity_gm": {lang: float},
-    "token_parity_spread": float}.
+    "token_parity_spread": float}. gini is the Gini coefficient over
+    per-language TOKEN_PARITY values (Foroutan et al.'s "apply the Gini
+    coefficient to per-language token costs"), NOT over renyi efficiency --
+    that's a materially different quantity (dispersion of relative token COST
+    across languages, vs. dispersion of per-language vocabulary-usage
+    efficiency), so don't conflate the two if reusing this function elsewhere.
     """
     token_freq = defaultdict(Counter)
     compressions_by_lang = defaultdict(list)
@@ -86,9 +100,9 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
                 paired_lang_counts[lang].append(count)
 
     renyi = {
-        lang: renyi_efficiency(list(c.values())) for lang, c in token_freq.items() if c
+        lang: renyi_efficiency(list(c.values()), vocab_size=vocab_size)
+        for lang, c in token_freq.items() if c
     }
-    gini = gini_coefficient(list(renyi.values())) if renyi else 0.0
     per_lang_compression = {
         lang: float(np.mean(vals)) for lang, vals in compressions_by_lang.items()
     }
@@ -111,6 +125,9 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
         else:
             token_parity[lang] = 1.0
     token_parity_gm, token_parity_spread = anchor_invariant_parity(token_parity)
+    # Foroutan et al.: Gini over per-language TOKEN COST (token_parity), not
+    # over renyi efficiency -- see this function's own docstring.
+    gini = gini_coefficient(list(token_parity.values())) if token_parity else 0.0
     return {
         "token_freq": token_freq,
         "renyi": renyi,
@@ -125,7 +142,7 @@ def evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, anchor_lang="eng"):
     }
 
 
-def evaluate_on_indigenous_panel(induce_spans_fn_by_lang, eval_groups):
+def evaluate_on_indigenous_panel(induce_spans_fn_by_lang, eval_groups, vocab_size=None):
     """Dedicated entry point for common.data.indigenous_panel's DELIBERATELY
     mixed-anchor panel (English for crk-en/iu-en, Spanish for the AmericasNLP
     pairs). Pooling every pair into one evaluate_on_groups(..., anchor_lang="eng")
@@ -142,15 +159,22 @@ def evaluate_on_indigenous_panel(induce_spans_fn_by_lang, eval_groups):
     not a hardcoded pair, so a new anchor language added to that manifest needs no
     change here.
 
+    vocab_size: see evaluate_on_groups's own docstring -- passed through to
+    every evaluate_on_groups call this makes.
+
     Returns {
       "combined": <evaluate_on_groups over every pair's groups pooled together --
-        token_freq/renyi/gini/per_lang_compression/avg_compression/fertility are
+        token_freq/renyi/per_lang_compression/avg_compression/fertility are
         per-language, anchor-free quantities, so meaningful pooled across the
-        panel. Its token_parity* fields are NOT meaningful here and are dropped>,
+        panel. Its token_parity* fields are NOT meaningful here (mixed anchors)
+        and are dropped -- gini is ALSO dropped for the same reason, since it's
+        now computed from token_parity (see evaluate_on_groups's own docstring
+        for that 2026-09-16 change), not from the anchor-free renyi values it
+        used to be derived from>,
       "token_parity_by_anchor": {anchor_lang: <that anchor's own subset's
         evaluate_on_groups result -- token_parity/token_parity_gm/
-        token_parity_spread ARE meaningful within each, scoped to languages
-        sharing that anchor>},
+        token_parity_spread/gini ARE meaningful within each, scoped to
+        languages sharing that anchor>},
       "morphology_spread": {"fertility_spread": max/min fertility across the whole
         panel, "compression_spread": same for per_lang_compression} -- the
         panel-wide headline number that avoids the mixed-anchor problem entirely.
@@ -171,12 +195,12 @@ def evaluate_on_indigenous_panel(induce_spans_fn_by_lang, eval_groups):
         for anchor in anchors_present:
             groups_by_anchor[anchor].append(group)
 
-    combined = evaluate_on_groups(induce_spans_fn_by_lang, eval_groups)
-    for key in ("token_parity", "token_parity_anchor", "token_parity_gm", "token_parity_spread"):
+    combined = evaluate_on_groups(induce_spans_fn_by_lang, eval_groups, vocab_size=vocab_size)
+    for key in ("token_parity", "token_parity_anchor", "token_parity_gm", "token_parity_spread", "gini"):
         combined.pop(key, None)
 
     token_parity_by_anchor = {
-        anchor: evaluate_on_groups(induce_spans_fn_by_lang, anchor_groups, anchor_lang=anchor)
+        anchor: evaluate_on_groups(induce_spans_fn_by_lang, anchor_groups, anchor_lang=anchor, vocab_size=vocab_size)
         for anchor, anchor_groups in groups_by_anchor.items()
     }
 
@@ -202,7 +226,7 @@ def report_indigenous_panel_eval(results, label=""):
         f"compression_spread={results['morphology_spread']['compression_spread']:.3f}"
     )
     combined = results["combined"]
-    print(f"  avg_compression={combined['avg_compression']:.2f}  gini={combined['gini']:.4f}")
+    print(f"  avg_compression={combined['avg_compression']:.2f}")
     print("  per-language compression / renyi efficiency / fertility (anchor-free, comparable across the whole panel):")
     for lang in sorted(combined["renyi"]):
         print(
@@ -210,8 +234,12 @@ def report_indigenous_panel_eval(results, label=""):
             f"renyi={combined['renyi'][lang]:.4f}  "
             f"fertility={combined['fertility'].get(lang, 0.0):.2f}"
         )
+    # gini is reported per-anchor, not from "combined" -- it's derived from
+    # token_parity now (see evaluate_on_groups's own docstring), which is only
+    # meaningful within one anchor's own languages, same as token_parity itself.
     for anchor, anchor_results in sorted(results["token_parity_by_anchor"].items()):
         print(f"  token_parity vs anchor={anchor!r} (only comparable within this anchor's own languages):")
+        print(f"    gini={anchor_results['gini']:.4f}")
         token_parity = anchor_results["token_parity"]
         token_parity_gm = anchor_results["token_parity_gm"]
         for lang in sorted(token_parity):
@@ -287,6 +315,9 @@ def eval_wandb_log_dict(results, prefix="eval"):
     log_dict.update(
         {f"{prefix}/token_parity_gm/{lang}": v for lang, v in results.get("token_parity_gm", {}).items()}
     )
+    for lang, m in results.get("morphology", {}).items():
+        log_dict[f"{prefix}/morphology_med/{lang}"] = m["med"]
+        log_dict[f"{prefix}/morphology_consistency_f1/{lang}"] = m["consistency_f1"]
     return log_dict
 
 
@@ -295,10 +326,18 @@ def strip_token_freq(results, is_indigenous_panel):
     so strip it before writing --output (an earlier version of systems.pretraining.cli_eval
     hit the identical bug with tuple-keyed dicts). For --eval-data-source
     indigenous_panel, token_freq is nested inside "combined" and inside each
-    anchor's entry in "token_parity_by_anchor", not at the top level."""
+    anchor's entry in "token_parity_by_anchor", not at the top level.
+
+    "morphology" (see run_eval_cli's own --morphology-gold-dir handling) is a
+    top-level, always-JSON-safe key added AFTER evaluate_on_groups/
+    evaluate_on_indigenous_panel run -- carried through explicitly for the
+    indigenous_panel branch below (which otherwise reconstructs a fixed-key
+    dict from scratch and would silently drop it), and already passes through
+    the non-indigenous branch's dict comprehension unchanged since it isn't
+    "token_freq"."""
     if not is_indigenous_panel:
         return {k: v for k, v in results.items() if k != "token_freq"}
-    return {
+    stripped = {
         "combined": {k: v for k, v in results["combined"].items() if k != "token_freq"},
         "token_parity_by_anchor": {
             anchor: {k: v for k, v in anchor_results.items() if k != "token_freq"}
@@ -306,6 +345,9 @@ def strip_token_freq(results, is_indigenous_panel):
         },
         "morphology_spread": results["morphology_spread"],
     }
+    if "morphology" in results:
+        stripped["morphology"] = results["morphology"]
+    return stripped
 
 
 def indigenous_panel_wandb_log_dict(results, prefix="eval"):
@@ -314,13 +356,16 @@ def indigenous_panel_wandb_log_dict(results, prefix="eval"):
     combined = results["combined"]
     log_dict = {
         f"{prefix}/avg_compression": combined["avg_compression"],
-        f"{prefix}/gini": combined["gini"],
         **{f"{prefix}/renyi/{lang}": v for lang, v in combined["renyi"].items()},
         **{f"{prefix}/compression/{lang}": v for lang, v in combined["per_lang_compression"].items()},
         **{f"{prefix}/fertility/{lang}": v for lang, v in combined["fertility"].items()},
         **{f"{prefix}/morphology_spread/{k}": v for k, v in results["morphology_spread"].items()},
     }
+    # gini logged per-anchor, not from "combined" -- see report_indigenous_panel_eval's
+    # own comment for why (it's derived from token_parity, meaningful only within
+    # one anchor's own languages).
     for anchor, anchor_results in results["token_parity_by_anchor"].items():
+        log_dict[f"{prefix}/gini_vs_{anchor}"] = anchor_results["gini"]
         log_dict.update(
             {
                 f"{prefix}/token_parity_vs_{anchor}/{lang}": v
@@ -328,6 +373,9 @@ def indigenous_panel_wandb_log_dict(results, prefix="eval"):
                 if lang != anchor
             }
         )
+    for lang, m in results.get("morphology", {}).items():
+        log_dict[f"{prefix}/morphology_med/{lang}"] = m["med"]
+        log_dict[f"{prefix}/morphology_consistency_f1/{lang}"] = m["consistency_f1"]
     return log_dict
 
 
@@ -374,6 +422,24 @@ def build_eval_arg_parser(system_label, checkpoint_help=None, eval_data_source_h
         help="cap the number of held-out groups scored; omit for the full set",
     )
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument(
+        "--morphology-gold-dir", type=str, default=None,
+        help="directory of common.data.prepare_morphology_gold's own per-language "
+        ".jsonl gold morpheme segmentations (see that module's own docstring for "
+        "sources/coverage) -- if given, also scores Morphological Edit Distance and "
+        "Morphological Consistency F1 (Asgari et al.'s MorphBPE) for whichever of "
+        "this checkpoint's languages have gold data, merged into --output under a "
+        "new \"morphology\" key. Omit to skip entirely (default) -- most "
+        "checkpoints won't have gold coverage for most of their languages anyway.",
+    )
+    parser.add_argument(
+        "--vocab-size", type=int, default=None,
+        help="this checkpoint's TRUE designed vocabulary size, for renyi_efficiency's "
+        "own normalization denominator (see evaluate_on_groups's docstring) -- omit "
+        "and Rényi efficiency silently normalizes by the number of distinct token "
+        "types that happened to appear in this eval sample instead, which cannot "
+        "detect a vocabulary padded with tokens too rare to ever be learned",
+    )
     parser.add_argument(
         "--output", type=str, default=None,
         help="write {result_key: results} JSON here (default: print only, via report_eval/"
@@ -479,11 +545,31 @@ def run_eval_cli(
     induce_fn_by_lang = build_induce_fn_by_lang(model, sequences_by_lang, args)
     is_indigenous_panel = args.eval_data_source == "indigenous_panel"
     if is_indigenous_panel:
-        results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups)
+        results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups, vocab_size=args.vocab_size)
         report_indigenous_panel_eval(results, label=system_label)
     else:
-        results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
+        results = evaluate_on_groups(induce_fn_by_lang, eval_groups, vocab_size=args.vocab_size)
         report_eval(results, label=system_label)
+
+    if args.morphology_gold_dir:
+        # Optional, additive: only languages with BOTH gold morphology data AND
+        # an induce_fn get scored (see evaluate_morphological_segmentation's own
+        # docstring) -- reuses the SAME induce_fn_by_lang already built above,
+        # no second checkpoint load. Merged in as a new top-level "morphology"
+        # key, untouched by every existing consumer of a results dict.
+        from common.data.prepare_morphology_gold import load_morphology_gold
+        from common.eval.morphology import evaluate_morphological_segmentation
+
+        gold_words_by_lang = load_morphology_gold(args.morphology_gold_dir)
+        morphology_results = evaluate_morphological_segmentation(induce_fn_by_lang, gold_words_by_lang)
+        results["morphology"] = morphology_results
+        if morphology_results:
+            print(f"  morphology (MED / Consistency F1): {len(morphology_results)} language(s) scored")
+            for lang, m in sorted(morphology_results.items()):
+                print(
+                    f"    {lang} [{m['source']}, n={m['n_words']}]: "
+                    f"med={m['med']:.3f}  consistency_f1={m['consistency_f1']:.3f}"
+                )
 
     if args.output:
         result_key = args.result_key or system_label

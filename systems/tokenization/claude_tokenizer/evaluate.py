@@ -35,7 +35,7 @@ import numpy as np
 
 from common.config_file import parse_args_with_config
 from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
-from common.eval.metrics import compression_rate, fertility
+from common.eval.metrics import compression_rate, fertility, gini_coefficient
 from common.eval.parity import _find_anchor_key, anchor_invariant_parity
 from common.eval.reporting import word_count
 
@@ -169,8 +169,13 @@ def evaluate_claude_on_groups(
 ):
     """count_fn: (text) -> int token count (e.g. ClaudeTokenCounter.count,
     bound to one model + rate limiter). Mirrors common.eval.cross_tokenizer.
-    evaluate_on_groups's compression/fertility/token_parity computation,
-    but WITHOUT renyi/gini (see module docstring for why).
+    evaluate_on_groups's compression/fertility/token_parity computation, but
+    WITHOUT renyi (see module docstring for why -- the Claude API only
+    returns a token COUNT, never the actual token ids/spans renyi_efficiency
+    needs). gini IS computable here despite that: as of the 2026-09-16 fix,
+    gini is derived from token_parity (Foroutan et al.'s own "per-language
+    token cost", not from renyi/vocabulary-usage efficiency), and
+    token_parity only needs the same token counts this function already has.
 
     Every (group, language) call is dispatched to a ThreadPoolExecutor so
     the run can approach max_workers-many requests in flight rather than
@@ -188,7 +193,8 @@ def evaluate_claude_on_groups(
     Returns {"per_lang_compression": {...}, "avg_compression": float,
     "fertility": {...}, "token_parity": {...}, "token_parity_anchor": str,
     "token_parity_gm": {...}, "token_parity_spread": float, "renyi": {}
-    (always empty), "gini": None (always), "num_failed_calls": int,
+    (always empty -- the API never exposes per-token frequencies), "gini":
+    float (or None if token_parity is empty), "num_failed_calls": int,
     "num_total_calls": int, "num_skipped_via_checkpoint": int}.
     token_parity_gm/token_parity_spread are anchor-invariant (see
     common.eval.parity.anchor_invariant_parity) -- computed identically to
@@ -289,6 +295,7 @@ def evaluate_claude_on_groups(
         else:
             token_parity[lang] = 1.0
     token_parity_gm, token_parity_spread = anchor_invariant_parity(token_parity)
+    gini = gini_coefficient(list(token_parity.values())) if token_parity else None
 
     return {
         "per_lang_compression": per_lang_compression,
@@ -299,7 +306,7 @@ def evaluate_claude_on_groups(
         "token_parity_gm": token_parity_gm,
         "token_parity_spread": token_parity_spread,
         "renyi": {},
-        "gini": None,
+        "gini": gini,
         "num_failed_calls": len(errors),
         "num_total_calls": len(tasks_all),
         "num_skipped_via_checkpoint": skipped,
@@ -322,12 +329,17 @@ def evaluate_claude_on_indigenous_panel(
     so a resumed run resumes each anchor's calls independently.
 
     Returns {"combined": {"avg_compression", "per_lang_compression",
-    "fertility", "renyi": {} (always empty), "gini": None (always) --
-    pooled across both anchor subgroups, safe since these are per-language,
-    anchor-free}, "token_parity_by_anchor": {anchor: <that subgroup's
-    evaluate_claude_on_groups result>}, "morphology_spread":
-    {"fertility_spread", "compression_spread"} (max/min across the whole
-    panel), "num_total_calls"/"num_failed_calls"/"num_skipped_via_checkpoint"
+    "fertility": pooled across both anchor subgroups, safe since these are
+    per-language, anchor-free; "renyi": {} (always empty -- the API never
+    exposes per-token frequencies); "gini": None (always) -- unlike renyi,
+    gini IS anchor-dependent as of the 2026-09-16 fix (derived from
+    token_parity, not from renyi), so it can't be meaningfully pooled here
+    the same way compression/fertility can -- see each anchor's own real
+    gini value in token_parity_by_anchor instead}, "token_parity_by_anchor":
+    {anchor: <that subgroup's evaluate_claude_on_groups result, including a
+    real "gini">}, "morphology_spread": {"fertility_spread",
+    "compression_spread"} (max/min across the whole panel),
+    "num_total_calls"/"num_failed_calls"/"num_skipped_via_checkpoint"
     (summed across both anchor subgroups)}.
     """
     from common.data.indigenous_panel import PAIRS
@@ -407,6 +419,7 @@ def report_claude_indigenous_panel_eval(results, label=""):
         )
     for anchor, anchor_results in sorted(results["token_parity_by_anchor"].items()):
         print(f"  token_parity vs anchor={anchor!r} (only comparable within this anchor's own languages):")
+        print(f"    gini={anchor_results['gini']:.4f}")
         token_parity = anchor_results["token_parity"]
         token_parity_gm = anchor_results["token_parity_gm"]
         for lang in sorted(token_parity):
@@ -420,9 +433,9 @@ def report_claude_indigenous_panel_eval(results, label=""):
 
 def report_claude_eval(results, label=""):
     prefix = f"[{label}] " if label else ""
-    print(f"\n{prefix}held-out evaluation (compression / fertility / token parity only -- "
-          f"no renyi/gini, see systems/claude_tokenizer/model.py's own docstring for why):")
-    print(f"  avg_compression={results['avg_compression']:.2f}")
+    print(f"\n{prefix}held-out evaluation (compression / fertility / token parity / gini -- "
+          f"no renyi, since the API never exposes per-token frequencies):")
+    print(f"  avg_compression={results['avg_compression']:.2f}  gini={results['gini']:.4f}")
     if results.get("num_total_calls"):
         skipped = results.get("num_skipped_via_checkpoint", 0)
         skipped_note = f", {skipped} resumed from checkpoint" if skipped else ""
@@ -610,7 +623,7 @@ def run_smoke_test():
 
     results = evaluate_claude_on_groups(fake_groups, fake_count, max_workers=4, progress_every=0)
     assert results["renyi"] == {}, "renyi must always be empty -- not available from a bare count"
-    assert results["gini"] is None, "gini must always be None -- not available from a bare count"
+    assert isinstance(results["gini"], float), "gini IS computable from token_parity, unlike renyi"
     assert set(results["per_lang_compression"]) == {"eng", "deu"}
     assert results["token_parity"]["eng"] == 1.0, "anchor's own parity must always be exactly 1.0"
     assert results["num_total_calls"] == 4 and results["num_failed_calls"] == 0

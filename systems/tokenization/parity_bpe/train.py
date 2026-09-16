@@ -153,7 +153,7 @@ class ParityBPETrainer(BaseTokenizerTrainer):
             lang: (lambda raw, m=model: induce_spans(m, raw))
             for lang in {lang for group in eval_sample for lang in group}
         }
-        eval_results = evaluate_on_groups(induce_fn_by_lang, eval_sample)
+        eval_results = evaluate_on_groups(induce_fn_by_lang, eval_sample, vocab_size=cfg.vocab_size)
         report_eval(eval_results, label="parity_bpe (post-fit)")
         if run is not None:
             run.log(eval_wandb_log_dict(eval_results))

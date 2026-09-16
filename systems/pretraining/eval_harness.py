@@ -31,12 +31,13 @@ once an actual pretraining run exists.
 """
 
 import collections
-import random
 import re
 import string
 
 import torch
 import torch.nn.functional as F
+
+from common.eval.metrics import bootstrap_ci  # noqa: F401 -- re-exported, see its own docstring
 
 
 def _encode_tensor(adapter, text, lang, device):
@@ -139,43 +140,9 @@ def loglikelihood(model, adapter, context, continuation, lang=None, device="cpu"
     return total_lp, n_tok
 
 
-def bootstrap_ci(outcomes, n_resamples=1000, ci=0.95, seed=0):
-    """Percentile bootstrap confidence interval for the MEAN of `outcomes`
-    (e.g. a 0/1 correctness list -> accuracy's own CI). Resamples the RAW
-    per-example values with replacement n_resamples times -- a genuine
-    bootstrap over the underlying trials, not a closed-form approximation
-    over pre-aggregated counts -- so the same helper generalizes to any
-    per-example statistic later (e.g. a paired accuracy DIFFERENCE between
-    two systems scored on the same items, which has no simple closed form),
-    not just a binomial proportion.
-
-    Exists because a raw percentage-point gap between two systems whose
-    accuracy both sit near chance isn't meaningful on its own at typical
-    per-language eval sizes here (267-364 examples for XNLI/XCOPA) --
-    reporting a CI alongside the point estimate is standard practice for
-    exactly this reason.
-
-    Returns (point_estimate, ci_low, ci_high). (0.0, 0.0, 0.0) for empty
-    input rather than raising -- matches this module's existing "n==0 ->
-    accuracy 0.0" convention elsewhere.
-
-    rng.choices(outcomes, k=n) (a single C-level call) rather than a
-    Python-level per-element randrange loop -- resampling 1000x at typical
-    aggregate eval sizes (thousands of examples) would otherwise dominate
-    runtime; this keeps the added cost negligible next to the per-example
-    forward passes evaluate_multiple_choice itself already pays.
-    """
-    n = len(outcomes)
-    if n == 0:
-        return 0.0, 0.0, 0.0
-    point = sum(outcomes) / n
-    rng = random.Random(seed)
-    resampled_means = [sum(rng.choices(outcomes, k=n)) / n for _ in range(n_resamples)]
-    resampled_means.sort()
-    alpha = (1 - ci) / 2
-    low_idx = int(alpha * n_resamples)
-    high_idx = min(n_resamples - 1, int((1 - alpha) * n_resamples))
-    return point, resampled_means[low_idx], resampled_means[high_idx]
+# bootstrap_ci itself now lives in common.eval.metrics (2026-09-16) -- imported
+# above and re-exported under this module's own name, so every existing
+# `from systems.pretraining.eval_harness import bootstrap_ci` caller keeps working.
 
 
 def evaluate_multiple_choice(

@@ -115,10 +115,10 @@ def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token, indigenous_
         for lang in group
     }
     if indigenous_panel:
-        results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups)
+        results = evaluate_on_indigenous_panel(induce_fn_by_lang, eval_groups, vocab_size=wrapped.vocab_size)
         report_indigenous_panel_eval(results, label=repo_id)
     else:
-        results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
+        results = evaluate_on_groups(induce_fn_by_lang, eval_groups, vocab_size=wrapped.vocab_size)
         report_eval(results, label=repo_id)
     return wrapped, results
 

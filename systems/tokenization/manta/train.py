@@ -305,7 +305,7 @@ class MantaTrainer(BaseTokenizerTrainer):
                 eval_sample = sample_eval_groups(
                     self.eval_groups, cfg.max_eval_samples, seed=cfg.seed
                 )
-                eval_results = evaluate_on_groups(eval_induce_fn_by_lang, eval_sample)
+                eval_results = evaluate_on_groups(eval_induce_fn_by_lang, eval_sample, vocab_size=cfg.vocab_size)
                 report_eval(eval_results, label=f"manta step {step} dev")
                 if run is not None:
                     run.log(eval_wandb_log_dict(eval_results), step=step)

@@ -109,6 +109,11 @@ def main(argv=None):
             "morphology_spread": results["morphology_spread"],
         }
     else:
+        # No vocab_size passed deliberately -- BLT has no fixed vocabulary at all
+        # (dynamically-sized byte patches predicted at inference time, see
+        # Ch.~tokentax's own tokenizer-intro paragraph), so there's no "true
+        # designed vocab size" for renyi_efficiency to normalize against the way
+        # every other (vocabulary-based) tokenizer in this project has.
         results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
         report_eval(results, label="blt")
         clean_results = {k: v for k, v in results.items() if k != "token_freq"}

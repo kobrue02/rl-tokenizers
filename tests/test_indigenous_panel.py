@@ -568,12 +568,14 @@ def test_evaluate_claude_on_indigenous_panel_separates_anchors():
     en_scope = results["token_parity_by_anchor"]["en"]
     assert en_scope["token_parity"]["crk"] == pytest.approx(0.25)
     assert en_scope["token_parity"]["iu"] == pytest.approx(2.0)
+    assert isinstance(en_scope["gini"], float)  # computable per-anchor, from token_parity
     es_scope = results["token_parity_by_anchor"]["es"]
     assert es_scope["token_parity"]["nah"] == pytest.approx(1.5)
+    assert isinstance(es_scope["gini"], float)
 
     combined = results["combined"]
     assert combined["renyi"] == {}
-    assert combined["gini"] is None
+    assert combined["gini"] is None  # anchor-dependent now -- not meaningfully poolable across anchors
     assert set(combined["fertility"]) == {"crk", "en", "iu", "nah", "es"}
     assert results["num_total_calls"] == sum(len(g) for g in eval_groups)
     assert results["num_failed_calls"] == 0
