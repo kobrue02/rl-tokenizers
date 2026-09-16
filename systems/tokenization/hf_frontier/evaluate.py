@@ -27,6 +27,7 @@ from common.eval.cross_tokenizer import (
     evaluate_on_indigenous_panel,
     report_eval,
     report_indigenous_panel_eval,
+    strip_token_freq,
 )
 from common.data.corpora import stream_groups
 from common.data.oldi_data import load_bouquet_dev, load_bouquet_test
@@ -86,6 +87,11 @@ def build_arg_parser():
         "this compares EXTERNAL tokenizers, not ones trained by this project",
     )
     parser.add_argument("--run-name", type=str, default="")
+    parser.add_argument(
+        "--morphology-gold-dir", type=str, default=None,
+        help="see common.eval.cross_tokenizer.build_eval_arg_parser's own flag of the "
+        "same name -- identical behavior here, applied to every --hf-repo-id entry",
+    )
     return parser
 
 
@@ -103,7 +109,9 @@ def _load_eval_groups(args):
     return groups
 
 
-def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token, indigenous_panel=False):
+def _evaluate_one(
+    repo_id, eval_groups, trust_remote_code, hf_token, indigenous_panel=False, morphology_gold_dir=None,
+):
     wrapped = HFFrontierTokenizer.load(repo_id, trust_remote_code=trust_remote_code, hf_token=hf_token)
     print(f"\nhf_repo_id={repo_id} span_method={wrapped.span_method} native_vocab_size={wrapped.vocab_size}")
 
@@ -120,6 +128,25 @@ def _evaluate_one(repo_id, eval_groups, trust_remote_code, hf_token, indigenous_
     else:
         results = evaluate_on_groups(induce_fn_by_lang, eval_groups, vocab_size=wrapped.vocab_size)
         report_eval(results, label=repo_id)
+
+    if morphology_gold_dir:
+        # See common.eval.cross_tokenizer.run_eval_cli's own --morphology-gold-dir
+        # handling -- identical logic, reusing the SAME induce_fn_by_lang already
+        # built above, no second tokenizer load.
+        from common.data.prepare_morphology_gold import load_morphology_gold
+        from common.eval.morphology import evaluate_morphological_segmentation
+
+        gold_words_by_lang = load_morphology_gold(morphology_gold_dir)
+        morphology_results = evaluate_morphological_segmentation(induce_fn_by_lang, gold_words_by_lang)
+        results["morphology"] = morphology_results
+        if morphology_results:
+            print(f"  morphology (MED / Consistency F1): {len(morphology_results)} language(s) scored")
+            for lang, m in sorted(morphology_results.items()):
+                print(
+                    f"    {lang} [{m['source']}, n={m['n_words']}]: "
+                    f"med={m['med']:.3f}  consistency_f1={m['consistency_f1']:.3f}"
+                )
+
     return wrapped, results
 
 
@@ -138,7 +165,7 @@ def main(argv=None):
         try:
             wrapped, results = _evaluate_one(
                 repo_id, eval_groups, args.trust_remote_code, args.hf_token,
-                indigenous_panel=is_indigenous_panel,
+                indigenous_panel=is_indigenous_panel, morphology_gold_dir=args.morphology_gold_dir,
             )
         except Exception as e:
             # One bad repo must not lose every other repo's completed results.
@@ -146,23 +173,12 @@ def main(argv=None):
             failed[repo_id] = f"{type(e).__name__}: {e}"
             continue
         all_wrapped[repo_id] = wrapped
-        # token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't
-        # valid JSON and aren't needed for the summary (report_eval /
-        # report_indigenous_panel_eval already printed it); stripped here
-        # rather than crashing json.dumps below. indigenous_panel's results
-        # nest token_freq inside "combined" and inside each anchor entry of
-        # "token_parity_by_anchor", so both need stripping.
-        if is_indigenous_panel:
-            all_results[repo_id] = {
-                "combined": {k: v for k, v in results["combined"].items() if k != "token_freq"},
-                "token_parity_by_anchor": {
-                    anchor: {k: v for k, v in anchor_results.items() if k != "token_freq"}
-                    for anchor, anchor_results in results["token_parity_by_anchor"].items()
-                },
-                "morphology_spread": results["morphology_spread"],
-            }
-        else:
-            all_results[repo_id] = {k: v for k, v in results.items() if k != "token_freq"}
+        # token_freq is {lang: Counter[bytes, int]} -- bytes keys aren't valid
+        # JSON and aren't needed for the summary (report_eval/
+        # report_indigenous_panel_eval already printed it) -- strip_token_freq
+        # also correctly carries "morphology" through the indigenous_panel
+        # branch's fixed-key reconstruction (see its own docstring).
+        all_results[repo_id] = strip_token_freq(results, is_indigenous_panel)
 
     if failed:
         print(f"\n{len(failed)}/{len(repo_ids)} repo(s) failed: {list(failed)} -- see FAILED lines above for why")

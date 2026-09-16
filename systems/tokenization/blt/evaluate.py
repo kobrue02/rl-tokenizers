@@ -62,6 +62,11 @@ def build_arg_parser():
     parser.add_argument("--use-wandb", action="store_true")
     parser.add_argument("--wandb-project", type=str, default="blt")
     parser.add_argument("--run-name", type=str, default="")
+    parser.add_argument(
+        "--morphology-gold-dir", type=str, default=None,
+        help="see common.eval.cross_tokenizer.build_eval_arg_parser's own flag of the "
+        "same name -- identical behavior here",
+    )
     return parser
 
 
@@ -117,6 +122,24 @@ def main(argv=None):
         results = evaluate_on_groups(induce_fn_by_lang, eval_groups)
         report_eval(results, label="blt")
         clean_results = {k: v for k, v in results.items() if k != "token_freq"}
+
+    if args.morphology_gold_dir:
+        # See common.eval.cross_tokenizer.run_eval_cli's own --morphology-gold-dir
+        # handling -- identical logic, reusing the SAME induce_fn_by_lang already
+        # built above, no second model load.
+        from common.data.prepare_morphology_gold import load_morphology_gold
+        from common.eval.morphology import evaluate_morphological_segmentation
+
+        gold_words_by_lang = load_morphology_gold(args.morphology_gold_dir)
+        morphology_results = evaluate_morphological_segmentation(induce_fn_by_lang, gold_words_by_lang)
+        clean_results["morphology"] = morphology_results
+        if morphology_results:
+            print(f"  morphology (MED / Consistency F1): {len(morphology_results)} language(s) scored")
+            for lang, m in sorted(morphology_results.items()):
+                print(
+                    f"    {lang} [{m['source']}, n={m['n_words']}]: "
+                    f"med={m['med']:.3f}  consistency_f1={m['consistency_f1']:.3f}"
+                )
 
     all_results = {"facebook/blt-1b": clean_results}
     payload = json.dumps(all_results, indent=2)

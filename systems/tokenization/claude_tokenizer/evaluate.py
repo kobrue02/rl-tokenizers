@@ -5,6 +5,14 @@ one network call per document, and only compression/fertility/token parity
 are reportable, NOT Rényi efficiency or Gini (need per-token identities the
 public API doesn't expose).
 
+No --morphology-gold-dir here (unlike hf_frontier/evaluate.py and
+blt/evaluate.py) for the same reason: MED and Consistency F1 (see
+common.eval.morphology) both need the tokenizer's actual predicted spans to
+compare against gold morphs, and count_tokens exposes only a bare int
+total, never token identities/boundaries -- there is no induce_spans-shaped
+function to build for Claude at all, so this is a structural gap, not a
+missing-wiring one.
+
 --model takes a COMMA-SEPARATED list -- every model shares ONE RateLimiter
 for the whole run, not one per model, since Anthropic's RPM limits are
 account-wide, not per-model.

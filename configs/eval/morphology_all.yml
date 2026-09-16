@@ -1,0 +1,66 @@
+# scripts/evaluate_morphology_all.py -- sbatch jobs/eval/morphology_all.sh -c configs/eval/morphology_all.yml
+#
+# Computes MED / Morphological Consistency F1 (common.eval.morphology) for
+# every tokenizer system EXCEPT claude_tokenizer -- Anthropic's count_tokens
+# API returns only a bare token count, never actual token spans/boundaries,
+# so MED/Consistency-F1 (both need the tokenizer's own predicted
+# segmentation) are structurally uncomputable for it, not just unconfigured
+# here (see systems/tokenization/claude_tokenizer/evaluate.py's own module
+# docstring). fairtok/flexitokens are excluded too, matching this project's
+# own 2026-09-16 scope decision (scripts/generate_tikz_figures.py's own
+# _REPO_TOKENIZER_NAMES comment: fairtok never trained successfully,
+# flexitokens no longer pursued).
+#
+# PREREQUISITE: `python3 -m common.data.prepare_morphology_gold --output-dir
+# data/morphology_gold` run once first.
+#
+# eval_data_source: bouquet (dev split, NOT bouquet_test) -- deliberate:
+# morphology numbers come entirely from the gold word list
+# (evaluate_morphological_segmentation), not from eval_groups' own text --
+# eval_groups only needs to cover the SAME LANGUAGES the gold data does, to
+# build each system's induce_fn_by_lang. Using the smaller dev split keeps
+# the corpus-level metrics every evaluate.py computes as a side effect
+# (compression/fertility/renyi/gini) cheap for the two systems with real
+# per-call cost: blt (a real ~100M-param forward pass per sentence) and
+# hf_frontier (real network calls against gated repos). Re-run with
+# eval_data_source: bouquet_test in each entry's own args once these
+# morphology numbers look right and final reported numbers are needed.
+#
+# blt additionally gets --num-groups 50 (same reasoning already established
+# by results/blt_comparison_sample50.json) -- morphology's own per-word
+# gold-list evaluation doesn't need many groups, just enough to cover its
+# target languages; NOT applied to the other 7 systems, whose corpus-level
+# eval has no per-sentence model cost.
+#
+# checkpoint paths below are this project's own real, already-trained
+# artifacts (see configs/eval/own_tokenizers_indigenous_panel.yml and
+# configs/prep/{system}_50k.yml for the same paths independently confirmed).
+# hf_repo_id list is the same 23-repo set as configs/eval/hf_frontier.yml
+# (see that file's own comment for the full verification history) --
+# kept identical so morphology numbers are directly comparable to that
+# file's own bouquet_test comparison run, not a differently-scoped subset.
+morphology_gold_dir: data/morphology_gold
+output_dir: results
+combined_output: results/morphology_all.json
+systems:
+  - name: bpe
+    args: ["--checkpoint", "checkpoints/bpe_50k.json", "--eval-data-source", "bouquet"]
+  - name: superbpe
+    args: ["--checkpoint", "checkpoints/superbpe_6351128.pt", "--eval-data-source", "bouquet"]
+  - name: fanta
+    args: ["--checkpoint", "checkpoints/fanta_6284655.pt", "--eval-data-source", "bouquet"]
+  - name: magnet
+    args: ["--checkpoint", "checkpoints/magnet_6269682.pt", "--eval-data-source", "bouquet"]
+  - name: manta
+    args: ["--checkpoint", "checkpoints/manta_6269684.pt", "--eval-data-source", "bouquet"]
+  - name: parity_bpe
+    args: ["--checkpoint", "checkpoints/parity_bpe_6370066.json", "--eval-data-source", "bouquet"]
+  - name: hf_frontier
+    args:
+      - "--hf-repo-id"
+      - "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-multilingual-cased,xlm-roberta-base,meta-models/Muse-Glimmer-30B,tiktoken:cl100k_base,tiktoken:o200k_base,google/byt5-small,google/canine-s"
+      - "--trust-remote-code"
+      - "--eval-data-source"
+      - "bouquet"
+  - name: blt
+    args: ["--device", "cpu", "--eval-data-source", "bouquet", "--num-groups", "50"]
