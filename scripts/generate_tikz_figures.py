@@ -3,7 +3,7 @@ JSON file (e.g. results/hf_frontier_comparison.json, or a scripts/combine_eval_r
 with Claude's entry merged in). No LaTeX install needed to run this, only to compile
 the output.
 
-Five figures (a raw 33-tokenizer x 259-language dump isn't legible in print):
+Five figures (a raw dozens-of-tokenizers x 259-language dump isn't legible in print):
   1. Spread leaderboard: every tokenizer ranked by token_parity_spread (anchor-invariant
      max/min token cost across languages -- see common.eval.parity.anchor_invariant_parity).
   2. Fairness landscape: avg_compression vs spread scatter, one point per tokenizer;
@@ -17,22 +17,31 @@ Five figures (a raw 33-tokenizer x 259-language dump isn't legible in print):
      taxonomy (see common.data.lang2tax; ~85% of languages resolve against it), full
      per-language data (not the heatmap's worst-20 subset). Every baseline family collapses
      to one bold mean line + a shaded min-max band across that family's own tokenizers
-     (matching figs. 4.7/4.8's own family-aggregated bars); "This work" tokenizers still plot
-     individually, same green hue disambiguated by marker shape (_OWN_SYSTEM_MARKS), since
-     comparing our own systems against each other is the point. Full per-tokenizer detail for
-     every OTHER family lives in table 7 instead (see gen_resource_level_table_tex).
+     (matching figs. 4.7/4.8's own family-aggregated bars) -- including "Reproduced baselines"
+     (bpe/superbpe/magnet/manta/parity_bpe, other researchers' methods trained here, NOT this
+     thesis's own contribution). Only fanta -- the actual contribution -- still plots
+     individually, highlighted with a bold star marker. Full per-tokenizer detail for every
+     other family lives in table 7 instead (see gen_resource_level_table_tex).
   5. Real API cost by provider: 4 subplots (DeepSeek/GPT/Claude/Kimi, see _PROVIDER_PANELS),
      each 6 real Tukey box plots (one per resource level) from each language's own dollar
      cost. Claude renders as a "pending" placeholder until merged into the input. Pricing is
      real, live-fetched (platform.claude.com, developers.openai.com, deepseek.ai; Kimi's
      rate supplied by the user).
 
-Two summary tables (exact-value reference companions, not meant to be legible-at-a-glance
+Three summary tables (exact-value reference companions, not meant to be legible-at-a-glance
 the way the figures above are):
   6. Tokenizer summary: every tokenizer's compression/fertility/gini/spread, sorted by
      spread -- the full ranked list figure 2's scatter only labels 3 points of.
   7. Resource-level detail: every tokenizer's mean token_parity per resource level -- the
      per-tokenizer detail figure 4 no longer shows once baseline families aggregate.
+  8. Coverage: how many of the (union-of-all-tokenizers') languages each tokenizer actually
+     got scored on, plus any repo that failed to load entirely (evaluate.py's per-repo error
+     isolation -- see hf_frontier/evaluate.py's own docstring -- otherwise makes a failed
+     repo invisible everywhere else).
+
+--csv-out additionally writes the full per-(tokenizer, language) detail (token_parity,
+fertility, compression, renyi) as a supplementary CSV -- see write_full_csv's own docstring
+for why this exists instead of a printed appendix table.
 
 Usage:
     python3 -m scripts.generate_tikz_figures --input results/hf_frontier_comparison.json --output-dir figures/tikz
@@ -43,6 +52,7 @@ No local LaTeX install to compile-test against -- verify with a real compiler
 """
 
 import argparse
+import csv
 import json
 import math
 import os
@@ -77,16 +87,18 @@ _FAMILY_COLORS = {
     "Encoder-only": "encCol",
     "Anthropic": "anthropicCol",
     "This work": "oursCol",
+    "Reproduced baselines": "reproCol",
     "Other": "otherCol",
     # Used ONLY by the standalone "our work vs other approaches" leaderboard
-    # (scripts/generate_our_work_vs_other_approaches.py, not the main
-    # multi-family comparison) -- a manual row-level family override there
-    # reclassifies manta/magnet/parity_bpe/flexitokens under this key so they
-    # render visually distinct from fanta's own "This work" green, despite
-    # family_of() itself still (correctly, for every OTHER figure) bucketing
-    # all of this project's own tokenizers as "This work". Reuses "Other"'s
-    # own purple -- the two families never co-occur in the same figure, so
-    # sharing one TikZ color macro is harmless.
+    # (scripts/generate_scoped_leaderboards.py's
+    # generate_our_work_vs_other_approaches_leaderboard, not the main
+    # multi-family comparison) -- a chapter-local row-level family override
+    # there relabels manta/magnet/parity_bpe as "Other approaches" (a more
+    # specific legend string than the main pipeline's broader "Reproduced
+    # baselines" bucket, which also includes bpe/superbpe -- excluded from
+    # that scoped comparison entirely). Reuses "Other"'s own purple -- the two
+    # families never co-occur in the same figure, so sharing one TikZ color
+    # macro is harmless.
     "Other approaches": "otherCol",
 }
 _FAMILY_RGB = {
@@ -95,7 +107,8 @@ _FAMILY_RGB = {
     "Meta/Llama": (74, 111, 227),
     "Encoder-only": (140, 140, 140),
     "Anthropic": (180, 60, 60),
-    "This work": (34, 139, 74),  # distinct green so our own 6 tokenizers stand out from "Other"
+    "This work": (34, 139, 74),  # distinct green so fanta -- this thesis's own contribution -- stands out
+    "Reproduced baselines": (191, 148, 39),  # amber -- other researchers' methods, trained by us
     "Other": (163, 79, 168),
     "Other approaches": (163, 79, 168),
 }
@@ -105,17 +118,15 @@ _FAMILY_RGB = {
 # fairtok/flexitokens deliberately excluded (dropped from the project 2026-09-16 --
 # fairtok was never successfully trained, flexitokens is no longer pursued).
 _REPO_TOKENIZER_NAMES = {"magnet", "manta", "fanta", "superbpe", "bpe", "parity_bpe"}
-# Per-system marker shape (not color -- all six share "This work"'s green so the
-# whole family still reads as one group) for gen_resource_level_tex's individual
-# own-system lines, so they stay distinguishable from each other in grayscale too.
-_OWN_SYSTEM_MARKS = {
-    "bpe": "*",
-    "superbpe": "square*",
-    "fanta": "triangle*",
-    "magnet": "diamond*",
-    "manta": "pentagon*",
-    "parity_bpe": "otimes*",
-}
+# Of those 6, fanta is this thesis's OWN novel contribution ("This work");
+# the other 5 are OTHER RESEARCHERS' published tokenization methods, reproduced/
+# retrained here for a fair comparison -- family_of() below buckets them as
+# "Reproduced baselines", a materially different claim than "This work" (2026-09-16
+# correction; see scripts/generate_scoped_leaderboards.py's own module docstring,
+# which already drew this exact fanta-vs-everything-else distinction for its
+# dedicated leaderboard before family_of() caught up to it here).
+_OUR_CONTRIBUTION_NAMES = {"fanta"}
+_REPRODUCED_BASELINE_NAMES = _REPO_TOKENIZER_NAMES - _OUR_CONTRIBUTION_NAMES
 # Single source of truth for gen_spread_leaderboard_tex's own default -- also
 # referenced by scripts/generate_scoped_leaderboards.py to know, without
 # duplicating the number, whether a given row count will render as one
@@ -162,8 +173,10 @@ def cost_color(t):
 
 
 def family_of(name):
-    if name in _REPO_TOKENIZER_NAMES:
+    if name in _OUR_CONTRIBUTION_NAMES:
         return "This work"
+    if name in _REPRODUCED_BASELINE_NAMES:
+        return "Reproduced baselines"
     lname = name.lower()
     if name.startswith("tiktoken:") or name.startswith("openai"):
         return "OpenAI/tiktoken"
@@ -253,6 +266,16 @@ def load_rows(results_path, exclude=None):
     for i, r in enumerate(rows):
         r["idx"] = i
     return rows, models
+
+
+def load_failed(results_path):
+    """{repo_id: error_message} for every repo evaluate.py's per-repo error
+    isolation recorded as failed (see e.g. hf_frontier/evaluate.py's own
+    docstring) -- load_rows() discards the "_failed" key entirely (it isn't a
+    model result), so gen_coverage_table_tex needs it read separately."""
+    with open(results_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("_failed", {})
 
 
 def compute_families(rows):
@@ -922,16 +945,20 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
     the rest are a genuine gap in that external resource). Uses each model's full
     per-language token_parity dict, not the heatmap's worst-20 subset.
 
-    Every baseline family (everything except "This work") collapses to one bold
-    mean line + a shaded min-max band across that family's own tokenizers -- one
-    thin line per tokenizer at full tokenizer count was an unreadable ~30-line
-    spaghetti plot, and figs. gen_indigenous_panel_parity_bars_tex/AmericasNLP
-    already aggregate to family level, so this now matches that convention.
-    "This work" tokenizers still plot individually (same green family hue,
-    disambiguated by marker shape via _OWN_SYSTEM_MARKS) since comparing this
-    project's own systems against each other IS this figure's point -- full
-    per-tokenizer detail for every OTHER family lives in
-    gen_resource_level_table_tex instead."""
+    Every baseline family (everything except "This work" -- which, per the
+    2026-09-16 correction, means fanta ALONE: the other 5 tokenizers this
+    project trained are OTHER RESEARCHERS' published methods, reproduced here,
+    bucketed under "Reproduced baselines" like any other baseline family) now
+    collapses to one bold mean line + a shaded min-max band across that
+    family's own tokenizers -- one thin line per tokenizer at full tokenizer
+    count was an unreadable ~30-line spaghetti plot, and figs.
+    gen_indigenous_panel_parity_bars_tex/AmericasNLP already aggregate to
+    family level, so this now matches that convention. fanta -- this thesis's
+    own actual contribution -- is the one tokenizer that still plots
+    individually, highlighted with a bold star marker so it stands out even
+    from "Reproduced baselines"' own aggregated band. Full per-tokenizer
+    detail for every other family (including the 5 reproduced baselines)
+    lives in gen_resource_level_table_tex instead."""
     levels, unresolved, present_levels, counts, row_level_means = _resource_levels_and_means(rows, models)
 
     own_rows = [r for r in rows if r["family"] == "This work"]
@@ -999,10 +1026,9 @@ def gen_resource_level_tex(rows, models, families, out_dir, data_prefix=""):
         body.append(r"\addlegendentry{%s}" % fam)
     for r in own_rows:
         col = _FAMILY_COLORS["This work"]
-        mark = _OWN_SYSTEM_MARKS.get(r["name"], "*")
         body.append(
-            r"\addplot+[color=%s, thick, mark=%s, mark size=1.8pt, mark options={fill=%s}] "
-            r"table [x=level, y=parity] {%sresourcelevel_%d.dat};" % (col, mark, col, data_prefix, r["idx"])
+            r"\addplot+[color=%s, ultra thick, mark=star, mark size=3pt, mark options={fill=%s}] "
+            r"table [x=level, y=parity] {%sresourcelevel_%d.dat};" % (col, col, data_prefix, r["idx"])
         )
         body.append(r"\addlegendentry{%s}" % esc(r["short"]))
     body += [r"\end{axis}", r"\end{tikzpicture}"]
@@ -1058,6 +1084,72 @@ def gen_resource_level_table_tex(rows, models, out_dir):
     body += [r"\bottomrule", r"\end{tabular}"]
     full_tex, _ = _write_standalone_and_body("resource_level_table", preamble, body, out_dir)
     return full_tex
+
+
+def gen_coverage_table_tex(rows, models, failed, out_dir):
+    """Per-tokenizer language coverage + failed-repo table -- exposes what's
+    otherwise invisible everywhere else: evaluate.py's per-repo error
+    isolation (see e.g. hf_frontier/evaluate.py's own docstring) means a
+    gated-without-access or transiently-failing repo just silently drops out
+    of every other figure/table, with no visible trace it was ever attempted.
+    Coverage is out of the UNION of every language ANY successful tokenizer
+    in this input has data for (same "all_codes" convention
+    _resource_levels_and_means/gen_heatmap_tex already use), not a hardcoded
+    259 -- a non-BOUQuET --eval-data-source would silently make a hardcoded
+    denominator wrong. family_of() only needs a name, not a model entry, so
+    failed repos still get a real family classification here."""
+    all_codes = set()
+    for m in models.values():
+        all_codes.update(m["token_parity"].keys())
+    total = len(all_codes)
+
+    preamble = [r"\documentclass{standalone}", r"\usepackage{booktabs}"]
+    body = [
+        r"\begin{tabular}{llr}",
+        r"\toprule",
+        r"Tokenizer & Family & Coverage \\",
+        r"\midrule",
+    ]
+    for r in rows:
+        n = len(models[r["name"]]["token_parity"])
+        pct = 100.0 * n / total if total else 0.0
+        body.append(r"%s & %s & %d/%d (%.0f\%%) \\" % (esc(r["short"]), esc(r["family"]), n, total, pct))
+    for repo_id, error in sorted(failed.items()):
+        msg = error if len(error) <= 60 else error[:57] + "..."  # table cell, not a log
+        body.append(r"%s & %s & FAILED (%s) \\" % (esc(short_name(repo_id)), esc(family_of(repo_id)), esc(msg)))
+    body += [r"\bottomrule", r"\end{tabular}"]
+    full_tex, _ = _write_standalone_and_body("coverage_table", preamble, body, out_dir)
+    return full_tex
+
+
+def write_full_csv(rows, models, path):
+    """Full per-(tokenizer, language) detail as CSV -- the raw numbers every
+    figure/table above compresses away (the heatmap subsets to 20 languages,
+    the resource-level figure/table both aggregate/summarize by level, the
+    tokenizer summary table is one row per tokenizer not per language). Not
+    meant to be read directly in the thesis -- a supplementary export for
+    anyone (a grader, a future reader) who wants the exact numbers without
+    parsing the results JSON by hand."""
+    fieldnames = [
+        "tokenizer", "family", "language",
+        "token_parity", "token_parity_gm", "fertility", "per_lang_compression", "renyi",
+    ]
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in rows:
+            m = models[r["name"]]
+            for lang in sorted(m["token_parity"]):
+                writer.writerow({
+                    "tokenizer": r["name"],
+                    "family": r["family"],
+                    "language": lang,
+                    "token_parity": m["token_parity"].get(lang),
+                    "token_parity_gm": m.get("token_parity_gm", {}).get(lang),
+                    "fertility": m.get("fertility", {}).get(lang),
+                    "per_lang_compression": m.get("per_lang_compression", {}).get(lang),
+                    "renyi": m.get("renyi", {}).get(lang),
+                })
 
 
 def _panel_title(panel, models):
@@ -1260,10 +1352,11 @@ _FIGURE_SUBDIRS = {
     "api_cost": "api_cost",
     "tokenizer_summary_table": "tokenizer_summary_table",
     "resource_level_table": "resource_level_table",
+    "coverage_table": "coverage_table",
 }
 
 
-def generate(results_path, out_dir, data_prefix=None, exclude=None):
+def generate(results_path, out_dir, data_prefix=None, exclude=None, csv_out=None):
     """Each figure gets its own subdirectory under out_dir (figures/tikz/spread_leaderboard/,
     etc.) rather than 50+ files flattened together. data_prefix is the base path baked into
     every `table {...}` reference -- needed because \\includestandalone (without shell-escape)
@@ -1273,7 +1366,11 @@ def generate(results_path, out_dir, data_prefix=None, exclude=None):
 
     exclude: see load_rows's own docstring -- e.g. exclude={"fanta"} for
     Ch.~tokentax's pooled figures, which must not show fanta before it's
-    introduced later in the thesis (Ch.~fantaeval)."""
+    introduced later in the thesis (Ch.~fantaeval).
+
+    csv_out: optional path -- if given, also writes the full per-(tokenizer,
+    language) detail there via write_full_csv (see that function's own
+    docstring)."""
     os.makedirs(out_dir, exist_ok=True)
     base_prefix = out_dir.replace(os.sep, "/") if data_prefix is None else data_prefix
     if base_prefix and not base_prefix.endswith("/"):
@@ -1291,8 +1388,10 @@ def generate(results_path, out_dir, data_prefix=None, exclude=None):
     api_cost_dir, _api_cost_prefix = subdir("api_cost")  # no external .dat files -- prefix unused
     summary_table_dir, _summary_table_prefix = subdir("tokenizer_summary_table")
     resource_level_table_dir, _resource_level_table_prefix = subdir("resource_level_table")
+    coverage_table_dir, _coverage_table_prefix = subdir("coverage_table")
 
     rows, models = load_rows(results_path, exclude=exclude)
+    failed = load_failed(results_path)
     families = compute_families(rows)
 
     write_bar_data(rows, families, leaderboard_dir)
@@ -1306,19 +1405,37 @@ def generate(results_path, out_dir, data_prefix=None, exclude=None):
     tex5, _unresolved_cost_langs = gen_api_cost_boxplot_tex(models, api_cost_dir)
     tex6 = gen_tokenizer_summary_table_tex(rows, models, summary_table_dir)
     tex7 = gen_resource_level_table_tex(rows, models, resource_level_table_dir)
+    tex8 = gen_coverage_table_tex(rows, models, failed, coverage_table_dir)
 
-    _assert_well_formed(tex1, "fig_spread_leaderboard.tex", expected_tikzpictures=2)
+    _assert_well_formed(
+        tex1, "fig_spread_leaderboard.tex",
+        # Mirrors gen_spread_leaderboard_tex's own column-count decision (single
+        # column, 1 tikzpicture, below MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD) --
+        # was hardcoded to 2 unconditionally, which only never broke because
+        # every real run has well over 12 rows. See scripts/
+        # generate_scoped_leaderboards.py's own _expected_tikzpictures for the
+        # same computation applied to its scoped subsets.
+        expected_tikzpictures=2 if len(rows) >= MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD else 1,
+    )
     _assert_well_formed(tex2, "fig_landscape.tex")
     _assert_well_formed(tex3, "fig_heatmap.tex")
     _assert_well_formed(tex4, "fig_resource_level.tex")
     _assert_well_formed(tex5, "fig_api_cost.tex", expected_tikzpictures=4)
     _assert_well_formed(tex6, "fig_tokenizer_summary_table.tex", expected_tikzpictures=0)
     _assert_well_formed(tex7, "fig_resource_level_table.tex", expected_tikzpictures=0)
+    _assert_well_formed(tex8, "fig_coverage_table.tex", expected_tikzpictures=0)
 
     print(f"{len(rows)} models, {len(families)} families, heatmap languages: {top_langs}")
     print(f"resource-level coverage: {sum(level_counts.values())} resolved {dict(sorted(level_counts.items()))}, "
           f"{len(unresolved_langs)} not in Joshi et al.'s taxonomy: {unresolved_langs}")
+    if failed:
+        print(f"{len(failed)} repo(s) failed to load entirely (see coverage_table/): {sorted(failed)}")
     print("wrote one subdirectory per figure under", out_dir, "-", ", ".join(_FIGURE_SUBDIRS.values()))
+
+    if csv_out:
+        write_full_csv(rows, models, csv_out)
+        print(f"wrote full per-(tokenizer, language) CSV to {csv_out}")
+
     return rows, families, top_langs
 
 
@@ -1356,6 +1473,13 @@ def build_arg_parser():
         "thesis (see scripts/generate_scoped_leaderboards.py and scripts/"
         "generate_fanta_eval_figures.py for where fanta belongs instead)",
     )
+    parser.add_argument(
+        "--csv-out", type=str, default=None,
+        help="also write the full per-(tokenizer, language) detail to this CSV path (see "
+        "write_full_csv's own docstring) -- the raw numbers every figure/table above "
+        "compresses away, for anyone who wants exact values without parsing the results "
+        "JSON by hand. Ignored with --indigenous-panel.",
+    )
     return parser
 
 
@@ -1365,7 +1489,10 @@ def main(argv=None):
         generate_indigenous_panel_figures(args.input, args.output_dir, data_prefix=args.data_prefix)
     else:
         exclude = [n.strip() for n in args.exclude.split(",")] if args.exclude else None
-        generate(args.input, args.output_dir, data_prefix=args.data_prefix, exclude=exclude)
+        generate(
+            args.input, args.output_dir, data_prefix=args.data_prefix, exclude=exclude,
+            csv_out=args.csv_out,
+        )
 
 
 if __name__ == "__main__":

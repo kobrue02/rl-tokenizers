@@ -2,9 +2,12 @@
 (fig:resource-level-trend), the "systematicity" result: does token parity
 (English-relative) track Joshi et al. (2020)'s linguistic resource level,
 and how strong/consistent is that trend -- not just for the pooled
-average, but across individual tokenizers (fig:resource-level-trend itself
-draws one line per tokenizer; this reports whether most of those lines
-individually point the same direction, not just the pooled mean).
+average, but across individual tokenizers. This script always computes the
+per-tokenizer breakdown directly from the results JSON (independent of
+gen_resource_level_tex's own figure, which as of 2026-09-16 only draws
+individual lines for "This work" tokenizers and a mean+band per baseline
+family -- see that function's docstring) -- reports whether most tokenizers
+individually point the same direction, not just the pooled mean.
 
 Four numbers, in increasing order of how much they commit to "systematic":
   1. Pooled mean token_parity per level (what the figure's y-axis position

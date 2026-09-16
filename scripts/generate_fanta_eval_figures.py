@@ -1,9 +1,11 @@
 """Figures for the FANTA-vs-other-fairness-aware-tokenizers evaluation
 chapter (Ch.~fantaeval): one leaderboard-style bar chart per requested
-anchor language, showing each of FANTA/manta/magnet/parity_bpe/flexitokens'
-MEAN token parity relative to that anchor across every BOUQuET language --
+anchor language, showing each of FANTA/manta/magnet/parity_bpe's MEAN token
+parity relative to that anchor across every BOUQuET language --
 complementing (not replacing) scripts/generate_scoped_leaderboards.py's own
-anchor-invariant "spread" leaderboard for the same 5-tokenizer subset.
+anchor-invariant "spread" leaderboard for the same 4-tokenizer subset.
+flexitokens/fairtok excluded -- dropped from the project 2026-09-16 (see
+scripts/generate_tikz_figures.py's _REPO_TOKENIZER_NAMES comment).
 
 DERIVED, not a new evaluation run: each tokenizer's results/
 all_tokenizers_comparison.json entry already has token_parity_gm (the
@@ -41,7 +43,7 @@ from scripts.generate_tikz_figures import (
 )
 
 _OUR_WORK = {"fanta"}
-_OTHER_APPROACHES = {"manta", "magnet", "parity_bpe", "flexitokens"}
+_OTHER_APPROACHES = {"manta", "magnet", "parity_bpe"}
 _KEYS = _OUR_WORK | _OTHER_APPROACHES
 
 

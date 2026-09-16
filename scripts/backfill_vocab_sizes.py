@@ -5,11 +5,14 @@ combine_eval_results.py records vocab_size -- it was never part of
 common.eval.cross_tokenizer.evaluate_on_groups's return contract -- so this
 is sourced separately, per tokenizer family:
 
-  - This project's own 7 tokenizers (bpe/superbpe/magnet/flexitokens/manta/
-    fanta/parity_bpe): every jobs/train_*.sh usage example trains with
-    --vocab-size 50000 -- taken as the declared value. NOT verified against
-    a live checkpoint (none are present in this local checkout; the actual
-    training runs happen on the cluster). Flagged accordingly in "source".
+  - This project's own 6 tokenizers (bpe/superbpe/magnet/manta/fanta/
+    parity_bpe -- see scripts/generate_tikz_figures.py's own
+    _REPO_TOKENIZER_NAMES, which this module imports directly rather than
+    duplicating the list): every jobs/train_tokenizer/*.sh usage example
+    trains with --vocab-size 50000 -- taken as the declared value. NOT
+    verified against a live checkpoint (none are present in this local
+    checkout; the actual training runs happen on the cluster). Flagged
+    accordingly in "source".
   - claude-opus-5: Anthropic does not publish a tokenizer or vocab size --
     recorded as vocab_size=null, not guessed.
   - Everything else (HF Hub repos + tiktoken: encodings): loaded LIVE via

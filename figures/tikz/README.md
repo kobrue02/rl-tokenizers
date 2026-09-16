@@ -30,19 +30,22 @@ figures/tikz/
 │   ├── fig_resource_level.tex
 │   ├── fig_resource_level_body.tex
 │   ├── resourcelevel_family_*.dat        (one per BASELINE family -- mean+min+max band)
-│   └── resourcelevel_*.dat               (one per "This work" tokenizer only -- individual lines)
+│   └── resourcelevel_*.dat               (fanta only -- the one individually-plotted line)
 ├── api_cost/
 │   ├── fig_api_cost.tex
 │   └── fig_api_cost_body.tex             (self-contained -- 4 subplots, no .dat needed)
 ├── tokenizer_summary_table/
 │   ├── fig_tokenizer_summary_table.tex
 │   └── fig_tokenizer_summary_table_body.tex   (plain LaTeX tabular, no .dat needed)
-└── resource_level_table/
-    ├── fig_resource_level_table.tex
-    └── fig_resource_level_table_body.tex      (plain LaTeX tabular, no .dat needed)
+├── resource_level_table/
+│   ├── fig_resource_level_table.tex
+│   └── fig_resource_level_table_body.tex      (plain LaTeX tabular, no .dat needed)
+└── coverage_table/
+    ├── fig_coverage_table.tex
+    └── fig_coverage_table_body.tex            (plain LaTeX tabular, no .dat needed)
 ```
 
-The last two are TABLES, not TikZ figures -- exact-value reference companions for
+The last three are TABLES, not TikZ figures -- exact-value reference companions for
 data the figures above compress away (see "Design notes" below).
 
 ## Compiling to test
@@ -62,6 +65,7 @@ pdflatex figures/tikz/resource_level/fig_resource_level.tex
 pdflatex figures/tikz/api_cost/fig_api_cost.tex
 pdflatex figures/tikz/tokenizer_summary_table/fig_tokenizer_summary_table.tex
 pdflatex figures/tikz/resource_level_table/fig_resource_level_table.tex
+pdflatex figures/tikz/coverage_table/fig_coverage_table.tex
 ```
 
 (running e.g. `pdflatex fig_spread_leaderboard.tex` from *inside*
@@ -122,7 +126,7 @@ Each figure comes in two forms:
 \end{figure}
 ```
 
-The two tables embed the same way, via `table` (not `figure`) environments --
+The three tables embed the same way, via `table` (not `figure`) environments --
 their body files are plain `tabular` content, no `\pgfplotsset`/colors needed,
 just `\usepackage{booktabs}` once in your preamble:
 
@@ -139,6 +143,13 @@ just `\usepackage{booktabs}` once in your preamble:
   \input{figures/tikz/resource_level_table/fig_resource_level_table_body.tex}
   \caption{...}
   \label{tab:resource-level-detail}
+\end{table}
+
+\begin{table}[htbp]
+  \centering
+  \input{figures/tikz/coverage_table/fig_coverage_table_body.tex}
+  \caption{...}
+  \label{tab:coverage}
 \end{table}
 ```
 
@@ -231,11 +242,13 @@ for it beyond `tikz`/`xcolor`.)
   shaded min-max band across that family's own tokenizers (uses pgfplots'
   `fillbetween` library -- `\usepgfplotslibrary{fillbetween}` is required,
   printed at the top of `fig_resource_level.tex` alongside the usual
-  `pgfplots`/`compat` lines). "This work" tokenizers still plot individually
-  (own systems compared against each other IS this figure's point), same
-  green family hue as everywhere else, disambiguated from one another by
-  marker shape (`_OWN_SYSTEM_MARKS` in the script) rather than a second color
-  palette, so the figure still reads correctly in grayscale. Full
+  `pgfplots`/`compat` lines). Only **fanta** (`family_of()`'s "This work",
+  this thesis's own actual contribution) still plots individually, highlighted
+  with a bold star marker -- the other 5 tokenizers this project trained
+  (bpe/superbpe/magnet/manta/parity_bpe) are OTHER RESEARCHERS' published
+  methods, just reproduced here, and now correctly bucket under "Reproduced
+  baselines" like any other baseline family (2026-09-16 correction -- they
+  were wrongly lumped into "This work" before). Full
   per-tokenizer detail for every baseline family that the aggregation now
   hides lives in `resource_level_table/` instead (see below).
 - **Real API cost by provider**: 4 subplots (DeepSeek, GPT, Claude, Kimi K3 --
@@ -263,11 +276,25 @@ for it beyond `tikz`/`xcolor`.)
   compression) to stay legible.
 - **Resource-level detail table**: every tokenizer's mean token_parity per
   resource level, one row per tokenizer x one column per level -- the
-  per-tokenizer detail the resource-level trend figure no longer shows for
-  baseline families once they aggregate to a family-level band (own "This
-  work" systems already have individual figure lines, but are included here
-  too for a single complete reference).
-- Both tables use `booktabs` (`\toprule`/`\midrule`/`\bottomrule`), no other
-  package needed beyond that.
+  per-tokenizer detail the resource-level trend figure no longer shows once
+  every family except fanta aggregates to a family-level band (fanta already
+  has its own individual figure line, but is included here too for a single
+  complete reference).
+- **Coverage table**: how many of the (union-of-all-tokenizers') languages
+  each tokenizer actually got scored on, plus any repo that failed to load
+  entirely (`evaluate.py`'s per-repo error isolation -- see e.g.
+  `systems/tokenization/hf_frontier/evaluate.py`'s own docstring -- otherwise
+  silently drops a failed repo out of every other figure/table with no trace
+  it was ever attempted). Coverage is out of the union of every language ANY
+  tokenizer has data for, not a hardcoded 259, so a non-BOUQuET
+  `--eval-data-source` still gets the right denominator.
+- All three tables use `booktabs` (`\toprule`/`\midrule`/`\bottomrule`), no
+  other package needed beyond that.
+- **`--csv-out PATH`**: also writes the full per-(tokenizer, language) detail
+  (token_parity, token_parity_gm, fertility, per_lang_compression, renyi) as a
+  supplementary CSV -- not meant to be read directly in the thesis, just an
+  export for anyone who wants the exact numbers behind the heatmap/
+  resource-level figures without parsing the results JSON by hand (see
+  `write_full_csv`'s own docstring).
 - No LaTeX was available to compile-test when this was written -- verify with
   a real compiler before trusting the output.

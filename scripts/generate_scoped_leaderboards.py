@@ -13,13 +13,20 @@ produces:
      project's OWN tokenizers, so the sheer number of frontier models isn't
      diluted by them.
   2. our_work_vs_other_approaches: fanta (this thesis's own contribution) vs.
-     manta/magnet/parity_bpe/flexitokens (other published fairness-aware
-     tokenization methods, reproduced/reused here) -- a row-level family
-     OVERRIDE reclassifies the latter four under "Other approaches" (see
-     scripts/generate_tikz_figures.py's own _FAMILY_COLORS comment for why
-     this needs a manual override rather than family_of() itself, which
-     buckets all of this project's own tokenizers as "This work" everywhere
-     else, correctly).
+     manta/magnet/parity_bpe (other published fairness-aware tokenization
+     methods, reproduced/reused here) -- a row-level family OVERRIDE
+     reclassifies the latter three under "Other approaches" here specifically
+     (a more precise legend string for this dedicated fanta-vs-others chapter
+     than the main pipeline's broader "Reproduced baselines" bucket, which
+     ALSO includes bpe/superbpe -- excluded from this comparison entirely).
+     family_of() itself (scripts/generate_tikz_figures.py) already agrees on
+     the underlying fanta-vs-everything-else distinction as of the 2026-09-16
+     correction (see its own _OUR_CONTRIBUTION_NAMES/_REPRODUCED_BASELINE_NAMES
+     comment) -- the override here is purely about this chapter's own label
+     text, not fixing a wrong classification anymore. flexitokens/fairtok
+     excluded -- dropped from the project 2026-09-16 (see
+     generate_tikz_figures.py's _REPO_TOKENIZER_NAMES comment for the same
+     decision).
 
 Both reuse gen_spread_leaderboard_tex/compute_families/write_bar_data
 directly (no new figure logic) -- only the INPUT ROW SET and (for #2) the
@@ -52,7 +59,7 @@ def _expected_tikzpictures(num_rows):
     regardless of how many rows a given subset happens to have."""
     return 2 if num_rows >= MIN_ROWS_FOR_TWO_COLUMN_LEADERBOARD else 1
 
-_OTHER_APPROACHES = {"manta", "magnet", "parity_bpe", "flexitokens"}
+_OTHER_APPROACHES = {"manta", "magnet", "parity_bpe"}
 _OUR_WORK = {"fanta"}
 # Not an HF Hub model, so absent from results/hf_frontier_comparison.json's
 # own key set -- added explicitly to the "frontier" leaderboard anyway (see

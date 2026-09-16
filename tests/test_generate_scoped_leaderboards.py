@@ -120,19 +120,39 @@ def test_generate_our_work_vs_other_approaches_reclassifies_families(tmp_path):
         "manta": _fake_model_entry(5.0),
         "magnet": _fake_model_entry(4.0),
         "parity_bpe": _fake_model_entry(5.5),
-        "flexitokens": _fake_model_entry(23.0),
         "bpe": _fake_model_entry(8.3),  # NOT in either group -- must be excluded
     })
 
     out_dir = tmp_path / "out"
     rows, families = generate_our_work_vs_other_approaches_leaderboard(str(all_results), str(out_dir))
-    assert {r["name"] for r in rows} == {"fanta", "manta", "magnet", "parity_bpe", "flexitokens"}
+    assert {r["name"] for r in rows} == {"fanta", "manta", "magnet", "parity_bpe"}
     by_name = {r["name"]: r for r in rows}
     assert by_name["fanta"]["family"] == "This work"
-    for name in ("manta", "magnet", "parity_bpe", "flexitokens"):
+    for name in ("manta", "magnet", "parity_bpe"):
         assert by_name[name]["family"] == "Other approaches"
     assert set(families) == {"This work", "Other approaches"}
-    # single-column, since only 5 rows -- see gen_spread_leaderboard_tex's own
+    # single-column, since only 4 rows -- see gen_spread_leaderboard_tex's own
     # min_rows_for_two_columns default (12)
     tex_path = out_dir / "fig_spread_leaderboard_our_work_vs_other_approaches.tex"
     assert tex_path.read_text().count(r"\begin{tikzpicture}") == 1
+
+
+def test_generate_our_work_vs_other_approaches_excludes_dropped_flexitokens(tmp_path):
+    """flexitokens/fairtok were dropped from the project 2026-09-16 (see
+    generate_tikz_figures.py's _REPO_TOKENIZER_NAMES comment) -- a stray
+    flexitokens entry in the results file must not resurface here, since
+    it's no longer in _OTHER_APPROACHES and this leaderboard only includes
+    _OUR_WORK | _OTHER_APPROACHES keys (family_of() itself now buckets a
+    stray "flexitokens" as "Other" anyway, not that this leaderboard
+    consults family_of() for its own row set)."""
+    all_results = tmp_path / "all.json"
+    _write_json(all_results, {
+        "fanta": _fake_model_entry(8.0),
+        "manta": _fake_model_entry(5.0),
+        "magnet": _fake_model_entry(4.0),
+        "parity_bpe": _fake_model_entry(5.5),
+        "flexitokens": _fake_model_entry(23.0),  # stray leftover entry, must be ignored
+    })
+    out_dir = tmp_path / "out"
+    rows, _families = generate_our_work_vs_other_approaches_leaderboard(str(all_results), str(out_dir))
+    assert {r["name"] for r in rows} == {"fanta", "manta", "magnet", "parity_bpe"}
