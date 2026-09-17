@@ -1,10 +1,13 @@
 """Renders scripts.evaluate_morphology_all's own combined JSON
-(results/morphology_all.json / results/morphology_indigenous_panel.json) as
-a markdown comparison report (scripts/generate_encoder_comparison_table.py's
-own summary/detailed-table convention) plus one TikZ/pgfplots scatter figure
-(scripts/generate_tikz_figures.py's own house style -- .dat tables +
-standalone/`_body.tex` pairs, no matplotlib) plotting mean MED against mean
-Consistency F1, one point per system.
+(results/morphology_all.json / results/morphology_indigenous_panel.json) as:
+1. a markdown comparison report (scripts/generate_encoder_comparison_table.py's
+   own summary/detailed-table convention) for personal/reference use,
+2. a real \\input-able LaTeX table (gen_morphology_summary_table_tex --
+   generate_tikz_figures.py's own gen_tokenizer_summary_table_tex house
+   style, booktabs + standalone/`_body.tex` pair), and
+3. one TikZ/pgfplots scatter figure (same house style -- .dat tables + a
+   standalone/`_body.tex` pair, no matplotlib) plotting mean MED against
+   mean Consistency F1, one point per system.
 
 Reuses generate_tikz_figures.py's own family_of/short_name/esc/fam_key/
 _FAMILY_COLORS/_FAMILY_RGB/_write_standalone_and_body directly (same family
@@ -263,6 +266,40 @@ def gen_morphology_landscape_tex(rows, families, out_dir, data_prefix=""):
     return full_tex
 
 
+def gen_morphology_summary_table_tex(rows, out_dir):
+    """Full ranked morphology summary (name, family, MED, Consistency F1,
+    fertility, n_langs) -- the exact-value reference companion to
+    gen_morphology_landscape_tex's scatter, which only labels this project's
+    own 6 systems. Sorted by mean MED ascending, matching `rows`' own
+    existing sort order from load_morphology_rows. Same
+    \\documentclass{standalone}+booktabs house style as
+    generate_tikz_figures.py's own gen_tokenizer_summary_table_tex (fanta's
+    thesis-comparable table), \\input-able directly, not just a markdown
+    report for personal reference.
+
+    n_langs is included (unlike gen_tokenizer_summary_table_tex's own table,
+    where every tokenizer covers the same fixed BOUQuET set) because
+    coverage genuinely varies here -- e.g. magnet scores 10/16 languages,
+    not 16/16 -- and silently omitting that would make its numbers look
+    directly comparable to a full-coverage system's when they aren't."""
+    preamble = [r"\documentclass{standalone}", r"\usepackage{booktabs}"]
+    body = [
+        r"\begin{tabular}{llrrrr}",
+        r"\toprule",
+        r"Tokenizer & Family & MED & Consistency F1 & Fertility & N \\",
+        r"\midrule",
+    ]
+    for r in rows:
+        fertility_str = f"{r['mean_fertility']:.2f}" if r["mean_fertility"] is not None else "--"
+        body.append(
+            r"%s & %s & %.2f & %.3f & %s & %d \\"
+            % (esc(r["short"]), esc(r["family"]), r["mean_med"], r["mean_f1"], fertility_str, r["n_langs"])
+        )
+    body += [r"\bottomrule", r"\end{tabular}"]
+    full_tex, _ = _write_standalone_and_body("morphology_summary_table", preamble, body, out_dir)
+    return full_tex
+
+
 def generate(input_path, output_dir, indigenous_panel_input=None, data_prefix=None, exclude=None, table_output=None):
     data_prefix = data_prefix if data_prefix is not None else (output_dir.rstrip("/") + "/")
     rows, all_langs = load_morphology_rows(input_path, indigenous_panel_input, exclude=exclude)
@@ -274,13 +311,18 @@ def generate(input_path, output_dir, indigenous_panel_input=None, data_prefix=No
     write_scatter_data(rows, families, output_dir)
     tex = gen_morphology_landscape_tex(rows, families, output_dir, data_prefix=data_prefix)
     _assert_well_formed(tex, "fig_morphology_landscape.tex")
+    table_tex = gen_morphology_summary_table_tex(rows, output_dir)
+    _assert_well_formed(table_tex, "fig_morphology_summary_table.tex", expected_tikzpictures=0)
 
     if table_output:
         os.makedirs(os.path.dirname(table_output) or ".", exist_ok=True)
         with open(table_output, "w", encoding="utf-8") as f:
             f.write(render_report(rows, all_langs))
         print(f"wrote comparison tables for {len(rows)} system(s) to {table_output}")
-    print(f"wrote morphology_landscape scatter ({len(rows)} systems, {len(all_langs)} languages) to {output_dir}")
+    print(
+        f"wrote morphology_landscape scatter + morphology_summary_table "
+        f"({len(rows)} systems, {len(all_langs)} languages) to {output_dir}"
+    )
     return rows, all_langs
 
 

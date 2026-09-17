@@ -1,0 +1,40 @@
+\documentclass{standalone}
+\usepackage{booktabs}
+\begin{document}
+\begin{tabular}{llrrrr}
+\toprule
+Tokenizer & Family & MED & Consistency F1 & Fertility & N \\
+\midrule
+fanta & This work & 2.41 & 0.132 & 1.47 & 16 \\
+xlm-roberta-base & Encoder-only & 2.95 & 0.332 & 1.90 & 16 \\
+magnet & Reproduced baselines & 3.17 & 0.394 & 1.98 & 10 \\
+bert-base-multilingual-cased & Encoder-only & 3.25 & 0.279 & 2.15 & 16 \\
+gemma-7b & Other & 3.31 & 0.280 & 2.07 & 16 \\
+Muse-Glimmer-30B & Other & 3.41 & 0.290 & 2.02 & 16 \\
+gpt-oss-20b & OpenAI/tiktoken & 3.44 & 0.299 & 2.02 & 16 \\
+gpt-oss-120b & OpenAI/tiktoken & 3.44 & 0.299 & 2.02 & 16 \\
+tk:o200k\_base & OpenAI/tiktoken & 3.44 & 0.299 & 2.02 & 16 \\
+Qwen3.8-2.4T-A95B & Chinese labs & 3.54 & 0.290 & 2.11 & 16 \\
+DeepSeek-V4-Pro & Chinese labs & 3.76 & 0.306 & 2.35 & 16 \\
+DeepSeek-R1 & Chinese labs & 3.76 & 0.306 & 2.35 & 16 \\
+bloom & Other & 3.76 & 0.315 & 2.39 & 16 \\
+Llama-3.1-8B-Instruct & Meta/Llama & 3.86 & 0.294 & 2.39 & 16 \\
+Llama-3.3-70B-Instruct & Meta/Llama & 3.86 & 0.294 & 2.39 & 16 \\
+Kimi-K3 & Chinese labs & 3.87 & 0.307 & 2.52 & 16 \\
+bpe & Reproduced baselines & 3.87 & 0.329 & 2.47 & 16 \\
+Qwen3-8B & Chinese labs & 3.88 & 0.309 & 2.44 & 16 \\
+Llama-2-7b-hf & Meta/Llama & 3.98 & 0.315 & 2.59 & 16 \\
+tk:cl100k\_base & OpenAI/tiktoken & 4.05 & 0.308 & 2.55 & 16 \\
+superbpe & Reproduced baselines & 4.05 & 0.336 & 2.46 & 16 \\
+Mistral-7B-v0.1 & Other & 4.12 & 0.313 & 2.68 & 16 \\
+falcon-7b & Other & 4.68 & 0.289 & 2.97 & 16 \\
+gpt2 & OpenAI/tiktoken & 5.10 & 0.278 & 3.41 & 16 \\
+opt-125m & Other & 5.10 & 0.278 & 3.41 & 16 \\
+parity\_bpe & Reproduced baselines & 7.83 & 0.380 & 5.25 & 16 \\
+blt-1b & Other & 8.25 & 0.375 & 4.01 & 16 \\
+canine-s & Other & 9.61 & 0.381 & 6.64 & 16 \\
+manta & Reproduced baselines & 11.20 & 0.380 & 7.55 & 16 \\
+byt5-small & Other & 11.20 & 0.380 & 7.55 & 16 \\
+\bottomrule
+\end{tabular}
+\end{document}

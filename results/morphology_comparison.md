@@ -102,26 +102,3 @@
 | google/canine-s | 0.087 | 0.740 | 0.407 | 0.157 | 0.106 | 0.219 | 0.215 | 0.970 | 0.110 | 1.000 | 0.115 | 0.925 | 0.223 | 0.266 | 0.163 | 0.397 |
 | manta | 0.087 | 0.740 | 0.402 | 0.157 | 0.106 | 0.219 | 0.215 | 0.970 | 0.108 | 1.000 | 0.104 | 0.925 | 0.220 | 0.266 | 0.163 | 0.396 |
 | google/byt5-small | 0.087 | 0.740 | 0.402 | 0.157 | 0.106 | 0.219 | 0.215 | 0.970 | 0.108 | 1.000 | 0.104 | 0.925 | 0.220 | 0.266 | 0.163 | 0.396 |
-
-## FANTA loss-term ablation (2026-09-19)
-
-Isolates FantaConfig.lambda_rate (rate-anchor term) from lambda_fair
-(Gini fairness term) -- see configs/train_tokenizer/fanta_ablation_*_50k.yml
-for the full setup. manta shares FANTA's exact architecture with neither
-term, so it serves as the natural "zero" baseline.
-
-| variant | mean_med | mean_consistency_f1 | n_langs |
-| --- | --- | --- | --- |
-| fanta (both terms) | 2.550 | 0.148 | 13 |
-| fanta_ablation_anchor_only (anchor only) | 2.784 | 0.162 | 13 |
-| fanta_ablation_gini_only (gini only) | 11.442 | 0.428 | 13 |
-| manta (neither term) | 11.442 | 0.428 | 13 |
-
-**Finding**: gini_only's MED is byte-for-byte identical to manta's for
-every language -- the Gini term alone contributes NO morphological
-benefit and cannot prevent the documented degenerate compression-rate
-collapse (fanta/train.py's own docstring). anchor_only recovers ~93% of
-full fanta's improvement over manta on its own; the Gini term's
-remaining contribution is refining cross-lingual equality once the
-anchor has already set sensible segment granularity, not driving the
-morphological alignment itself.

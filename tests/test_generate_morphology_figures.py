@@ -1,7 +1,8 @@
 """Tests for scripts.generate_morphology_figures: loading/merging
 morphology_all.json (+ an optional indigenous_panel companion file),
---exclude, the markdown summary/detailed tables, and the MED-vs-Consistency-F1
-scatter figure (well-formedness + own-system labeling)."""
+--exclude, the markdown summary/detailed tables, the LaTeX summary table,
+and the MED-vs-Consistency-F1 scatter figure (well-formedness + own-system
+labeling)."""
 
 import json
 
@@ -10,6 +11,7 @@ from scripts.generate_morphology_figures import (
     build_summary_table,
     compute_families,
     gen_morphology_landscape_tex,
+    gen_morphology_summary_table_tex,
     generate,
     load_morphology_rows,
 )
@@ -148,6 +150,21 @@ def test_gen_morphology_landscape_tex_is_well_formed_and_labels_own_systems(tmp_
     assert "external-model" not in tex
 
 
+def test_gen_morphology_summary_table_tex_is_well_formed_and_reports_all_columns(tmp_path):
+    rows, _ = load_morphology_rows(_make_full_fixture(tmp_path))
+    tex = gen_morphology_summary_table_tex(rows, str(tmp_path))
+    _assert_well_formed(tex, "fig_morphology_summary_table.tex", expected_tikzpictures=0)
+    assert r"\begin{tabular}{llrrrr}" in tex
+    assert "Tokenizer & Family & MED & Consistency F1 & Fertility & N" in tex
+    assert "fanta" in tex and "bpe" in tex and "external-model" in tex
+
+
+def test_gen_morphology_summary_table_tex_renders_dash_for_missing_fertility(tmp_path):
+    rows = [{"name": "bpe", "short": "bpe", "family": "Reproduced baselines", "mean_med": 2.0, "mean_f1": 0.5, "mean_fertility": None, "n_langs": 1}]
+    tex = gen_morphology_summary_table_tex(rows, str(tmp_path))
+    assert "bpe & Reproduced baselines & 2.00 & 0.500 & -- & 1" in tex
+
+
 def _make_full_fixture(tmp_path):
     path = tmp_path / "morphology_all.json"
     _write(path, {
@@ -168,6 +185,8 @@ def test_generate_writes_table_and_figure_end_to_end(tmp_path):
     assert len(rows) == 3
     assert (out_dir / "fig_morphology_landscape.tex").exists()
     assert (out_dir / "fig_morphology_landscape_body.tex").exists()
+    assert (out_dir / "fig_morphology_summary_table.tex").exists()
+    assert (out_dir / "fig_morphology_summary_table_body.tex").exists()
     assert table_output.exists()
     report = table_output.read_text()
     assert "## Summary" in report
