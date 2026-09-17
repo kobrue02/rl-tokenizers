@@ -1,0 +1,63 @@
+# scripts/evaluate_morphology_all.py -- sbatch jobs/eval/morphology_all.sh -c configs/eval/morphology_indigenous_panel.yml
+#
+# Same driver/systems as configs/eval/morphology_all.yml, but eval_data_source:
+# indigenous_panel instead of bouquet -- covers aym/cni/shp (the 3
+# indigenous-panel languages with real UniMorph-derived gold data, see
+# common.data.prepare_morphology_gold's own docstring), which the main
+# morphology_all.yml run can NEVER score: BOUQuET simply doesn't carry
+# those bare-code languages at all, so no induce_fn is ever built for them
+# there, regardless of gold data existing. Requires a one-time
+# `python -m common.data.prepare_indigenous_panel` run first (same
+# prerequisite as configs/eval/own_tokenizers_indigenous_panel.yml).
+#
+# output_dir/combined_output are DELIBERATELY different from
+# configs/eval/morphology_all.yml's own (results vs.
+# results/indigenous_panel_morphology) -- the driver script writes
+# {output_dir}/{name}_morphology.json per system with NO panel tag in the
+# filename, so reusing the same output_dir would either silently skip this
+# run entirely (mistaking the main-panel file for "already done") or
+# overwrite it, depending on --force. Same "different paths so runs don't
+# collide" convention as configs/eval/claude_indigenous_panel.yml vs.
+# configs/eval/claude.yml.
+#
+# blt gets --num-groups 50 (same reasoning as morphology_all.yml's own
+# comment) -- indigenous_panel's own total row count is NOT small (the
+# es-anchor bucket alone, dominated by arn-es, has ~257k rows -- see
+# configs/eval/claude_indigenous_panel.yml's own comment for the real
+# incident this caused for Claude's rate-limited API), and blt is a real
+# per-sentence transformer forward pass with no existing indigenous_panel
+# run to calibrate cost against. The other 7 systems are uncapped, matching
+# configs/eval/own_tokenizers_indigenous_panel.yml/configs/eval/
+# hf_frontier_indigenous_panel.yml's own already-completed, uncapped runs
+# (free/fast local compute, confirmed fine at full scale for both).
+#
+# MAGNET CAVEAT (see common.eval.cross_tokenizer.run_eval_cli's own
+# docstring): magnet resolves each language via eval_lang_to_script, and
+# indigenous_panel's bare codes (aym, crk, ...) aren't in
+# magnet.train.LANG_SCRIPT -- magnet will score 0 languages here, expected,
+# not a bug.
+morphology_gold_dir: data/morphology_gold
+output_dir: results/indigenous_panel_morphology
+combined_output: results/morphology_indigenous_panel.json
+systems:
+  - name: bpe
+    args: ["--checkpoint", "checkpoints/bpe_50k.json", "--eval-data-source", "indigenous_panel"]
+  - name: superbpe
+    args: ["--checkpoint", "checkpoints/superbpe_6351128.pt", "--eval-data-source", "indigenous_panel"]
+  - name: fanta
+    args: ["--checkpoint", "checkpoints/fanta_6284655.pt", "--eval-data-source", "indigenous_panel"]
+  - name: magnet
+    args: ["--checkpoint", "checkpoints/magnet_6269682.pt", "--eval-data-source", "indigenous_panel"]
+  - name: manta
+    args: ["--checkpoint", "checkpoints/manta_6269684.pt", "--eval-data-source", "indigenous_panel"]
+  - name: parity_bpe
+    args: ["--checkpoint", "checkpoints/parity_bpe_6370066.json", "--eval-data-source", "indigenous_panel"]
+  - name: hf_frontier
+    args:
+      - "--hf-repo-id"
+      - "deepseek-ai/DeepSeek-V4-Pro,moonshotai/Kimi-K3,meta-llama/Llama-3.1-8B-Instruct,Qwen/Qwen3.8-2.4T-A95B,meta-llama/Llama-3.3-70B-Instruct,openai-community/gpt2,openai/gpt-oss-20b,deepseek-ai/DeepSeek-R1,openai/gpt-oss-120b,facebook/opt-125m,Qwen/Qwen3-8B,mistralai/Mistral-7B-v0.1,NousResearch/Llama-2-7b-hf,google/gemma-7b,bigscience/bloom,tiiuae/falcon-7b,bert-base-multilingual-cased,xlm-roberta-base,meta-models/Muse-Glimmer-30B,tiktoken:cl100k_base,tiktoken:o200k_base,google/byt5-small,google/canine-s"
+      - "--trust-remote-code"
+      - "--eval-data-source"
+      - "indigenous_panel"
+  - name: blt
+    args: ["--device", "cpu", "--eval-data-source", "indigenous_panel", "--num-groups", "50"]
