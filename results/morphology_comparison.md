@@ -1,37 +1,37 @@
 ## Summary (sorted by mean MED, ascending)
 
-| system | family | n_langs | mean_med | mean_consistency_f1 |
-| --- | --- | --- | --- | --- |
-| fanta | This work | 13 | 2.550 | 0.148 |
-| xlm-roberta-base | Encoder-only | 13 | 2.722 | 0.340 |
-| bert-base-multilingual-cased | Encoder-only | 13 | 3.134 | 0.290 |
-| magnet | Reproduced baselines | 10 | 3.173 | 0.394 |
-| google/gemma-7b | Other | 13 | 3.218 | 0.281 |
-| meta-models/Muse-Glimmer-30B | Other | 13 | 3.297 | 0.306 |
-| openai/gpt-oss-20b | OpenAI/tiktoken | 13 | 3.347 | 0.321 |
-| openai/gpt-oss-120b | OpenAI/tiktoken | 13 | 3.347 | 0.321 |
-| tiktoken:o200k_base | OpenAI/tiktoken | 13 | 3.347 | 0.321 |
-| Qwen/Qwen3.8-2.4T-A95B | Chinese labs | 13 | 3.435 | 0.310 |
-| deepseek-ai/DeepSeek-V4-Pro | Chinese labs | 13 | 3.671 | 0.328 |
-| deepseek-ai/DeepSeek-R1 | Chinese labs | 13 | 3.671 | 0.328 |
-| bigscience/bloom | Other | 13 | 3.740 | 0.340 |
-| meta-llama/Llama-3.1-8B-Instruct | Meta/Llama | 13 | 3.775 | 0.315 |
-| meta-llama/Llama-3.3-70B-Instruct | Meta/Llama | 13 | 3.775 | 0.315 |
-| NousResearch/Llama-2-7b-hf | Meta/Llama | 13 | 3.786 | 0.338 |
-| moonshotai/Kimi-K3 | Chinese labs | 13 | 3.798 | 0.332 |
-| Qwen/Qwen3-8B | Chinese labs | 13 | 3.800 | 0.334 |
-| bpe | Reproduced baselines | 13 | 3.863 | 0.351 |
-| mistralai/Mistral-7B-v0.1 | Other | 13 | 3.942 | 0.337 |
-| tiktoken:cl100k_base | OpenAI/tiktoken | 13 | 4.010 | 0.332 |
-| superbpe | Reproduced baselines | 13 | 4.044 | 0.362 |
-| tiiuae/falcon-7b | Other | 13 | 4.771 | 0.309 |
-| openai-community/gpt2 | OpenAI/tiktoken | 13 | 5.245 | 0.298 |
-| facebook/opt-125m | Other | 13 | 5.245 | 0.298 |
-| facebook/blt-1b | Other | 13 | 7.948 | 0.422 |
-| parity_bpe | Reproduced baselines | 13 | 7.988 | 0.421 |
-| google/canine-s | Other | 13 | 9.565 | 0.430 |
-| manta | Reproduced baselines | 13 | 11.442 | 0.428 |
-| google/byt5-small | Other | 13 | 11.442 | 0.428 |
+| system | family | n_langs | mean_med | mean_consistency_f1 | mean_fertility |
+| --- | --- | --- | --- | --- | --- |
+| fanta | This work | 13 | 2.550 | 0.148 | 1.450 |
+| xlm-roberta-base | Encoder-only | 13 | 2.722 | 0.340 | 1.651 |
+| bert-base-multilingual-cased | Encoder-only | 13 | 3.134 | 0.290 | 1.941 |
+| magnet | Reproduced baselines | 10 | 3.173 | 0.394 | 1.976 |
+| google/gemma-7b | Other | 13 | 3.218 | 0.281 | 1.853 |
+| meta-models/Muse-Glimmer-30B | Other | 13 | 3.297 | 0.306 | 1.782 |
+| openai/gpt-oss-20b | OpenAI/tiktoken | 13 | 3.347 | 0.321 | 1.802 |
+| openai/gpt-oss-120b | OpenAI/tiktoken | 13 | 3.347 | 0.321 | 1.802 |
+| tiktoken:o200k_base | OpenAI/tiktoken | 13 | 3.347 | 0.321 | 1.802 |
+| Qwen/Qwen3.8-2.4T-A95B | Chinese labs | 13 | 3.435 | 0.310 | 1.879 |
+| deepseek-ai/DeepSeek-V4-Pro | Chinese labs | 13 | 3.671 | 0.328 | 2.142 |
+| deepseek-ai/DeepSeek-R1 | Chinese labs | 13 | 3.671 | 0.328 | 2.142 |
+| bigscience/bloom | Other | 13 | 3.740 | 0.340 | 2.243 |
+| meta-llama/Llama-3.1-8B-Instruct | Meta/Llama | 13 | 3.775 | 0.315 | 2.183 |
+| meta-llama/Llama-3.3-70B-Instruct | Meta/Llama | 13 | 3.775 | 0.315 | 2.183 |
+| NousResearch/Llama-2-7b-hf | Meta/Llama | 13 | 3.786 | 0.338 | 2.377 |
+| moonshotai/Kimi-K3 | Chinese labs | 13 | 3.798 | 0.332 | 2.337 |
+| Qwen/Qwen3-8B | Chinese labs | 13 | 3.800 | 0.334 | 2.246 |
+| bpe | Reproduced baselines | 13 | 3.863 | 0.351 | 2.323 |
+| mistralai/Mistral-7B-v0.1 | Other | 13 | 3.942 | 0.337 | 2.474 |
+| tiktoken:cl100k_base | OpenAI/tiktoken | 13 | 4.010 | 0.332 | 2.381 |
+| superbpe | Reproduced baselines | 13 | 4.044 | 0.362 | 2.316 |
+| tiiuae/falcon-7b | Other | 13 | 4.771 | 0.309 | 2.864 |
+| openai-community/gpt2 | OpenAI/tiktoken | 13 | 5.245 | 0.298 | 3.377 |
+| facebook/opt-125m | Other | 13 | 5.245 | 0.298 | 3.377 |
+| facebook/blt-1b | Other | 13 | 7.948 | 0.422 | 3.496 |
+| parity_bpe | Reproduced baselines | 13 | 7.988 | 0.421 | 5.126 |
+| google/canine-s | Other | 13 | 9.565 | 0.430 | 6.304 |
+| manta | Reproduced baselines | 13 | 11.442 | 0.428 | 7.372 |
+| google/byt5-small | Other | 13 | 11.442 | 0.428 | 7.372 |
 
 ## Detailed: Morphological Edit Distance per language
 

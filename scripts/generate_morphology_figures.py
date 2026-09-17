@@ -69,12 +69,37 @@ from scripts.generate_tikz_figures import (
 _OWN_SYSTEM_NAMES = {"bpe", "superbpe", "fanta", "manta", "magnet", "parity_bpe"}
 
 
+def _fertility_by_lang(result):
+    """Fertility (common.eval.metrics.fertility, tokens/word -- see that
+    function's own docstring) lives at a DIFFERENT path depending on which
+    eval_data_source produced `result`: flat at result["fertility"] for a
+    normal bouquet/bouquet_test run, but nested under result["combined"]
+    for an indigenous_panel run (common.eval.cross_tokenizer.
+    evaluate_on_indigenous_panel's own {"combined", "token_parity_by_anchor",
+    "morphology_spread", "morphology"} shape -- same distinction
+    hf_frontier/evaluate.py's own wandb logging already makes)."""
+    if "combined" in result:
+        return result["combined"].get("fertility", {})
+    return result.get("fertility", {})
+
+
 def load_morphology_rows(input_path, indigenous_panel_input=None, exclude=None):
     """Returns (rows, all_langs). rows: one dict per system with name/short/
     family/langs ({lang: {med, consistency_f1, n_words, source}})/mean_med/
-    mean_f1/n_langs, sorted by mean_med ascending. A system with zero scored
-    languages (e.g. --exclude, or a system present in one input but not the
-    other) is dropped entirely -- there's no meaningful mean to report.
+    mean_f1/mean_fertility/n_langs, sorted by mean_med ascending. A system
+    with zero scored languages (e.g. --exclude, or a system present in one
+    input but not the other) is dropped entirely -- there's no meaningful
+    mean to report.
+
+    mean_fertility is macro-averaged over the SAME language set MED/F1 were
+    scored on (not every language that system's own bouquet/bouquet_test run
+    covers) -- MorphBPE's own paper reports fertility alongside MED/
+    Consistency F1 in one table, and this keeps the three numbers directly
+    comparable (same language subset), rather than averaging fertility over
+    a much larger, different language set. A language with morphology data
+    but no fertility entry (shouldn't happen -- same eval_groups run
+    produces both -- but guarded rather than assumed) is skipped for the
+    fertility mean only, not dropped from the row entirely.
 
     indigenous_panel_input: optional second combined JSON (same shape,
     scripts/evaluate_morphology_all.py's own indigenous_panel-sourced
@@ -91,9 +116,11 @@ def load_morphology_rows(input_path, indigenous_panel_input=None, exclude=None):
         return {k: v for k, v in data.items() if k != "_failed" and isinstance(v, dict) and k not in exclude}
 
     combined_langs = {}
+    combined_fertility = {}
     for path in [input_path] + ([indigenous_panel_input] if indigenous_panel_input else []):
         for name, result in _load(path).items():
             combined_langs.setdefault(name, {}).update(result.get("morphology", {}))
+            combined_fertility.setdefault(name, {}).update(_fertility_by_lang(result))
 
     rows = []
     all_langs = set()
@@ -102,11 +129,13 @@ def load_morphology_rows(input_path, indigenous_panel_input=None, exclude=None):
             continue
         meds = [m["med"] for m in langs.values()]
         f1s = [m["consistency_f1"] for m in langs.values()]
+        fertilities = [combined_fertility[name][lang] for lang in langs if lang in combined_fertility.get(name, {})]
         all_langs.update(langs)
         rows.append({
             "name": name, "short": short_name(name), "family": family_of(name),
             "langs": langs, "n_langs": len(langs),
             "mean_med": sum(meds) / len(meds), "mean_f1": sum(f1s) / len(f1s),
+            "mean_fertility": sum(fertilities) / len(fertilities) if fertilities else None,
         })
     rows.sort(key=lambda r: r["mean_med"])
     return rows, sorted(all_langs)
@@ -124,8 +153,11 @@ def render_markdown_table(header, rows):
 
 
 def build_summary_table(rows):
-    header = ["system", "family", "n_langs", "mean_med", "mean_consistency_f1"]
-    out = [[r["name"], r["family"], str(r["n_langs"]), _fmt(r["mean_med"]), _fmt(r["mean_f1"])] for r in rows]
+    header = ["system", "family", "n_langs", "mean_med", "mean_consistency_f1", "mean_fertility"]
+    out = [
+        [r["name"], r["family"], str(r["n_langs"]), _fmt(r["mean_med"]), _fmt(r["mean_f1"]), _fmt(r["mean_fertility"])]
+        for r in rows
+    ]
     return header, out
 
 

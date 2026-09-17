@@ -84,10 +84,46 @@ def test_load_morphology_rows_keeps_system_present_in_only_one_file(tmp_path):
 
 
 def test_build_summary_table_reports_family_and_n_langs():
-    rows = [{"name": "fanta", "family": "This work", "n_langs": 13, "mean_med": 2.55, "mean_f1": 0.15}]
+    rows = [{
+        "name": "fanta", "family": "This work", "n_langs": 13,
+        "mean_med": 2.55, "mean_f1": 0.15, "mean_fertility": 1.42,
+    }]
     header, table_rows = build_summary_table(rows)
-    assert header == ["system", "family", "n_langs", "mean_med", "mean_consistency_f1"]
-    assert table_rows == [["fanta", "This work", "13", "2.550", "0.150"]]
+    assert header == ["system", "family", "n_langs", "mean_med", "mean_consistency_f1", "mean_fertility"]
+    assert table_rows == [["fanta", "This work", "13", "2.550", "0.150", "1.420"]]
+
+
+def test_build_summary_table_renders_dash_when_fertility_unavailable():
+    rows = [{"name": "fanta", "family": "This work", "n_langs": 13, "mean_med": 2.55, "mean_f1": 0.15, "mean_fertility": None}]
+    _, table_rows = build_summary_table(rows)
+    assert table_rows[0][-1] == "--"
+
+
+def test_load_morphology_rows_computes_mean_fertility_over_same_langs_as_med(tmp_path):
+    """fertility must be macro-averaged over the SAME language subset MED/F1
+    were scored on -- not every language that system's bouquet run covers
+    (e.g. a language with fertility but no gold morphology data must not
+    silently pull the fertility mean toward it)."""
+    path = tmp_path / "morphology_all.json"
+    data = _result({"eng_Latn": (2.0, 0.5), "deu_Latn": (4.0, 0.3)})
+    data["fertility"] = {"eng_Latn": 1.5, "deu_Latn": 2.5, "fra_Latn": 100.0}  # fra has no morphology data
+    _write(path, {"bpe": data})
+
+    rows, _ = load_morphology_rows(str(path))
+    assert rows[0]["mean_fertility"] == 2.0  # (1.5 + 2.5) / 2, fra_Latn excluded
+
+
+def test_load_morphology_rows_reads_fertility_from_combined_for_indigenous_panel_shape(tmp_path):
+    """evaluate_on_indigenous_panel's own results shape nests fertility under
+    "combined", not at the top level -- see _fertility_by_lang's own
+    docstring for why."""
+    path = tmp_path / "morphology_indigenous_panel.json"
+    data = _result({"aym": (3.0, 0.2)})
+    data["combined"] = {"fertility": {"aym": 4.0}}
+    _write(path, {"bpe": data})
+
+    rows, _ = load_morphology_rows(str(path))
+    assert rows[0]["mean_fertility"] == 4.0
 
 
 def test_build_detailed_table_uses_dashes_for_missing_language_coverage():
