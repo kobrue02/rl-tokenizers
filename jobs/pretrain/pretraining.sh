@@ -62,11 +62,10 @@
 # multi-day run's own read volume.
 #
 # Usage:
-#   sbatch jobs/pretrain/pretraining.sh --shard-dir pretrain_data/glot500_bpe \
+#   sbatch jobs/pretrain/pretraining.sh --shard-dir pretrain_data/culturax_bpe_large \
 #       --model-size small --total-steps 50000 --seq-len 1024 --per-device-batch-size 16
-#   sbatch --gres=gpu:4 jobs/pretrain/pretraining.sh -c configs/pretrain/fanta_large.yml
-#   sbatch --gres=gpu:8 --cpus-per-task=32 jobs/pretrain/pretraining.sh -c configs/pretrain/bpe_large.yml
 #   sbatch --partition=gpu_h100 --gres=gpu:4 jobs/pretrain/pretraining.sh -c configs/pretrain/bpe_culturax.yml
+#   sbatch --partition=gpu_h100 --gres=gpu:4 jobs/pretrain/pretraining.sh -c configs/pretrain/fanta_culturax.yml
 #   # gpu_h100 is bwUniCluster 3.0's DEDICATED H100 queue (AMD EPYC 9454,
 #   # 94GiB/GPU, 15.36TB local NVMe) -- distinct from the shared
 #   # gpu_a100_il/gpu_h100_il pool (Ice Lake, 80GiB/GPU, 6.4TB, either card

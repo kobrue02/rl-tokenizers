@@ -31,10 +31,10 @@
 # Usage:
 #   sbatch jobs/prep/pretraining_data_gpu.sh --dataset glot500 --langs all \
 #       --dataset-config "$WORK_ROOT/data/glot500" \
-#       --system fanta --checkpoint checkpoints/fanta_50k.pt \
-#       --vocab-json vocab_out/fanta_50k_vocab.json \
+#       --system fanta --checkpoint checkpoints/fanta_6284655.pt \
+#       --vocab-json vocab_out/fanta_vocab_6284655.json \
 #       --output-dir pretrain_data/glot500_fanta --max-tokens 5000000000
-#   sbatch jobs/prep/pretraining_data_gpu.sh -c configs/prep/fanta_50k.yml
+#   sbatch jobs/prep/pretraining_data_gpu.sh -c configs/prep/fanta_culturax.yml
 #
 # All flags forward directly to systems/pretraining/data_prep.py -- see
 # `python3 -m systems.pretraining.data_prep --help`. Requires HF_TOKEN.

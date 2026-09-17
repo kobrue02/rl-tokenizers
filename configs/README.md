@@ -69,19 +69,26 @@ once first — see that module's own docstring).
   aren't source-specific); train on a single source at a time to override
   either.
 
-## Example: the `bpe_50k` experiment (bpe/superbpe -- CPU-only tokenizer)
+## Example: the `bpe_culturax` experiment (bpe/superbpe -- CPU-only tokenizer)
+
+`bpe_culturax`/`fanta_culturax` are this project's current "large"-scale
+decoder experiments -- CulturaX (document-level web text) replaced Glot500
+as the pretraining corpus (2026-09-19: Glot500's own documents were
+confirmed to be single sentences/short fragments, not real documents --
+see `configs/prep/bpe_culturax.yml`'s own comment; every Glot500-sourced
+config/checkpoint/result this project had was removed accordingly).
+`generate`/`eval` configs for the CulturaX runs don't exist yet as of this
+writing -- copy `configs/generate/`/`configs/eval/`'s own shape once a
+`bpe_culturax`/`fanta_culturax` checkpoint reaches `final.pt`.
 
 ```bash
 sbatch jobs/train_tokenizer/bpe.sh -c configs/train_tokenizer/bpe_50k.yml
-sbatch jobs/prep/pretraining_data.sh -c configs/prep/bpe_50k.yml   # CPU (bpe/superbpe need no GPU)
+sbatch jobs/prep/pretraining_data.sh -c configs/prep/bpe_culturax.yml   # CPU (bpe/superbpe need no GPU)
 
-train_id=$(sbatch --parsable jobs/pretrain/pretraining.sh -c configs/pretrain/bpe_50k.yml)
-
-sbatch --dependency=afterok:$train_id jobs/generate/samples.sh -c configs/generate/bpe_50k.yml
-sbatch --dependency=afterok:$train_id jobs/eval/pretrained.sh -c configs/eval/bpe_50k.yml
+sbatch --gres=gpu:4 --partition=gpu_h100 jobs/pretrain/pretraining.sh -c configs/pretrain/bpe_culturax.yml
 ```
 
-## Example: the `fanta_50k` experiment (a NEURAL, span-family tokenizer)
+## Example: the `fanta_culturax` experiment (a NEURAL, span-family tokenizer)
 
 Same shape, two differences: data prep needs a GPU (`jobs/prep/pretraining_data_gpu.sh`,
 not the CPU version -- see that script's own docstring for why: a neural
@@ -92,20 +99,18 @@ systems need it and bpe/superbpe don't).
 
 ```bash
 sbatch jobs/train_tokenizer/fanta.sh -c configs/train_tokenizer/fanta_50k.yml
-sbatch jobs/prep/pretraining_data_gpu.sh -c configs/prep/fanta_50k.yml
+sbatch jobs/prep/pretraining_data_gpu.sh -c configs/prep/fanta_culturax.yml
 
-train_id=$(sbatch --parsable jobs/pretrain/pretraining.sh -c configs/pretrain/fanta_50k.yml)
-
-sbatch --dependency=afterok:$train_id jobs/generate/samples.sh -c configs/generate/fanta_50k.yml
-sbatch --dependency=afterok:$train_id jobs/eval/pretrained.sh -c configs/eval/fanta_50k.yml
+sbatch --gres=gpu:4 --partition=gpu_h100 jobs/pretrain/pretraining.sh -c configs/pretrain/fanta_culturax.yml
 ```
 
-Note `configs/pretrain/fanta_50k.yml` sets its own `output_dir: checkpoints/pretrain_fanta`
--- `systems.pretraining.train`'s default output_dir (`checkpoints/pretrain`) is shared
-across every run that doesn't override it, so two pretraining runs active at
-the same time (e.g. bpe and fanta) MUST use different `output_dir`s or one
-will overwrite the other's checkpoints. Give every new experiment its own
-`output_dir` for exactly this reason.
+Note `configs/pretrain/bpe_culturax.yml`/`fanta_culturax.yml` each set their
+own distinct `output_dir` (`checkpoints/pretrain_bpe_culturax_large`/
+`checkpoints/pretrain_fanta_culturax_large`) -- `systems.pretraining.train`'s
+default output_dir (`checkpoints/pretrain`) is shared across every run that
+doesn't override it, so two pretraining runs active at the same time MUST
+use different `output_dir`s or one will overwrite the other's checkpoints.
+Give every new experiment its own `output_dir` for exactly this reason.
 
 Copy one of these files as a starting point for a new experiment (e.g.
 `configs/train_tokenizer/fanta_aggressive_fairness.yml`) rather than

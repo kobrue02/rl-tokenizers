@@ -28,9 +28,10 @@ CAVEAT (parity_bpe specifically): three configs (parity_bpe_50k/_hybrid_50k/
 _window_50k) all produce a checkpoint matching the SAME
 checkpoints/parity_bpe_*.json glob (job-ID-tagged, not variant-tagged) --
 this script can report "at least one parity_bpe checkpoint exists" but
-cannot attribute a specific glob match to a specific variant config. See
-configs/prep/parity_bpe_50k.yml's own comment for how that's disambiguated
-by hand today (checking job timestamps against `ls checkpoints/`).
+cannot attribute a specific glob match to a specific variant config.
+Disambiguated by hand today: cross-reference each checkpoint's mtime (`ls
+-la checkpoints/parity_bpe_*.json`) against `sacct`'s own job start times
+for whichever variant's train_tokenizer job was submitted at that time.
 
 Usage:
     python3 -m scripts.check_pipeline_status            # human-readable report
