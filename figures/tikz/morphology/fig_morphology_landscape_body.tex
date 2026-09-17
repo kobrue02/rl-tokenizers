@@ -1,0 +1,32 @@
+\begin{tikzpicture}
+\begin{axis}[
+    width=12cm, height=9cm,
+    xlabel={Mean Morphological Edit Distance (unnormalized; lower = closer to gold morph boundaries)},
+    ylabel={Mean Morphological Consistency F1 (higher = more consistent segmentation)},
+    legend style={at={(1.02,1)}, anchor=north west, font=\scriptsize, draw=none},
+    grid=both, grid style={gray!15},
+    axis lines=left,
+    enlarge x limits={abs=0.4}, enlarge y limits={abs=0.02},
+]
+\addplot+[only marks, mark=*, mark size=2pt, color=openaiCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_OpenAI_tiktoken.dat};
+\addlegendentry{OpenAI/tiktoken}
+\addplot+[only marks, mark=*, mark size=2pt, color=chinaCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_Chinese_labs.dat};
+\addlegendentry{Chinese labs}
+\addplot+[only marks, mark=*, mark size=2pt, color=metaCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_Meta_Llama.dat};
+\addlegendentry{Meta/Llama}
+\addplot+[only marks, mark=*, mark size=2pt, color=encCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_Encoder-only.dat};
+\addlegendentry{Encoder-only}
+\addplot+[only marks, mark=*, mark size=2pt, color=oursCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_This_work.dat};
+\addlegendentry{This work}
+\addplot+[only marks, mark=*, mark size=2pt, color=reproCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_Reproduced_baselines.dat};
+\addlegendentry{Reproduced baselines}
+\addplot+[only marks, mark=*, mark size=2pt, color=otherCol] table [x=mean_med, y=mean_f1] {figures/tikz/morphology/scatter_Other.dat};
+\addlegendentry{Other}
+\node[font=\scriptsize, anchor=south west] at (axis cs:2.8499,0.1627) {fanta};
+\node[font=\scriptsize, anchor=north west] at (axis cs:3.4727,0.3793) {magnet};
+\node[font=\scriptsize, anchor=north west] at (axis cs:4.1627,0.3357) {bpe};
+\node[font=\scriptsize, anchor=south west] at (axis cs:4.3436,0.3769) {superbpe};
+\node[font=\scriptsize, anchor=south east] at (axis cs:7.6879,0.4361) {parity\_bpe};
+\node[font=\scriptsize, anchor=north east] at (axis cs:11.1422,0.4134) {manta};
+\end{axis}
+\end{tikzpicture}
