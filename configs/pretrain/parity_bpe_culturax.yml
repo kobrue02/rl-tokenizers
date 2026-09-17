@@ -1,0 +1,15 @@
+# systems/pretraining/cli.py -- sbatch --gres=gpu:4 --partition=gpu_h100 jobs/pretrain/pretraining.sh -c configs/pretrain/parity_bpe_culturax.yml
+# --partition=gpu_h100 (NOT gpu_h100_il) -- see configs/pretrain/bpe_culturax.yml's own comment.
+# Same "large" architecture/step-budget/batch-shape as bpe_culturax/
+# fanta_culturax -- see that file's own comment for the full rationale.
+# Replaces parity_bpe_50k's own glot500 pretraining (never started -- only
+# its prep had progressed before glot500 was dropped 2026-09-19).
+shard_dir: pretrain_data/culturax_parity_bpe_large
+model_size: large
+seq_len: 1024
+per_device_batch_size: 16
+total_steps: 207383
+output_dir: checkpoints/pretrain_parity_bpe_culturax_large
+use_wandb: true
+run_name: parity_bpe_culturax_large_207k_steps
+resume_from: ""

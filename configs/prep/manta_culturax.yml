@@ -1,0 +1,21 @@
+# systems/pretraining/data_prep.py -- sbatch jobs/prep/pretraining_data_gpu.sh -c configs/prep/manta_culturax.yml
+# GPU job -- manta's induce_spans is a real forward pass per document, same
+# rationale as configs/prep/fanta_culturax.yml/magnet_culturax.yml.
+#
+# Extends the bpe_culturax/fanta_culturax "large"-scale CulturaX re-run to
+# manta -- 2026-09-19: glot500 dropped project-wide, manta_50k's own
+# glot500 pretraining (ACTIVELY RUNNING at cancellation time, real GPU
+# training in progress) cancelled and its prep data removed; this replaces
+# it, not resumes it.
+dataset: culturax
+langs: all
+system: manta
+checkpoint: checkpoints/manta_6269684.pt
+vocab_json: vocab_out/manta_vocab_6269684.json
+output_dir: pretrain_data/culturax_manta_large
+max_tokens: 13591050230
+tokens_per_language: 128217455
+lang_batch_size: 5
+dedup: false
+use_wandb: true
+run_name: manta_culturax_large_data_prep

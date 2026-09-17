@@ -1,0 +1,17 @@
+# systems/pretraining/cli.py -- sbatch --gres=gpu:4 --partition=gpu_h100 jobs/pretrain/pretraining.sh -c configs/pretrain/manta_culturax.yml
+# --partition=gpu_h100 (NOT gpu_h100_il) -- see configs/pretrain/bpe_culturax.yml's own comment.
+# Same "large" architecture/step-budget/batch-shape as bpe_culturax/
+# fanta_culturax -- see that file's own comment for the full rationale.
+# Replaces manta_50k's own glot500 pretraining -- that run was ACTIVELY
+# TRAINING (real GPU-hours already spent, job 7017111) when glot500 was
+# dropped 2026-09-19 and the job cancelled; this is a fresh start on
+# CulturaX, not a resume.
+shard_dir: pretrain_data/culturax_manta_large
+model_size: large
+seq_len: 1024
+per_device_batch_size: 16
+total_steps: 207383
+output_dir: checkpoints/pretrain_manta_culturax_large
+use_wandb: true
+run_name: manta_culturax_large_207k_steps
+resume_from: ""
