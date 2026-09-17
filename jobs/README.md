@@ -35,3 +35,25 @@ Every script accepts `-c config.yml` (see `configs/README.md`) -- copy an
 existing `sbatch jobs/<stage>/<script>.sh -c configs/<stage>/<config>.yml`
 invocation from a script's own usage comment rather than hand-building a
 long flag list each time.
+
+## `train_tokenizer/fanta.sh`'s `RESULT_KEY` env var
+
+`fanta.sh` always auto-submits a post-training eval job on success, and
+that job's `--output`/`--result-key` (plus the checkpoint/vocab paths and
+wandb run name) are all derived from `RESULT_KEY` (env var, default
+`"fanta"`) -- **not** from anything in the `-c config.yml` file. Submitting
+an ablation run (`configs/train_tokenizer/fanta_ablation_*_50k.yml`, which
+reweight `lambda_fair`/`lambda_rate` to isolate FANTA's two loss terms)
+without overriding `RESULT_KEY` would silently overwrite the real fanta
+run's own `results/fanta_comparison.json`:
+
+```bash
+RESULT_KEY=fanta_ablation_anchor_only sbatch jobs/train_tokenizer/fanta.sh \
+    -c configs/train_tokenizer/fanta_ablation_anchor_only_50k.yml
+RESULT_KEY=fanta_ablation_gini_only sbatch jobs/train_tokenizer/fanta.sh \
+    -c configs/train_tokenizer/fanta_ablation_gini_only_50k.yml
+```
+
+Each distinct `RESULT_KEY` gets its own `checkpoints/<key>_<jobid>.pt`,
+`results/<key>_comparison.json`, and wandb run name -- see the ablation
+configs' own comments for the full motivation and expected outcome.

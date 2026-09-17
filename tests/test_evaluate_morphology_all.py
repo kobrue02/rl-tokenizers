@@ -54,6 +54,30 @@ def test_run_morphology_all_calls_each_system_with_its_own_args_plus_shared_flag
     ]
 
 
+def test_run_morphology_all_creates_output_dir_if_it_does_not_exist(tmp_path, monkeypatch):
+    """Regression test: no per-system evaluate.py creates its own --output's
+    parent directory -- confirmed live, real run:
+    configs/eval/morphology_indigenous_panel.yml's fresh output_dir
+    (results/indigenous_panel_morphology/, never created by anything before
+    this fix) made every one of 8 systems fail with ENOENT on write."""
+    def fake_main(argv):
+        name, output_path = argv[0], argv[-1]
+        _write_fake_result(output_path, name, {"morphology": {}})  # real open(path, "w") -- raises ENOENT if parent is missing
+
+    monkeypatch.setattr(evaluate_cli, "main", fake_main)
+
+    output_dir = tmp_path / "fresh" / "subdir"  # deliberately does NOT exist yet
+    cfg = {
+        "output_dir": str(output_dir),
+        "morphology_gold_dir": "data/morphology_gold",
+        "systems": [{"name": "bpe", "args": ["--checkpoint", "checkpoints/bpe_50k.json"]}],
+    }
+    per_system_paths, failed = run_morphology_all(cfg)
+
+    assert failed == {}
+    assert per_system_paths == [str(output_dir / "bpe_morphology.json")]
+
+
 @pytest.mark.parametrize("excluded_name", ["claude_tokenizer", "fairtok", "flexitokens"])
 def test_run_morphology_all_rejects_excluded_systems(tmp_path, excluded_name):
     cfg = {

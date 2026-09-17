@@ -80,6 +80,13 @@ def run_morphology_all(cfg, force=False):
     remaining systems."""
     output_dir = cfg.get("output_dir", "results")
     morphology_gold_dir = cfg["morphology_gold_dir"]
+    # Not every output_dir already exists (e.g. configs/eval/
+    # morphology_indigenous_panel.yml's own results/indigenous_panel_morphology/,
+    # a fresh subdirectory) -- none of the per-system evaluate.py scripts
+    # create their own --output's parent directory, so this driver must,
+    # once, up front, for every system's output_path below. Confirmed live:
+    # without this, every system failed with ENOENT on its own --output path.
+    os.makedirs(output_dir, exist_ok=True)
     per_system_paths = []
     failed = {}
     for entry in cfg["systems"]:
