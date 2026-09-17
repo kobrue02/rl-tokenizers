@@ -96,23 +96,35 @@ def run_morphology_all(cfg, force=False):
                 f"{name!r} can't be scored here: {_EXCLUDED_SYSTEMS[name]} -- "
                 "remove it from this config's systems list"
             )
-        output_path = f"{output_dir}/{name}_morphology.json"
+        # label defaults to name, but can be overridden to run the SAME
+        # dispatcher (e.g. "fanta") more than once against different
+        # checkpoints -- an ablation sweep (fanta_ablation_anchor_only vs.
+        # fanta_ablation_gini_only) both dispatch via evaluate.py's "fanta"
+        # tokenizer, so `name` alone can't distinguish their output files OR
+        # their in-file result_key without colliding. Only passed as
+        # --result-key when it actually differs from `name` -- run_eval_cli-
+        # based systems already default result_key to their own name, and
+        # hf_frontier/blt don't support --result-key at all, so this stays a
+        # no-op for every existing (non-ablation) config entry.
+        label = entry.get("label", name)
+        output_path = f"{output_dir}/{label}_morphology.json"
         if not force and os.path.exists(output_path):
-            print(f"=== {name}: {output_path} already exists, skipping (pass --force to redo) ===")
+            print(f"=== {label}: {output_path} already exists, skipping (pass --force to redo) ===")
             per_system_paths.append(output_path)
             continue
-        print(f"=== evaluating {name} (morphology_gold_dir={morphology_gold_dir}) ===")
+        print(f"=== evaluating {label} (dispatch={name}, morphology_gold_dir={morphology_gold_dir}) ===")
         try:
             evaluate_cli.main([
                 name,
                 *entry.get("args", []),
+                *(["--result-key", label] if label != name else []),
                 "--morphology-gold-dir", morphology_gold_dir,
                 "--output", output_path,
             ])
             per_system_paths.append(output_path)
         except Exception as e:
-            print(f"  {name}: FAILED -- {e}")
-            failed[name] = str(e)
+            print(f"  {label}: FAILED -- {e}")
+            failed[label] = str(e)
     return per_system_paths, failed
 
 

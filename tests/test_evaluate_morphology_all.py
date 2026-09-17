@@ -54,6 +54,67 @@ def test_run_morphology_all_calls_each_system_with_its_own_args_plus_shared_flag
     ]
 
 
+def test_run_morphology_all_label_override_dispatches_via_name_but_writes_under_label(tmp_path, monkeypatch):
+    """An ablation sweep dispatches the SAME tokenizer (e.g. "fanta") twice
+    against different checkpoints -- `name` alone can't give each run a
+    distinct output file or in-file result_key, so `label` (defaulting to
+    `name`) does both, and gets passed as --result-key only when it
+    actually differs from `name`."""
+    calls = []
+
+    def fake_main(argv):
+        calls.append(argv)
+        output_path = argv[-1]
+        _write_fake_result(output_path, argv[0], {"morphology": {}})
+
+    monkeypatch.setattr(evaluate_cli, "main", fake_main)
+
+    cfg = {
+        "output_dir": str(tmp_path),
+        "morphology_gold_dir": "data/morphology_gold",
+        "systems": [
+            {
+                "name": "fanta", "label": "fanta_ablation_anchor_only",
+                "args": ["--checkpoint", "checkpoints/fanta_ablation_anchor_only_7007118.pt"],
+            },
+            {
+                "name": "fanta", "label": "fanta_ablation_gini_only",
+                "args": ["--checkpoint", "checkpoints/fanta_ablation_gini_only_7007119.pt"],
+            },
+        ],
+    }
+    per_system_paths, failed = run_morphology_all(cfg)
+
+    assert failed == {}
+    assert per_system_paths == [
+        f"{tmp_path}/fanta_ablation_anchor_only_morphology.json",
+        f"{tmp_path}/fanta_ablation_gini_only_morphology.json",
+    ]
+    # Both dispatch via "fanta" (argv[0]), but each gets its own --result-key.
+    assert calls[0][0] == calls[1][0] == "fanta"
+    assert calls[0][calls[0].index("--result-key") + 1] == "fanta_ablation_anchor_only"
+    assert calls[1][calls[1].index("--result-key") + 1] == "fanta_ablation_gini_only"
+
+
+def test_run_morphology_all_omits_result_key_when_label_equals_name(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_main(argv):
+        calls.append(argv)
+        _write_fake_result(argv[-1], argv[0], {"morphology": {}})
+
+    monkeypatch.setattr(evaluate_cli, "main", fake_main)
+
+    cfg = {
+        "output_dir": str(tmp_path),
+        "morphology_gold_dir": "data/morphology_gold",
+        "systems": [{"name": "bpe", "args": ["--checkpoint", "checkpoints/bpe_50k.json"]}],
+    }
+    run_morphology_all(cfg)
+
+    assert "--result-key" not in calls[0]
+
+
 def test_run_morphology_all_creates_output_dir_if_it_does_not_exist(tmp_path, monkeypatch):
     """Regression test: no per-system evaluate.py creates its own --output's
     parent directory -- confirmed live, real run:

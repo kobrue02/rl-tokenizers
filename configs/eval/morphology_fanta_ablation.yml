@@ -1,0 +1,38 @@
+# scripts/evaluate_morphology_all.py -- sbatch jobs/eval/morphology_all.sh -c configs/eval/morphology_fanta_ablation.yml
+#
+# Scores MED/Consistency F1/fertility for the two FANTA loss-term ablation
+# checkpoints (configs/train_tokenizer/fanta_ablation_anchor_only_50k.yml /
+# fanta_ablation_gini_only_50k.yml) -- the piece that actually tests the
+# anchor-term hypothesis on MORPHOLOGY specifically, not just compression/
+# gini (already checked directly from the two training runs' own
+# results/fanta_ablation_*_comparison.json: anchor_only reaches
+# avg_compression=5.934 (near full fanta's 6.027), gini_only collapses to
+# EXACTLY 1.0 -- identical to manta's own natural collapse -- confirming
+# the anchor, not the Gini term, is what prevents the degenerate collapse
+# fanta/train.py's own docstring describes).
+#
+# Both entries dispatch via evaluate.py's "fanta" tokenizer (same
+# architecture/CLI as the real fanta run) -- `name` alone can't distinguish
+# two checkpoints of the same dispatcher, so each entry sets its own
+# `label` (used for the output filename AND passed as --result-key, since
+# it differs from `name` -- see run_morphology_all's own docstring for why
+# this is needed here specifically and a no-op for every other config).
+#
+# Checkpoint paths confirmed live via `ls checkpoints/ | grep
+# fanta_ablation` on the cluster (2026-09-19) -- NOT guessed:
+#   fanta_ablation_anchor_only_7007118.pt
+#   fanta_ablation_gini_only_7007119.pt
+#
+# output_dir/combined_output are separate from configs/eval/morphology_all.yml's
+# own -- same "different paths so runs don't collide" convention as every
+# other *_indigenous_panel.yml vs. its main-panel sibling in this project.
+morphology_gold_dir: data/morphology_gold
+output_dir: results/fanta_ablation_morphology
+combined_output: results/morphology_fanta_ablation.json
+systems:
+  - name: fanta
+    label: fanta_ablation_anchor_only
+    args: ["--checkpoint", "checkpoints/fanta_ablation_anchor_only_7007118.pt", "--eval-data-source", "bouquet"]
+  - name: fanta
+    label: fanta_ablation_gini_only
+    args: ["--checkpoint", "checkpoints/fanta_ablation_gini_only_7007119.pt", "--eval-data-source", "bouquet"]
