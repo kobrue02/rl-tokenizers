@@ -20,6 +20,15 @@
 # Usage: sbatch jobs/train_tokenizer/fanta.sh --data-source all --langs all --max-steps 20000 --vocab-size 50000
 #   --lambda-fair/--lambda-rate reweight the two loss terms; --target-rate-anchor/--anchor-lang change the rate target.
 # Requires HF_TOKEN (flores_plus/bouquet are gated).
+#
+# RESULT_KEY (env var, default "fanta"): the post-training auto-eval below
+# ALWAYS runs on success and writes results/${RESULT_KEY}_comparison.json
+# under --result-key "$RESULT_KEY" -- for a lambda_fair/lambda_rate
+# ABLATION run (see configs/train_tokenizer/fanta_ablation_*_50k.yml), set
+# this to something other than the default, or it will silently OVERWRITE
+# the real fanta run's own completed results/fanta_comparison.json:
+#   RESULT_KEY=fanta_ablation_anchor_only sbatch jobs/train_tokenizer/fanta.sh \
+#       -c configs/train_tokenizer/fanta_ablation_anchor_only_50k.yml
 
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers  # larger-quota scratch -- see jobs/prep/pretraining_data.sh
@@ -45,22 +54,23 @@ cd $PROJECT_ROOT
 uv sync
 mkdir -p logs checkpoints vocab_out
 
-CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/fanta_${SLURM_JOB_ID}.pt"
-echo "Starting FANTA training with args: $@"
+RESULT_KEY="${RESULT_KEY:-fanta}"
+CHECKPOINT_PATH="$PROJECT_ROOT/checkpoints/${RESULT_KEY}_${SLURM_JOB_ID}.pt"
+echo "Starting FANTA training (RESULT_KEY=${RESULT_KEY}) with args: $@"
 python3 train.py fanta \
     --use-wandb \
     --wandb-project fanta \
-    --run-name "slurm-${SLURM_JOB_ID}" \
+    --run-name "${RESULT_KEY}-slurm-${SLURM_JOB_ID}" \
     --output-dir "$CHECKPOINT_PATH" \
-    --vocab-out "$PROJECT_ROOT/vocab_out/fanta_vocab_${SLURM_JOB_ID}.json" \
-    --vocab-stats-out "$PROJECT_ROOT/vocab_out/fanta_vocab_stats_${SLURM_JOB_ID}.json" \
+    --vocab-out "$PROJECT_ROOT/vocab_out/${RESULT_KEY}_vocab_${SLURM_JOB_ID}.json" \
+    --vocab-stats-out "$PROJECT_ROOT/vocab_out/${RESULT_KEY}_vocab_stats_${SLURM_JOB_ID}.json" \
     "$@"
 
 if [ $? -eq 0 ]; then
     echo "Training complete."
     echo "Submitting final test-set evaluation job..."
     sbatch jobs/eval/evaluate.sh fanta --checkpoint "$CHECKPOINT_PATH" --eval-data-source bouquet_test \
-        --output "results/fanta_comparison.json" --result-key fanta
+        --output "results/${RESULT_KEY}_comparison.json" --result-key "$RESULT_KEY"
 else
     echo "Training failed." && exit 1
 fi

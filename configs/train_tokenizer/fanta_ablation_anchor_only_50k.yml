@@ -1,0 +1,69 @@
+# systems/tokenization/fanta/cli.py -- sbatch jobs/train_tokenizer/fanta.sh -c configs/train_tokenizer/fanta_ablation_anchor_only_50k.yml
+#
+# ABLATION: isolates FantaConfig.lambda_rate (the per-language rate-anchor
+# term, fanta.model.rate_anchor_loss) from FantaConfig.lambda_fair (the
+# cross-lingual Gini fairness penalty, fanta.model.fairness_loss) -- see
+# fanta/train.py's own loss composition:
+#   loss = ce_loss + lambda_fair * gini_loss + lambda_rate * anchor_loss
+# This config sets lambda_fair: 0.0 (Gini term OFF) and leaves lambda_rate
+# at FantaConfig's own default (2.0, anchor term ON), everything else
+# identical to configs/train_tokenizer/fanta_50k.yml.
+#
+# MOTIVATION (this project's own morphology-eval analysis, 2026-09-17):
+# fanta (both terms on) scores dramatically lower Morphological Edit
+# Distance than manta (same MantaModel architecture, no fairness/anchor
+# terms at all) -- 2.55 vs 11.44 mean MED across 13 languages (see
+# results/morphology_comparison.md). fanta ALSO has far lower fertility
+# (1.45 vs manta's 7.37 tokens/word) -- fanta's segments are much coarser.
+# fanta/train.py's own docstring already establishes that lambda_fair alone
+# has a documented DEGENERATE solution (collapses mean_compression_rate to
+# ~1.0 within 10 steps -- i.e. near-byte-level, maximally FINE
+# segmentation) -- the opposite of what would explain fanta's much LOWER
+# fertility/MED. This makes lambda_rate (not lambda_fair) the more
+# plausible driver of fanta's morphological-alignment improvement over
+# manta: it's what disciplines segment granularity toward a realistic,
+# per-language target size, which happens to land closer to real morpheme
+# boundaries as a side effect -- not something Gini-equality alone can do.
+# This config (+ its sibling configs/train_tokenizer/fanta_ablation_gini_only_50k.yml,
+# isolating the OTHER term) tests that hypothesis directly rather than
+# leaving it as an unverified claim in the thesis text.
+#
+# EXPECTED SIGNATURE OF SUCCESS: if this hypothesis is right, an
+# anchor-only run's mean compression rate should stay near
+# target_rate_anchor (4.0 bytes/token for English, scaled by
+# common.eval.parity.compute_lang_parity_ratios for other languages) WITHOUT
+# collapsing, and its post-training MED/fertility (via
+# scripts/evaluate_morphology_all.py, same as every other system) should
+# land much closer to full fanta's than to manta's -- if instead it
+# collapses toward manta-like fertility, lambda_fair (or the INTERACTION of
+# both terms) is doing more of the work than this config alone predicts.
+#
+# CAUTION -- READ BEFORE SUBMITTING: jobs/train_tokenizer/fanta.sh
+# unconditionally auto-submits a post-training eval job that writes to
+# results/fanta_comparison.json under --result-key fanta -- running this
+# ablation via that script UNMODIFIED would silently OVERWRITE the real
+# fanta_50k run's own completed comparison file. Set RESULT_KEY before
+# submitting (see that script's own updated comment):
+#   RESULT_KEY=fanta_ablation_anchor_only sbatch jobs/train_tokenizer/fanta.sh \
+#       -c configs/train_tokenizer/fanta_ablation_anchor_only_50k.yml
+#
+# output_dir/vocab_out/run_name below are only honored by a DIRECT
+# `python3 train.py fanta -c ...` invocation (no sbatch wrapper) -- see
+# configs/train_tokenizer/superbpe_50k.yml's own comment for why: explicit
+# CLI flags always win over a config file's same-named key regardless of
+# argv order, and jobs/train_tokenizer/fanta.sh's own --output-dir/
+# --vocab-out/--run-name are hardcoded (job-ID-tagged) on its own command
+# line -- these fields are set here anyway for that direct-invocation path
+# and for documentation, but expect job-ID-tagged paths in practice.
+data_source: all
+langs: all
+vocab_size: 50000
+max_steps: 20000
+output_dir: checkpoints/fanta_ablation_anchor_only_50k.pt
+vocab_out: vocab_out/fanta_ablation_anchor_only_50k_vocab.json
+use_wandb: true
+run_name: fanta_ablation_anchor_only_50k
+# Same OOM history as configs/train_tokenizer/fanta_50k.yml -- carried
+# forward unchanged (see that file's own comment for the real incident).
+max_seq_length: 1024
+lambda_fair: 0.0

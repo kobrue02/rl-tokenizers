@@ -1,0 +1,41 @@
+# systems/tokenization/fanta/cli.py -- sbatch jobs/train_tokenizer/fanta.sh -c configs/train_tokenizer/fanta_ablation_gini_only_50k.yml
+#
+# ABLATION: the COMPLEMENT of configs/train_tokenizer/fanta_ablation_anchor_only_50k.yml
+# -- isolates FantaConfig.lambda_fair (Gini fairness term) by setting
+# lambda_rate: 0.0 (anchor term OFF), leaving lambda_fair at its own
+# default (1.0, Gini term ON). See that sibling config's own comment for
+# the full motivation/hypothesis; this file exists so the ablation is a
+# real 2x2 (both terms = fanta_50k.yml, anchor-only, gini-only, neither =
+# manta, architecturally identical baseline already trained) rather than a
+# single isolated data point that can't rule out an interaction effect
+# between the two terms.
+#
+# EXPECTED SIGNATURE, if the anchor-only hypothesis is correct: this run
+# should reproduce (or approach) fanta/train.py's own documented
+# lambda_fair-alone DEGENERATE solution -- mean_compression_rate collapsing
+# toward ~1.0 bytes/token (near-byte-level, maximally fine segmentation) --
+# i.e. fertility/MED closer to manta's (or worse) than to full fanta's.
+# Watch train/mean_compression_rate in wandb during the run, not just the
+# final eval, since the docstring notes the collapse happens fast (within
+# ~10 steps in the original anchor-less run this term's own docstring
+# describes).
+#
+# Same auto-eval collision caution as the anchor-only sibling config --
+# set RESULT_KEY before submitting:
+#   RESULT_KEY=fanta_ablation_gini_only sbatch jobs/train_tokenizer/fanta.sh \
+#       -c configs/train_tokenizer/fanta_ablation_gini_only_50k.yml
+#
+# output_dir/vocab_out/run_name are only honored by a direct
+# `python3 train.py fanta -c ...` invocation -- see the anchor-only
+# sibling config's own comment for why (jobs/train_tokenizer/fanta.sh
+# hardcodes job-ID-tagged paths that override these regardless).
+data_source: all
+langs: all
+vocab_size: 50000
+max_steps: 20000
+output_dir: checkpoints/fanta_ablation_gini_only_50k.pt
+vocab_out: vocab_out/fanta_ablation_gini_only_50k_vocab.json
+use_wandb: true
+run_name: fanta_ablation_gini_only_50k
+max_seq_length: 1024
+lambda_rate: 0.0
