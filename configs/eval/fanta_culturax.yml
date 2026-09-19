@@ -1,0 +1,23 @@
+# systems/pretraining/cli_eval.py -- sbatch jobs/eval/pretrained.sh -c configs/eval/fanta_culturax.yml
+#
+# Downstream XNLI/XCOPA/FLORES-MT eval for the fanta_culturax pretraining
+# run (configs/pretrain/fanta_culturax.yml) -- replaces the deleted
+# configs/eval/fanta_large.yml, same rationale as
+# configs/eval/bpe_culturax.yml's own comment (CulturaX replaced Glot500 as
+# the pretraining corpus, 2026-09-19). Same tokenizer
+# (checkpoints/fanta_6284655.pt), same benchmark/langs/lang_pairs/
+# max_examples as the deleted file -- only checkpoint/output/run_name point
+# at the new CulturaX-trained model instead.
+checkpoint: checkpoints/pretrain_fanta_culturax_large/final.pt
+system: fanta
+tokenizer_checkpoint: checkpoints/fanta_6284655.pt
+vocab_json: vocab_out/fanta_vocab_6284655.json
+benchmark: "xnli,xcopa,flores_mt"
+# Same union list as configs/eval/bpe_culturax.yml -- see its own comment.
+langs: "ar,bg,de,el,en,es,et,fr,hi,ht,id,it,qu,ru,sw,ta,th,tr,ur,vi,zh"
+lang_pairs: "eng:spa,eng:arz,eng:ben"
+max_examples: 4000
+label: fanta
+output: results/all_fanta_culturax.json
+use_wandb: true
+run_name: fanta_culturax_large_207k_steps

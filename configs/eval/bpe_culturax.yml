@@ -1,0 +1,24 @@
+# systems/pretraining/cli_eval.py -- sbatch jobs/eval/pretrained.sh -c configs/eval/bpe_culturax.yml
+#
+# Downstream XNLI/XCOPA/FLORES-MT eval for the bpe_culturax pretraining run
+# (configs/pretrain/bpe_culturax.yml) -- replaces the deleted
+# configs/eval/bpe_large.yml (its own glot500-sourced checkpoint was removed
+# 2026-09-19, see configs/prep/bpe_culturax.yml's own comment for why
+# CulturaX replaced Glot500 as the pretraining corpus). Same tokenizer
+# (checkpoints/bpe_50k.json), same benchmark/langs/lang_pairs/max_examples
+# as the deleted file -- only checkpoint/output/run_name point at the new
+# CulturaX-trained model instead.
+checkpoint: checkpoints/pretrain_bpe_culturax_large/final.pt
+system: bpe
+tokenizer_checkpoint: checkpoints/bpe_50k.json
+benchmark: "xnli,xcopa,flores_mt"
+# The union of XNLI_LANGS (15) and XCOPA_LANGS (11) -- same list every
+# other "large"-scale eval config in this project already uses, so bpe and
+# fanta (and any future culturax system) are compared on the same set.
+langs: "ar,bg,de,el,en,es,et,fr,hi,ht,id,it,qu,ru,sw,ta,th,tr,ur,vi,zh"
+lang_pairs: "eng:spa,eng:arz,eng:ben"
+max_examples: 4000
+label: bpe
+output: results/all_bpe_culturax.json
+use_wandb: true
+run_name: bpe_culturax_large_207k_steps
