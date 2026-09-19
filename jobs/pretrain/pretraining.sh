@@ -74,6 +74,18 @@
 
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
+# Captured HERE, before anything else can consume/shift "$@" -- see
+# jobs/prep/pretraining_data.sh's own comment for the full bug this fixes
+# (check_and_resubmit() is always called bare -- from both the normal
+# post-`wait` path and the on_term SIGTERM trap -- so a literal "$@" inside
+# it is a function-local empty array, not this script's real arguments).
+# Confirmed live: this is what silently dropped -c configs/pretrain/
+# bpe_culturax.yml on a real 24h-boundary auto-resubmit, resolving
+# output_dir back to the shared default "checkpoints/pretrain" instead of
+# "checkpoints/pretrain_bpe_culturax_large" and crashing the run at 99.3%
+# complete (step 206000/207383).
+ORIG_ARGS=("$@")
+
 module load devel/cuda/12.8
 module load devel/python/3.13.3-llvm-19.1
 echo "CUDA: $CUDA_HOME"
@@ -182,11 +194,11 @@ check_and_resubmit() {
     PARTITION=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'Partition=\K\S+')
 
     echo "Progress made this run: step $BEFORE_STEP -> $AFTER_STEP (of $TOTAL_STEPS). Resubmitting from $AFTER_CKPT..."
-    sbatch --partition="$PARTITION" --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" --cpus-per-task="$CPUS_PER_TASK" jobs/pretrain/pretraining.sh "$@" --resume-from "$AFTER_CKPT"
+    sbatch --partition="$PARTITION" --gres=gpu:"$NUM_GPUS" --time="$TIME_LIMIT" --cpus-per-task="$CPUS_PER_TASK" jobs/pretrain/pretraining.sh "${ORIG_ARGS[@]}" --resume-from "$AFTER_CKPT"
     SBATCH_EXIT=$?
     if [ "$SBATCH_EXIT" -ne 0 ]; then
         echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-        echo "  sbatch --partition=$PARTITION --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT --cpus-per-task=$CPUS_PER_TASK jobs/pretrain/pretraining.sh $@ --resume-from $AFTER_CKPT" >&2
+        echo "  sbatch --partition=$PARTITION --gres=gpu:$NUM_GPUS --time=$TIME_LIMIT --cpus-per-task=$CPUS_PER_TASK jobs/pretrain/pretraining.sh ${ORIG_ARGS[*]} --resume-from $AFTER_CKPT" >&2
         exit 1
     fi
     echo "Resubmitted successfully."

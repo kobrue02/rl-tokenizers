@@ -42,6 +42,12 @@
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 WORK_ROOT=/pfs/work9/workspace/scratch/tu_zxoqp65-rl-tokenizers  # larger-quota scratch -- see jobs/prep/pretraining_data.sh
 
+# Captured HERE, before anything else can consume/shift "$@" -- see
+# jobs/prep/pretraining_data.sh's own comment for the full bug this fixes
+# (check_and_resubmit() is always called bare, so a literal "$@" inside it
+# is a function-local empty array, not this script's real arguments).
+ORIG_ARGS=("$@")
+
 module load devel/cuda/12.8
 module load devel/python/3.13.3-llvm-19.1
 echo "CUDA: $CUDA_HOME"
@@ -98,11 +104,11 @@ check_and_resubmit() {
     TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
 
     echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
-    sbatch --time="$TIME_LIMIT" jobs/prep/pretraining_data_gpu.sh "$@"
+    sbatch --time="$TIME_LIMIT" jobs/prep/pretraining_data_gpu.sh "${ORIG_ARGS[@]}"
     SBATCH_EXIT=$?
     if [ "$SBATCH_EXIT" -ne 0 ]; then
         echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-        echo "  sbatch --time=$TIME_LIMIT jobs/prep/pretraining_data_gpu.sh $@" >&2
+        echo "  sbatch --time=$TIME_LIMIT jobs/prep/pretraining_data_gpu.sh ${ORIG_ARGS[*]}" >&2
         exit 1
     fi
     echo "Resubmitted successfully."

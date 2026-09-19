@@ -56,6 +56,18 @@
 
 PROJECT_ROOT=/home/tu/tu_tu/tu_zxoqp65/work/rl-tokenizers
 
+# Captured HERE, before anything else can consume/shift "$@" -- BASH FUNCTIONS
+# have their OWN positional-parameter scope, separate from the top-level
+# script's, unless explicitly forwarded (e.g. `foo "$@"`). check_and_resubmit()
+# below is always called BARE (no args) from both the normal post-`wait` path
+# and the on_term SIGTERM trap, so a literal "$@" inside it is ALWAYS empty --
+# confirmed live: every auto-resubmit was silently dropping -c config.yml and
+# resubmitting with bare argparse defaults (missing required value(s) for
+# ['dataset', 'system', 'checkpoint', 'output_dir']). ORIG_ARGS is a real
+# array, not a string, so later use as "${ORIG_ARGS[@]}" preserves exact
+# argument boundaries the same way "$@" would.
+ORIG_ARGS=("$@")
+
 # 44TiB Lustre scratch (`ws_allocate rl-tokenizers 60`, expires unless
 # `ws_extend`'d) vs $HOME's 550GiB hard cap -- only regenerable/derived data
 # lives here, never code.
@@ -138,11 +150,11 @@ check_and_resubmit() {
     TIME_LIMIT=$(scontrol show job "$SLURM_JOB_ID" | grep -oP 'TimeLimit=\K\S+')
 
     echo "Progress made this run: $BEFORE_TOKENS -> $AFTER_TOKENS tokens. Resubmitting..."
-    sbatch --time="$TIME_LIMIT" jobs/prep/pretraining_data.sh "$@"
+    sbatch --time="$TIME_LIMIT" jobs/prep/pretraining_data.sh "${ORIG_ARGS[@]}"
     SBATCH_EXIT=$?
     if [ "$SBATCH_EXIT" -ne 0 ]; then
         echo "Resubmission via sbatch failed (exit $SBATCH_EXIT) -- resume manually with:" >&2
-        echo "  sbatch --time=$TIME_LIMIT jobs/prep/pretraining_data.sh $@" >&2
+        echo "  sbatch --time=$TIME_LIMIT jobs/prep/pretraining_data.sh ${ORIG_ARGS[*]}" >&2
         exit 1
     fi
     echo "Resubmitted successfully."
