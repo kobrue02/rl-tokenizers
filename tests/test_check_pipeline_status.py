@@ -155,6 +155,33 @@ def test_check_wrapper_in_progress_when_some_systems_done_but_no_combined(tmp_pa
     assert per_system == {"bpe": "bpe_morphology.json", "fanta": None}
 
 
+def test_check_wrapper_uses_label_not_name_for_two_entries_sharing_one_dispatch_name(tmp_path, monkeypatch):
+    """Regression test: configs/eval/morphology_fanta_ablation.yml has TWO
+    entries both with name="fanta" (dispatching the same tokenizer twice
+    against different checkpoints), distinguished only by "label" -- using
+    "name" alone as the per-system dict key/filename collapsed both entries
+    into one and checked the wrong file, reporting "fanta: MISSING" even
+    when both real result files existed."""
+    monkeypatch.chdir(tmp_path)
+    os.makedirs("results")
+    open("results/fanta_ablation_anchor_only_morphology.json", "w").close()
+    open("results/fanta_ablation_gini_only_morphology.json", "w").close()
+    open("results/combined.json", "w").close()
+    cfg = {
+        "output_dir": "results", "combined_output": "results/combined.json",
+        "systems": [
+            {"name": "fanta", "label": "fanta_ablation_anchor_only"},
+            {"name": "fanta", "label": "fanta_ablation_gini_only"},
+        ],
+    }
+    status, detail, per_system = _check_wrapper(cfg, suffix="morphology")
+    assert status == "done"
+    assert per_system == {
+        "fanta_ablation_anchor_only": "fanta_ablation_anchor_only_morphology.json",
+        "fanta_ablation_gini_only": "fanta_ablation_gini_only_morphology.json",
+    }
+
+
 def test_check_tokenizer_training_is_independent_of_any_config_file(tmp_path, monkeypatch):
     """magnet/manta have no configs/train_tokenizer/*.yml at all (trained
     directly via their own .sh scripts with job-ID-tagged paths) -- this

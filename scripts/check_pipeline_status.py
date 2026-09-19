@@ -172,18 +172,28 @@ _WRAPPER_SUFFIXES = {
 
 def _check_wrapper(cfg, suffix):
     """Multi-system driver configs (scripts/evaluate_own_tokenizers_indigenous_panel.py,
-    scripts/evaluate_morphology_all.py): {systems: [{name, ...}], output_dir,
-    combined_output}. `suffix` is this wrapper's own exact per-system output
-    suffix (see _WRAPPER_SUFFIXES) -- e.g. {output_dir}/{name}_morphology.json,
-    checked for EXACT existence, not a glob."""
+    scripts/evaluate_morphology_all.py): {systems: [{name, label?, ...}],
+    output_dir, combined_output}. `suffix` is this wrapper's own exact
+    per-system output suffix (see _WRAPPER_SUFFIXES) -- e.g.
+    {output_dir}/{label}_morphology.json, checked for EXACT existence, not a
+    glob.
+
+    Uses entry.get("label", entry["name"]), NOT entry["name"] alone --
+    scripts.evaluate_morphology_all's own label override (needed to dispatch
+    the SAME system, e.g. "fanta", twice against different checkpoints, as
+    configs/eval/morphology_fanta_ablation.yml does) means two entries can
+    share one "name" but write to two different files. Using "name" alone
+    here collapsed both entries to one dict key and checked the WRONG
+    filename entirely -- confirmed live: reported "fanta: MISSING" for an
+    ablation config whose two real result files both existed."""
     output_dir = cfg.get("output_dir", "results")
     combined_output = cfg.get("combined_output")
     systems = cfg.get("systems", [])
     per_system = {}
     for entry in systems:
-        name = entry["name"]
-        path = os.path.join(output_dir, f"{name}_{suffix}.json")
-        per_system[name] = os.path.basename(path) if os.path.exists(path) else None
+        label = entry.get("label", entry["name"])
+        path = os.path.join(output_dir, f"{label}_{suffix}.json")
+        per_system[label] = os.path.basename(path) if os.path.exists(path) else None
     n_done = sum(1 for v in per_system.values() if v)
     if combined_output and os.path.exists(combined_output):
         status = "done"
